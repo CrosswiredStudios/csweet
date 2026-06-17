@@ -1,0 +1,82 @@
+[
+  {
+    "path": "COMMIT_SEQUENCE.md",
+    "sha256": "8f318f42ae7f033ac6b4192e539931f31305bcace4b08af59fb2aeb16a839e34",
+    "bytes": 1613
+  },
+  {
+    "path": "README.md",
+    "sha256": "c638e3280db72468525db6ef54bfa77e69ae8b540d4650a1f14f543e7c5f71c8",
+    "bytes": 3898
+  },
+  {
+    "path": "docs/00-product-vision.md",
+    "sha256": "09787260d9c12f0900a1c252e349227f4d87696ae699764896b6a2b2c1e93da2",
+    "bytes": 8272
+  },
+  {
+    "path": "docs/01-domain-model.md",
+    "sha256": "1f9cb445a5ba6b92f8fe692240b03332c652a6d693a7d37cd6f97fd070ef69ea",
+    "bytes": 7991
+  },
+  {
+    "path": "docs/02-agent-orchestration.md",
+    "sha256": "ee0cd8bfeba6ec129b1a7cdaed00564d1d93c842429bc925e68119b1d1c6f8ee",
+    "bytes": 7277
+  },
+  {
+    "path": "docs/03-workforce-marketplace.md",
+    "sha256": "087d609b1c3411a2c6a99003a42afa4e0a297eaa1945b72d5504670b434da8c7",
+    "bytes": 7582
+  },
+  {
+    "path": "docs/04-remote-worker-provider-protocol.md",
+    "sha256": "a28e6eba85593adaeeebb83cfcc6726bce05a216374a554468fc1c06fd612289",
+    "bytes": 7307
+  },
+  {
+    "path": "docs/05-human-workforce.md",
+    "sha256": "3fbf56b79ea193ede3624d1ded0df5e02508558315d99dbabec4f07d4686b7ce",
+    "bytes": 7439
+  },
+  {
+    "path": "docs/06-budgeting-and-governance.md",
+    "sha256": "541a82615963e560f5cdcb9c679fca76d63abf732c334f42db0d8e43f8324587",
+    "bytes": 5986
+  },
+  {
+    "path": "docs/07-security-privacy-and-trust.md",
+    "sha256": "68cecd20b77259d0be0862379380f7ad682dfd0000d8a2148e6d1721aceda21d",
+    "bytes": 6648
+  },
+  {
+    "path": "docs/08-application-architecture.md",
+    "sha256": "acc8e8ca8aa658264e4cf6439c5577c2346c6f206bd5fd3ef39f2b5b3843acba",
+    "bytes": 7128
+  },
+  {
+    "path": "docs/09-prototype-roadmap.md",
+    "sha256": "eb02b7c087acde2abb75269541a79fd2de01e4288ebbd36ea2afce67329612f6",
+    "bytes": 6665
+  },
+  {
+    "path": "docs/10-open-questions.md",
+    "sha256": "baf9aac9cd605abe931e9700c472ceea8ecd4cad1804ed59fd6c3fe0a00a02b1",
+    "bytes": 8719
+  },
+  {
+    "path": "docs/11-brand-and-naming.md",
+    "sha256": "41a0ccb80ff2d0141285d9c5a4a4c165ab1f31550fd6c4dca7d3122b78015391",
+    "bytes": 3386
+  },
+  {
+    "path": "docs/12-example-scenarios.md",
+    "sha256": "dbf5c0b7874f327e8ee89bce38e01538a6d8f643de563fbc438cca0eb57a4fa3",
+    "bytes": 6214
+  },
+  {
+    "path": "docs/README.md",
+    "sha256": "dfab72b53a1749248c7dc645d0e36ba99eb2bf1c7c3893024fa6f265ce1fc232",
+    "bytes": 1021
+  }
+]
