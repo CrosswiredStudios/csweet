@@ -2,13 +2,15 @@
 
 ## Goal
 
-Create the initial C-Sweet .NET solution structure, local development orchestration, and baseline build/test workflow.
+Create the initial C-Sweet .NET solution structure, local development orchestration, baseline Docker distribution structure, and build/test workflow.
 
 This phase does not implement business logic. It creates the skeleton that every later phase depends on.
 
 ## Why this phase comes first
 
-Junior developers need a consistent project layout before adding entities, APIs, UI, and AI integration. The solution should clearly separate domain logic, application use cases, infrastructure, AI integration, the Blazor app, the API, and the worker host.
+Junior developers need a consistent project layout before adding entities, APIs, UI, AI integration, and Docker distribution. The solution should clearly separate domain logic, application use cases, infrastructure, AI integration, the Blazor app, the API, and the worker host.
+
+Containerization should be planned during bootstrap so the project layout, ports, health endpoints, and configuration style are Docker-friendly from the beginning.
 
 ## Deliverables
 
@@ -16,6 +18,10 @@ Junior developers need a consistent project layout before adding entities, APIs,
 - Initial projects under `/src`.
 - Initial test projects under `/tests`.
 - .NET Aspire AppHost and ServiceDefaults projects.
+- Baseline `/docker` folder for service Dockerfiles.
+- Placeholder `docker-compose.yml` or tracked task to complete it in Phase 1A.
+- `.dockerignore`.
+- `.env.example`.
 - Basic API health endpoint.
 - Basic Blazor WASM shell.
 - Centralized package/version management if desired.
@@ -39,9 +45,24 @@ Junior developers need a consistent project layout before adding entities, APIs,
 /tests
   /CSweet.UnitTests
   /CSweet.IntegrationTests
+/docker
+  /api.Dockerfile
+  /app.Dockerfile
+  /worker.Dockerfile
 /docs
   /implementation
+  /deployment
 ```
+
+Root files to include early:
+
+```text
+docker-compose.yml
+.env.example
+.dockerignore
+```
+
+`docker-compose.yml` can be minimal in this phase and completed in [Phase 1A - Docker Containerization and Distribution](./01a-docker-containerization-and-distribution.md).
 
 ## Project creation commands
 
@@ -50,7 +71,7 @@ Use these commands from the repository root. Confirm the target .NET SDK version
 ```bash
 dotnet new sln -n CSweet
 
-mkdir -p src tests docs
+mkdir -p src tests docs docker docs/deployment
 
 dotnet new webapi -n CSweet.Api -o src/CSweet.Api
 dotnet new blazorwasm -n CSweet.App -o src/CSweet.App
@@ -185,6 +206,22 @@ builder.Build().Run();
 
 Adjust the exact syntax to match the current Aspire package version.
 
+## Docker bootstrap
+
+Add these files during this phase even if they are initially minimal:
+
+```text
+.dockerignore
+.env.example
+docker-compose.yml
+docker/api.Dockerfile
+docker/app.Dockerfile
+docker/worker.Dockerfile
+docs/deployment/docker.md
+```
+
+The full content and distribution expectations are defined in [Phase 1A - Docker Containerization and Distribution](./01a-docker-containerization-and-distribution.md).
+
 ## Baseline API endpoint
 
 Add:
@@ -202,6 +239,8 @@ Expected response:
 }
 ```
 
+This health endpoint is required for both Aspire and Docker Compose.
+
 ## Baseline UI
 
 The Blazor app should initially show:
@@ -218,9 +257,12 @@ Add or verify:
 ```text
 .editorconfig
 .gitignore
+.dockerignore
+.env.example
 Directory.Build.props
 Directory.Packages.props optional
 README.md
+docker-compose.yml
 ```
 
 ## Testing requirements
@@ -237,6 +279,10 @@ Expected result:
 
 - Status code is 200.
 - Response includes `status = ok`.
+
+### Docker validation
+
+At minimum, validate that the Dockerfiles are present and the Compose file can be parsed in Phase 1A.
 
 ## Manual QA
 
@@ -262,6 +308,13 @@ Verify:
 - WorkerHost is listed.
 - API health endpoint responds.
 
+After Phase 1A, also verify:
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
 ## Acceptance criteria
 
 - [ ] Solution builds.
@@ -269,6 +322,7 @@ Verify:
 - [ ] API health endpoint works.
 - [ ] Blazor app loads.
 - [ ] Aspire AppHost starts all initial services.
+- [ ] Initial Docker distribution files exist.
 - [ ] Project references follow the dependency rules.
 - [ ] No business logic has been added to the UI or infrastructure projects.
 
@@ -279,3 +333,4 @@ Verify:
 - Do not call LM Studio directly from the UI.
 - Do not add Agent Framework directly to every project.
 - Do not create marketplace-specific projects yet.
+- Do not postpone Docker until the end of the project.

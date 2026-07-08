@@ -17,12 +17,13 @@ Work can be performed by:
 2. **Outcomes over conversations.** Projects, tasks, decisions, artifacts, budgets, and audit history are first-class records.
 3. **Capabilities over job titles.** Roles are convenient bundles of capabilities, responsibilities, permissions, and accountability.
 4. **Local-first and provider-neutral.** The core application and Blazor interface are open source and can use local or hosted LLMs.
-5. **One mixed workforce.** Local agents, remote vendor workers, people, and hybrid services participate in the same organizational model.
-6. **Explicit authority.** Autonomy, budgets, approvals, data access, and tool permissions are assigned per capability and scope.
-7. **Durable execution.** Long-running work survives restarts, approvals, delays, retries, and provider outages.
-8. **Company-owned history.** The company retains its work history, decisions, and artifacts even when a worker or provider is removed.
-9. **Human effort at leverage points.** Agents prepare, organize, monitor, and execute routine work so people can focus on judgment, relationships, accountability, and real-world execution.
-10. **Open core, optional network.** A self-hosted installation remains useful without the official marketplace or commercial providers.
+5. **Docker-first distribution.** A self-hosted installation should be runnable with Docker Compose out of the box.
+6. **One mixed workforce.** Local agents, remote vendor workers, people, and hybrid services participate in the same organizational model.
+7. **Explicit authority.** Autonomy, budgets, approvals, data access, and tool permissions are assigned per capability and scope.
+8. **Durable execution.** Long-running work survives restarts, approvals, delays, retries, and provider outages.
+9. **Company-owned history.** The company retains its work history, decisions, and artifacts even when a worker or provider is removed.
+10. **Human effort at leverage points.** Agents prepare, organize, monitor, and execute routine work so people can focus on judgment, relationships, accountability, and real-world execution.
+11. **Open core, optional network.** A self-hosted installation remains useful without the official marketplace or commercial providers.
 
 ## Initial technology direction
 
@@ -30,6 +31,7 @@ Work can be performed by:
 - Microsoft Agent Framework as the initial agent and workflow runtime
 - Blazor web interface
 - PostgreSQL for durable company state
+- Docker Compose for default self-hosted distribution
 - S3-compatible object storage for artifacts
 - Optional pgvector or Qdrant for semantic retrieval
 - MCP and provider APIs for external capabilities
@@ -37,10 +39,12 @@ Work can be performed by:
 - SignalR for live company activity
 - OpenTelemetry for runtime observability
 
-The first implementation should be a modular monolith with two executable applications:
+The first implementation should be a modular monolith with containerized runtime services:
 
-- `CSweet.Web`
-- `CSweet.Worker`
+- `CSweet.App`
+- `CSweet.Api`
+- `CSweet.WorkerHost`
+- `PostgreSQL`
 
 Framework-specific types should remain behind application-owned abstractions so other runtimes can be supported later.
 

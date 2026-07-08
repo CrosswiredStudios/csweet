@@ -8,7 +8,7 @@ This folder breaks the proposed C-Sweet implementation into phased plans that ca
 
 The first production goal is not the marketplace. The first production goal is a reliable local vertical slice:
 
-> A user launches C-Sweet, completes first-run system setup, connects to a local or hosted LLM provider, creates their first business, runs a first agent-generated task, and approves the resulting artifact.
+> A user launches C-Sweet through Docker or the developer AppHost, completes first-run system setup, connects to a local or hosted LLM provider, creates their first business, runs a first agent-generated task, and approves the resulting artifact.
 
 ## Document map
 
@@ -16,38 +16,42 @@ Read these files in order:
 
 1. [00 Architecture Baseline](./00-architecture-baseline.md)
 2. [01 Phase 1 - Repository and Solution Bootstrap](./phases/01-repository-and-solution-bootstrap.md)
-3. [02 Phase 2 - Configuration Persistence and First-Run Guard](./phases/02-configuration-persistence-and-first-run-guard.md)
-4. [03 Phase 3 - LLM Provider Abstraction and LM Studio](./phases/03-llm-provider-abstraction-and-lm-studio.md)
-5. [04 Phase 4 - System Setup Wizard](./phases/04-system-setup-wizard.md)
-6. [05 Phase 5 - Microsoft Agent Framework Integration](./phases/05-microsoft-agent-framework-integration.md)
-7. [06 Phase 6 - Core Business Domain](./phases/06-core-business-domain.md)
-8. [07 Phase 7 - Business Onboarding](./phases/07-business-onboarding.md)
-9. [08 Phase 8 - First Agent Workflow](./phases/08-first-agent-workflow.md)
-10. [09 Phase 9 - Worker Runtime and Worker Contract](./phases/09-worker-runtime-and-worker-contract.md)
-11. [10 Phase 10 - Observability, Security, and Operations](./phases/10-observability-security-operations.md)
-12. [11 Marketplace Readiness](./11-marketplace-readiness.md)
-13. [12 Junior Developer Task Checklist](./12-junior-developer-task-checklist.md)
+3. [01A Phase 1A - Docker Containerization and Distribution](./phases/01a-docker-containerization-and-distribution.md)
+4. [02 Phase 2 - Configuration Persistence and First-Run Guard](./phases/02-configuration-persistence-and-first-run-guard.md)
+5. [03 Phase 3 - LLM Provider Abstraction and LM Studio](./phases/03-llm-provider-abstraction-and-lm-studio.md)
+6. [04 Phase 4 - System Setup Wizard](./phases/04-system-setup-wizard.md)
+7. [05 Phase 5 - Microsoft Agent Framework Integration](./phases/05-microsoft-agent-framework-integration.md)
+8. [06 Phase 6 - Core Business Domain](./phases/06-core-business-domain.md)
+9. [07 Phase 7 - Business Onboarding](./phases/07-business-onboarding.md)
+10. [08 Phase 8 - First Agent Workflow](./phases/08-first-agent-workflow.md)
+11. [09 Phase 9 - Worker Runtime and Worker Contract](./phases/09-worker-runtime-and-worker-contract.md)
+12. [10 Phase 10 - Observability, Security, and Operations](./phases/10-observability-security-operations.md)
+13. [11 Marketplace Readiness](./11-marketplace-readiness.md)
+14. [12 Junior Developer Task Checklist](./12-junior-developer-task-checklist.md)
 
 ## Recommended implementation order
 
 Do not start by building the marketplace or a complex autonomous company brain. Build in this order:
 
 1. Solution structure and local dev orchestration.
-2. Database and first-run configuration state.
-3. LLM provider profiles and connection tests.
-4. First-run setup wizard.
-5. Minimal Microsoft Agent Framework adapter.
-6. Core organization, role, task, run, artifact, and approval entities.
-7. Business onboarding.
-8. One useful agent workflow: generate a 30-day operating plan.
-9. Worker runtime and worker contract.
-10. Observability, security, and deployment hardening.
-11. Marketplace integration points.
+2. Docker containerization and one-command self-hosted startup.
+3. Database and first-run configuration state.
+4. LLM provider profiles and connection tests.
+5. First-run setup wizard.
+6. Minimal Microsoft Agent Framework adapter.
+7. Core organization, role, task, run, artifact, and approval entities.
+8. Business onboarding.
+9. One useful agent workflow: generate a 30-day operating plan.
+10. Worker runtime and worker contract.
+11. Observability, security, and deployment hardening.
+12. Marketplace integration points.
 
 ## Core architectural assumptions
 
 - C-Sweet is self-hostable first.
-- The default first provider is LM Studio running on the local machine.
+- Docker Compose is the default distribution path for people who want to run the platform without installing the .NET SDK.
+- Aspire AppHost is still used for the developer inner loop.
+- The default first provider is LM Studio running on the host machine, with Docker guidance for `host.docker.internal`.
 - Provider configuration must be flexible enough to support local and hosted OpenAI-compatible endpoints, Azure OpenAI, OpenAI, Ollama, Anthropic, Microsoft Foundry, and later custom providers.
 - Enterprise-ready .NET libraries are preferred over custom infrastructure.
 - Microsoft.Extensions.AI should be used as the normal LLM abstraction layer.
@@ -68,6 +72,8 @@ Use these official references when implementing:
 - EF Core overview: https://learn.microsoft.com/en-us/ef/core/
 - EF Core DbContext configuration: https://learn.microsoft.com/en-us/ef/core/dbcontext-configuration/
 - EF Core migrations: https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying
+- .NET Docker containerization: https://learn.microsoft.com/en-us/dotnet/core/docker/build-container
+- Docker Compose overview: https://docs.docker.com/compose/
 - LM Studio OpenAI compatibility: https://lmstudio.ai/docs/developer/openai-compat
 - LM Studio local server: https://lmstudio.ai/docs/developer/core/server
 - LM Studio chat completions: https://lmstudio.ai/docs/developer/openai-compat/chat-completions
@@ -78,9 +84,10 @@ Use these official references when implementing:
 
 The first full vertical slice is complete when:
 
+- `docker compose up -d` starts the platform from a clean checkout.
 - A fresh database starts with `IsFirstRunComplete = false`.
 - The UI redirects to `/setup` until setup is complete.
-- The user can configure LM Studio using `http://localhost:1234/v1`.
+- The user can configure LM Studio using `http://host.docker.internal:1234/v1` from Docker or `http://localhost:1234/v1` from direct local development.
 - The system can list or accept a model ID.
 - The system can run a chat completion test.
 - The system can store provider capability results.
