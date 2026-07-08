@@ -14,7 +14,20 @@ A user should be able to clone the core project, run it locally or on their own 
 
 The hosted marketplace is a separate product surface and should not be required for the first useful version.
 
-### 2. Configuration before business onboarding
+### 2. Docker-first distribution
+
+C-Sweet should support Docker containerization out of the box. A non-developer user should be able to run the platform with Docker Compose without installing the .NET SDK or manually configuring Postgres, the API, the app, and the worker host.
+
+The default user-facing startup path should be:
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+Aspire remains the developer orchestration path, but Docker Compose is the first self-hosted distribution path.
+
+### 3. Configuration before business onboarding
 
 The user cannot create a useful business automation environment until the system knows how to call an LLM. Therefore, first-run system onboarding must come before business onboarding.
 
@@ -27,7 +40,7 @@ The first-run setup flow must configure:
 - Storage/database status.
 - Local worker runtime status.
 
-### 3. Provider abstraction over provider lock-in
+### 4. Provider abstraction over provider lock-in
 
 The local default is LM Studio, but the architecture must not hard-code LM Studio. Treat LM Studio as one OpenAI-compatible provider profile.
 
@@ -44,7 +57,7 @@ The system should eventually support:
 - Microsoft Foundry
 - Custom HTTP providers
 
-### 4. Microsoft ecosystem preference
+### 5. Microsoft ecosystem preference
 
 Prefer enterprise-ready Microsoft/.NET libraries when they fit:
 
@@ -55,7 +68,7 @@ Prefer enterprise-ready Microsoft/.NET libraries when they fit:
 - Microsoft.Extensions.AI for model/provider abstraction.
 - Microsoft Agent Framework for agents, multi-agent workflows, tool use, human-in-the-loop, and workflow orchestration.
 
-### 5. Agents are not a replacement for normal code
+### 6. Agents are not a replacement for normal code
 
 Use deterministic code for:
 
@@ -95,8 +108,22 @@ Use Agent Framework for:
 /tests
   /CSweet.UnitTests
   /CSweet.IntegrationTests
+/docker
+  /api.Dockerfile
+  /app.Dockerfile
+  /worker.Dockerfile
 /docs
   /implementation
+  /deployment
+```
+
+Root deployment files:
+
+```text
+docker-compose.yml
+docker-compose.override.yml optional
+.env.example
+.dockerignore
 ```
 
 ### Project responsibilities
@@ -142,6 +169,28 @@ CSweet.WorkerHost
 Built-in workers, local agents, future marketplace workers
 ```
 
+## Containerized runtime architecture
+
+```text
+Docker Compose
+  ├─ csweet-app       public web entry point
+  ├─ csweet-api       API and application services
+  ├─ csweet-worker    local worker runtime
+  └─ postgres         durable database volume
+```
+
+The containerized stack should be able to connect to LM Studio running on the host machine through a configurable base URL. The default Docker-oriented LM Studio URL should be:
+
+```text
+http://host.docker.internal:1234/v1
+```
+
+The direct local development default can remain:
+
+```text
+http://localhost:1234/v1
+```
+
 ## Initial domain model
 
 ### System configuration domain
@@ -180,7 +229,8 @@ MemoryEntry
 The first vertical slice must be:
 
 ```text
-First-run setup
+Docker Compose startup or Aspire startup
+  → first-run setup
   → configure LM Studio
   → test provider
   → save provider profile
@@ -224,6 +274,12 @@ First-run setup
 
 **Reason:** This avoids special-case business logic and lets the same path support vLLM, llama-server, and hosted OpenAI-compatible providers.
 
+### ADR-006: Provide Docker Compose as the default self-hosted distribution
+
+**Decision:** C-Sweet must include Dockerfiles, Compose configuration, environment examples, and Docker deployment docs as part of the initial implementation track.
+
+**Reason:** Docker Compose gives self-hosted users a repeatable way to run the API, app, worker, and database with minimal setup. This is likely the easiest distribution path for early users.
+
 ## Cross-cutting requirements
 
 ### Auditing
@@ -263,6 +319,7 @@ Each phase must include:
 - Integration tests for API endpoints.
 - At least one happy-path UI test or manual QA checklist.
 - Manual test instructions for LM Studio when external local services are involved.
+- Docker startup validation when runtime services are affected.
 
 ### Security baseline
 
@@ -271,3 +328,5 @@ Each phase must include:
 - Do not log full prompts by default if they may contain business-sensitive information.
 - Support local-only mode without external network dependencies.
 - Allow providers to be disabled without deleting their history.
+- Do not bake secrets into Docker images.
+- Do not expose database ports publicly by default in self-hosted Compose.
