@@ -13,6 +13,7 @@ Before starting a task:
 - Do not add direct infrastructure dependencies to `CSweet.Domain`.
 - Do not call LLM providers directly from UI components.
 - Do not store secrets in appsettings committed to source control.
+- Do not bake secrets into Docker images.
 - Add tests for non-trivial logic.
 - Update docs when adding or changing behavior.
 
@@ -27,8 +28,28 @@ Before starting a task:
 - [ ] Add initial README.
 - [ ] Add `CSweet.AppHost`.
 - [ ] Add `CSweet.ServiceDefaults`.
+- [ ] Add `/docker` folder.
+- [ ] Add `.dockerignore`.
+- [ ] Add `.env.example`.
 - [ ] Add API health endpoint.
 - [ ] Confirm solution builds.
+
+## Phase 1A Docker checklist
+
+- [ ] Add `docker/api.Dockerfile`.
+- [ ] Add `docker/app.Dockerfile`.
+- [ ] Add `docker/worker.Dockerfile`.
+- [ ] Add `docker-compose.yml`.
+- [ ] Add `docker-compose.override.yml` if useful for development.
+- [ ] Add named Postgres volume.
+- [ ] Add health checks for API, app, worker, and Postgres.
+- [ ] Add `docs/deployment/docker.md`.
+- [ ] Document LM Studio from Docker using `http://host.docker.internal:1234/v1`.
+- [ ] Ensure `docker compose up -d` starts the platform.
+- [ ] Ensure the setup wizard loads from Docker.
+- [ ] Ensure data persists after container restart.
+- [ ] Ensure `docker compose down -v` resets local state.
+- [ ] Add CI validation that Docker images build.
 
 ## Phase 2 checklist
 
@@ -73,6 +94,7 @@ Before starting a task:
 - [ ] Add admin setup step.
 - [ ] Add finish step.
 - [ ] Redirect non-setup routes to `/setup` while setup incomplete.
+- [ ] Show Docker-specific LM Studio guidance when running in container mode.
 
 ## Phase 5 checklist
 
@@ -147,6 +169,7 @@ Before starting a task:
 - [ ] Add secret redaction.
 - [ ] Add prompt logging policy.
 - [ ] Add backup/deployment notes.
+- [ ] Add Docker operations notes.
 
 ## Pull request expectations
 
@@ -157,6 +180,7 @@ Each PR should include:
 - Migration name if database schema changes.
 - Test results.
 - Manual verification steps.
+- Docker verification steps if runtime or configuration changes.
 - Any known limitations.
 
 ## Suggested PR size
@@ -170,9 +194,11 @@ Examples of good PRs:
 - Add LM Studio preset to setup wizard.
 - Add provider chat connection test.
 - Add Organization entity and create endpoint.
+- Add API Dockerfile and Compose health check.
 
 Examples of too-large PRs:
 
 - Add all onboarding, all AI provider support, and all business entities at once.
 - Add marketplace support before first local workflow works.
 - Rewrite provider abstraction while also changing UI and database schema.
+- Add Docker, auth, migrations, and worker execution all in one PR.
