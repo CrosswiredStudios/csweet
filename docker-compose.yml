@@ -1,0 +1,104 @@
+services:
+  # ---------------------------------------------------------
+  # Public web entry point (Blazor WASM served by nginx)
+  # ---------------------------------------------------------
+  csweet-app:
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    depends_on:
+      csweet-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------
+  # Database migrations and first-run seed data
+  # ---------------------------------------------------------
+  csweet-migrator:
+    build:
+      context: .
+      dockerfile: docker/migrator.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      DOTNET_ENVIRONMENT: ${DOTNET_ENVIRONMENT:-Production}
+      ConnectionStrings__Postgres: ${CSWEET_CONNECTIONSTRINGS__POSTGRES:-Host=postgres;Port=5432;Database=csweet;Username=csweet;Password=change-me-in-production}
+
+  # ---------------------------------------------------------
+  # API and application services
+  # ---------------------------------------------------------
+  csweet-api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      csweet-migrator:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      DOTNET_ENVIRONMENT: ${DOTNET_ENVIRONMENT:-Production}
+      ConnectionStrings__Postgres: ${CSWEET_CONNECTIONSTRINGS__POSTGRES:-Host=postgres;Port=5432;Database=csweet;Username=csweet;Password=change-me-in-production}
+      CSWEET_SETUP__ALLOW_FIRST_RUN: ${CSWEET_SETUP__ALLOW_FIRST_RUN:-true}
+      CSWEET_LLM__DEFAULT_PROVIDER_TYPE: ${CSWEET_LLM__DEFAULT_PROVIDER_TYPE:-LMStudio}
+      CSWEET_LLM__DEFAULT_BASE_URL: ${CSWEET_LLM__DEFAULT_BASE_URL:-http://host.docker.internal:1234/v1}
+      CSWEET_LLM__DEFAULT_API_KEY: ${CSWEET_LLM__DEFAULT_API_KEY:-lm-studio}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------
+  # Local worker runtime
+  # ---------------------------------------------------------
+  csweet-worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      csweet-migrator:
+        condition: service_completed_successfully
+      csweet-api:
+        condition: service_healthy
+    environment:
+      DOTNET_ENVIRONMENT: ${DOTNET_ENVIRONMENT:-Production}
+      ConnectionStrings__Postgres: ${CSWEET_CONNECTIONSTRINGS__POSTGRES:-Host=postgres;Port=5432;Database=csweet;Username=csweet;Password=change-me-in-production}
+
+  # ---------------------------------------------------------
+  # Database (PostgreSQL)
+  # ---------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-csweet}
+      POSTGRES_USER: ${POSTGRES_USER:-csweet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+    volumes:
+      - csweet-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-csweet} -d ${POSTGRES_DB:-csweet}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  csweet-postgres:
+    driver: local

@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CSweet.Domain\CSweet.Domain.csproj" />
+    <ProjectReference Include="..\CSweet.Contracts\CSweet.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.6" />
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Aspire now ships via NuGet packages in .NET 10, no workload required -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CSweet.Api\CSweet.Api.csproj" IsAspireProjectResource="true" />
+    <ProjectReference Include="..\CSweet.App\CSweet.App.csproj" IsAspireProjectResource="true" />
+    <ProjectReference Include="..\CSweet.Migrator\CSweet.Migrator.csproj" IsAspireProjectResource="true" />
+    <ProjectReference Include="..\CSweet.WorkerHost\CSweet.WorkerHost.csproj" IsAspireProjectResource="true" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-CSweet.WorkerHost-a0b6a671-a1bb-4804-9b93-14f811954d59</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CSweet.Application\CSweet.Application.csproj" />
+    <ProjectReference Include="..\CSweet.Infrastructure\CSweet.Infrastructure.csproj" />
+    <ProjectReference Include="..\CSweet.AI\CSweet.AI.csproj" />
+    <ProjectReference Include="..\CSweet.Contracts\CSweet.Contracts.csproj" />
+    <ProjectReference Include="..\CSweet.ServiceDefaults\CSweet.ServiceDefaults.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,35 @@
+@using System.Net.Http.Json
+@using CSweet.Contracts.Setup
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<Router AppAssembly="@typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)" OnNavigateAsync="GuardFirstRunAsync">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+</Router>
+
+@code {
+    private async Task GuardFirstRunAsync(NavigationContext context)
+    {
+        if (context.Path.StartsWith("setup", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            var status = await Http.GetFromJsonAsync<SetupStatusResponse>("api/setup/status", context.CancellationToken);
+
+            if (status is { IsFirstRunComplete: false })
+            {
+                Navigation.NavigateTo("/setup");
+            }
+        }
+        catch
+        {
+            // Keep rendering the current route if the API is unavailable; pages can show connectivity state.
+        }
+    }
+}

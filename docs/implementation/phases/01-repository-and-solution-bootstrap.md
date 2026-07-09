@@ -317,14 +317,31 @@ docker compose up -d
 
 ## Acceptance criteria
 
-- [ ] Solution builds.
-- [ ] Tests run.
-- [ ] API health endpoint works.
-- [ ] Blazor app loads.
-- [ ] Aspire AppHost starts all initial services.
-- [ ] Initial Docker distribution files exist.
-- [ ] Project references follow the dependency rules.
-- [ ] No business logic has been added to the UI or infrastructure projects.
+- [x] Solution builds.
+- [x] Tests run.
+- [x] API health endpoint works.
+- [x] Blazor app loads.
+- [x] Aspire AppHost starts all initial services.
+- [x] Initial Docker distribution files exist.
+- [x] Project references follow the dependency rules.
+- [x] No business logic has been added to the UI or infrastructure projects.
+
+## Implementation status
+
+Completed in the bootstrap implementation pass.
+
+Verified:
+
+- `dotnet build CSweet.sln`
+- `dotnet test CSweet.sln --no-build`
+- `dotnet list CSweet.sln package --vulnerable --include-transitive`
+- `dotnet list CSweet.sln package --outdated`
+- `dotnet run --project src/CSweet.AppHost/CSweet.AppHost.csproj --launch-profile http`
+
+Notes:
+
+- `CSweet.AppHost` includes explicit launch profiles so Aspire starts with dashboard/resource-service configuration in Visual Studio and CLI runs.
+- Docker runtime startup is tracked in Phase 1A.
 
 ## Common mistakes
 

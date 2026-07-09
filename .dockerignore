@@ -1,0 +1,40 @@
+## .NET build artifacts
+**/bin/
+**/obj/
+
+## Git
+.git/
+.gitignore
+
+## IDE
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+## Secrets and sensitive data
+.env
+**/appsettings.*.json
+!**/appsettings.json
+
+## Documentation (not needed in images)
+docs/
+README.md
+MANIFEST.json
+COMMIT_SEQUENCE.md
+Install-CSweetPlanningDocs.ps1
+
+## Test projects
+tests/
+
+## Docker files (not needed inside images)
+docker-compose*.yml
+.dockerignore
+.env.example
+
+## Model files and large assets
+**/*.gguf
+**/*.bin
+**/*.safetensors

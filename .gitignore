@@ -1,0 +1,25 @@
+## .NET build artifacts
+**/bin/
+**/obj/
+
+## Git
+.git/
+
+## IDE and editor files
+.vs/
+.vscode/*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+## Environment and secrets
+.env
+!.env.example
+
+## Docker volumes (local data)
+docker/volumes/
+
+## Model files
+**/*.gguf
+**/*.bin
+**/*.safetensors

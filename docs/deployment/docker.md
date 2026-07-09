@@ -17,16 +17,19 @@ Then open:
 http://localhost:8080
 ```
 
-## Expected services
+## Services
 
-The first Docker distribution should include:
+The Docker distribution includes:
 
-```text
-csweet-app      Blazor UI or static web frontend
-csweet-api      ASP.NET Core API
-csweet-worker   Local worker runtime
-postgres        Durable database
-```
+| Service | Internal Port | Exposed | Description |
+|---------|--------------|---------|-------------|
+| `csweet-app` | 8080 | 8080 (configurable via `APP_PORT`) | Blazor WASM frontend served by nginx |
+| `csweet-migrator` | - | Internal only | One-shot database migration and setup seed runner |
+| `csweet-api` | 8080 | Internal only | API and application services |
+| `csweet-worker` | - | Internal only | Local worker runtime |
+| `postgres` | 5432 | Internal only | PostgreSQL database |
+
+Only the web app (`csweet-app`) is exposed publicly by default. The API, worker, and database are internal-only services.
 
 Optional services can be added when needed:
 
@@ -59,7 +62,7 @@ extra_hosts:
 
 The setup wizard should prefer the Docker-safe value when it detects container mode.
 
-## Required files
+## Required files (implemented)
 
 ```text
 docker-compose.yml
@@ -67,6 +70,7 @@ docker-compose.yml
 .dockerignore
 docker/api.Dockerfile
 docker/app.Dockerfile
+docker/migrator.Dockerfile
 docker/worker.Dockerfile
 ```
 
@@ -131,7 +135,7 @@ Minimum health checks:
 
 ```text
 csweet-api      GET /api/health
-csweet-worker   GET /api/worker-host/health or process health
+csweet-worker   process health
 csweet-app      HTTP response on public port
 postgres        pg_isready
 ```
@@ -142,14 +146,15 @@ Health checks should be used by Compose dependencies where practical so the app 
 
 ```text
 docker compose up -d
-  → postgres starts
-  → API starts and applies or validates migrations
-  → SystemConfiguration is seeded
-  → app starts
+  → postgres starts and becomes healthy (pg_isready health check)
+  → API starts and exposes /api/health
+  → app starts after API is healthy (/api/health check)
   → user opens http://localhost:8080
   → setup wizard opens
   → user configures LM Studio using host.docker.internal
 ```
+
+Database migrations run through the dedicated `csweet-migrator` one-shot service, not inside the API or worker containers.
 
 ## Security defaults
 
@@ -169,6 +174,7 @@ Suggested image names:
 ```text
 ghcr.io/crosswiredstudios/csweet-app
 ghcr.io/crosswiredstudios/csweet-api
+ghcr.io/crosswiredstudios/csweet-migrator
 ghcr.io/crosswiredstudios/csweet-worker
 ```
 

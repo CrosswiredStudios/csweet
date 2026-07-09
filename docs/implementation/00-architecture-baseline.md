@@ -103,6 +103,7 @@ Use Agent Framework for:
   /CSweet.AI
   /CSweet.WorkerHost
   /CSweet.Contracts
+  /CSweet.Migrator
   /CSweet.AppHost
   /CSweet.ServiceDefaults
 /tests
@@ -138,6 +139,7 @@ docker-compose.override.yml optional
 | `CSweet.AI` | LLM provider abstraction, Microsoft.Extensions.AI setup, Agent Framework adapters. |
 | `CSweet.WorkerHost` | Local worker process/runtime for built-in workers and future connector workers. |
 | `CSweet.Contracts` | Shared DTOs and contracts for API, workers, provider tests, artifacts, and workflows. |
+| `CSweet.Migrator` | One-shot database migration and seed runner. Applies EF Core migrations outside the API/Worker processes. |
 | `CSweet.AppHost` | .NET Aspire distributed app definition for local development. |
 | `CSweet.ServiceDefaults` | Aspire shared defaults for health checks, logging, OpenTelemetry, resiliency. |
 

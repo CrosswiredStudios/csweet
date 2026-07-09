@@ -429,16 +429,49 @@ Verify:
 
 ## Acceptance criteria
 
-- [ ] Root Compose file exists.
-- [ ] Dockerfiles exist for runtime services.
-- [ ] `.dockerignore` exists.
-- [ ] `.env.example` exists.
-- [ ] Docker deployment docs exist.
+- [x] Root Compose file exists.
+- [x] Dockerfiles exist for runtime services.
+- [x] `.dockerignore` exists.
+- [x] `.env.example` exists.
+- [x] Docker deployment docs exist.
 - [ ] `docker compose up -d` starts the platform.
-- [ ] Database data is persisted in a named volume.
+- [x] Database data is persisted in a named volume.
 - [ ] First-run setup works from Docker.
-- [ ] LM Studio host connection guidance is documented.
+- [x] LM Studio host connection guidance is documented.
 - [ ] CI validates image builds before release.
+
+## Implementation status
+
+Partially complete.
+
+Completed:
+
+- Service-specific Dockerfiles for API, Blazor app, and worker.
+- Root `docker-compose.yml` with `csweet-app`, `csweet-api`, `csweet-worker`, and `postgres`.
+- Named `csweet-postgres` volume.
+- App container serves Blazor WASM through nginx and proxies `/api` to `csweet-api`.
+- API, app, and Postgres health checks.
+- Docker deployment documentation and LM Studio host guidance.
+
+Verified:
+
+- `docker compose config`
+- `dotnet publish src/CSweet.Api/CSweet.Api.csproj -c Release`
+- `dotnet publish src/CSweet.App/CSweet.App.csproj -c Release`
+- `dotnet publish src/CSweet.WorkerHost/CSweet.WorkerHost.csproj -c Release`
+
+Not yet verified:
+
+- `docker compose build`
+- `docker compose up -d`
+
+The Docker daemon was not running during validation, so full image build and container startup still need to be run once Docker Desktop is available.
+
+Deferred to later phases:
+
+- Real first-run setup persistence.
+- Database migrations or a migration job container.
+- CI image build/publish workflow.
 
 ## Common mistakes
 

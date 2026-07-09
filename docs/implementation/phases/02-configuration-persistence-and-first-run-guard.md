@@ -15,6 +15,7 @@ C-Sweet needs to know how the system is configured before it can run agents or c
 - `CSweetDbContext` created.
 - Initial system setup entities created.
 - Initial migration created.
+- Dedicated migrator project created.
 - First-run seed logic added.
 - API endpoint to get setup status.
 - API guard/middleware or endpoint-level checks for setup requirements.
@@ -280,11 +281,27 @@ On startup or migration:
 
 ## Acceptance criteria
 
-- [ ] EF Core is configured.
-- [ ] Postgres runs in local Aspire environment.
-- [ ] Initial migration exists.
-- [ ] Setup status endpoint works.
-- [ ] Required onboarding steps are seeded.
-- [ ] First-run setup cannot be completed without provider prerequisites.
-- [ ] Audit events are created for setup actions.
-- [ ] Tests cover happy and failure paths.
+- [x] EF Core is configured.
+- [x] Postgres runs in local Aspire environment.
+- [x] Initial migration exists.
+- [x] Dedicated migrator project exists.
+- [x] Setup status endpoint works.
+- [x] Required onboarding steps are seeded.
+- [x] First-run setup cannot be completed without provider prerequisites.
+- [x] Audit events are created for setup actions.
+- [x] Tests cover happy and failure paths.
+
+## Implementation status
+
+Completed in the phase 2 implementation pass.
+
+Verified:
+
+- `dotnet build CSweet.sln`
+- `dotnet test CSweet.sln --no-build`
+
+Notes:
+
+- `dotnet ef` was not installed in the local environment, so the initial migration was added directly and validated by build.
+- `CSweet.Migrator` applies migrations and seeds setup state; the API and worker do not apply migrations at startup.
+- Development/test runs without a configured Postgres connection string use EF Core InMemory; production requires `ConnectionStrings:Postgres`.
