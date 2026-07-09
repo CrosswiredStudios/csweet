@@ -20,20 +20,8 @@ var logger = scope.ServiceProvider
 
 try
 {
-    var dbContext = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
-
-    if (dbContext.Database.IsRelational())
-    {
-        logger.LogInformation("Applying C-Sweet database migrations.");
-        await dbContext.Database.MigrateAsync();
-    }
-    else
-    {
-        logger.LogInformation("Skipping relational migrations because the configured provider is non-relational.");
-    }
-
-    var setupService = scope.ServiceProvider.GetRequiredService<ISetupService>();
-    await setupService.EnsureSeededAsync();
+    logger.LogInformation("Preparing C-Sweet database and setup seed data.");
+    await CSweetDatabaseInitializer.EnsureDatabaseReadyAsync(host.Services);
 
     logger.LogInformation("C-Sweet database migration and setup seeding completed.");
     return 0;

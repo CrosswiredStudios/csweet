@@ -13,7 +13,6 @@ Without a guided setup, users will hit broken workflows because the app cannot c
 - `/setup` route in Blazor WASM.
 - Setup status API client.
 - Wizard layout and progress indicator.
-- Deployment mode step.
 - LLM provider step with LM Studio preset.
 - Model capability test step.
 - Storage status step.
@@ -42,27 +41,7 @@ Actions:
 
 - Continue.
 
-### Step 2 - Deployment Mode
-
-Purpose:
-
-Capture the intended operating mode.
-
-Options:
-
-```text
-Local only
-Self-hosted server
-Hosted/private cloud
-Development mode
-```
-
-Initial behavior:
-
-- Store selected mode in setup metadata.
-- Do not branch heavily yet.
-
-### Step 3 - LLM Provider Setup
+### Step 2 - LLM Provider Setup
 
 Purpose:
 
@@ -103,7 +82,7 @@ Base URL: http://localhost:1234/v1
 API Key: lm-studio
 ```
 
-### Step 4 - Model Capability Test
+### Step 3 - Model Capability Test
 
 Purpose:
 
@@ -140,7 +119,7 @@ Optional for setup:
 - Vision.
 - Embeddings.
 
-### Step 5 - Storage Setup
+### Step 4 - Storage Setup
 
 Purpose:
 
@@ -159,7 +138,7 @@ Future checks:
 - Object storage.
 - Backup target.
 
-### Step 6 - Worker Runtime Setup
+### Step 5 - Worker Runtime Setup
 
 Purpose:
 
@@ -171,7 +150,7 @@ Initial checks:
 - Worker host reports version.
 - Built-in local strategy worker is registered or available.
 
-### Step 7 - Admin User Setup
+### Step 6 - Admin User Setup
 
 Purpose:
 
@@ -195,7 +174,7 @@ Email optional
 Display name
 ```
 
-### Step 8 - Finish
+### Step 7 - Finish
 
 Purpose:
 
@@ -284,12 +263,30 @@ Do not leave the user on a blank screen during provider tests.
 
 ## Acceptance criteria
 
-- [ ] `/setup` exists.
-- [ ] Wizard reads setup status from API.
-- [ ] LM Studio preset is selectable.
-- [ ] User can create provider profile from wizard.
-- [ ] User can run provider capability test.
-- [ ] User can set default chat provider.
-- [ ] Required setup status blocks finish until satisfied.
-- [ ] Completing setup redirects to business onboarding.
-- [ ] UI clearly communicates unsupported optional capabilities.
+- [x] `/setup` exists.
+- [x] Wizard reads setup status from API.
+- [x] LM Studio preset is selectable.
+- [x] User can create provider profile from wizard.
+- [x] User can run provider capability test.
+- [x] User can set default chat provider.
+- [x] Required setup status blocks finish until satisfied.
+- [x] Completing setup redirects to business onboarding.
+- [x] UI clearly communicates unsupported optional capabilities.
+
+## Implementation status
+
+Completed in the phase 4 implementation pass.
+
+Verified:
+
+- `dotnet build CSweet.sln`
+- `dotnet test CSweet.sln`
+- `curl.exe http://localhost:5149/api/health`
+- `curl.exe -I http://localhost:5097/setup`
+
+Notes:
+
+- The wizard uses typed Blazor API clients for setup status, step completion, provider profile creation, provider testing, and default chat provider selection.
+- Admin user details are captured in the UI and mark the setup step complete; durable admin identity persistence remains future authentication/configuration work.
+- Worker runtime checks are shown as optional warnings until a worker health endpoint exists.
+- A `/business-onboarding` placeholder route was added as the post-setup redirect target.

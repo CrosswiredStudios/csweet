@@ -1,55 +1,738 @@
 @page "/setup"
-@using System.Net.Http.Json
+@using CSweet.Contracts.Llm
 @using CSweet.Contracts.Setup
-@inject HttpClient Http
+@using CSweet.Domain.Setup
+@using CSweet.App.Setup
+@inject ISetupApiClient SetupApi
+@inject ILlmProviderApiClient LlmProviderApi
+@inject NavigationManager Navigation
 
 <PageTitle>C-Sweet Setup</PageTitle>
 
-<div class="container mt-5">
-    <h1>C-Sweet Setup</h1>
-    @if (_status is null)
+<div class="setup-shell">
+    <section class="setup-header">
+        <div>
+            <p class="setup-eyebrow">First-run configuration</p>
+            <h1>C-Sweet Setup</h1>
+            <p>Configure the local infrastructure C-Sweet needs before business onboarding starts.</p>
+        </div>
+        <div class="setup-progress-summary">
+            <span>@CompletedStepCount / @SetupSteps.Count</span>
+            <small>steps complete</small>
+        </div>
+    </section>
+
+    @if (_isLoading)
     {
-        <p class="lead">@(_errorMessage ?? "Loading setup status...")</p>
+        <div class="setup-panel">
+            <p class="setup-status-text">Loading setup status...</p>
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(_pageError))
+    {
+        <div class="setup-alert setup-alert-error">@_pageError</div>
+        <button class="btn btn-primary" @onclick="LoadAsync">Retry</button>
     }
     else
     {
-        <p class="lead">@(_status.IsFirstRunComplete ? "Setup is complete." : "Setup is waiting for the required first-run steps.")</p>
+        <div class="setup-grid">
+            <aside class="setup-steps" aria-label="Setup steps">
+                @foreach (var step in SetupSteps)
+                {
+                    var isActive = step.Key == _activeStepKey;
+                    var isComplete = IsStepComplete(step.Key);
+                    <button class="setup-step @(isActive ? "active" : null) @(isComplete ? "complete" : null)"
+                            @onclick="@(() => SelectStep(step.Key))">
+                        <span class="setup-step-index">@step.Number</span>
+                        <span>
+                            <strong>@step.Title</strong>
+                            <small>@(isComplete ? "Complete" : step.Description)</small>
+                        </span>
+                    </button>
+                }
+            </aside>
 
-        <div class="list-group mt-4">
-            @foreach (var step in _status.Steps)
-            {
-                <div class="list-group-item d-flex justify-content-between align-items-center">
-                    <span>@step.DisplayName</span>
-                    <span class="badge @(step.IsComplete ? "bg-success" : "bg-secondary")">
-                        @(step.IsComplete ? "Complete" : "Pending")
-                    </span>
-                </div>
-            }
+            <main class="setup-panel">
+                @if (_status?.IsFirstRunComplete == true)
+                {
+                    <div class="setup-alert setup-alert-success">Setup is complete. Redirecting to business onboarding...</div>
+                }
+                else
+                {
+                    @RenderActiveStep()
+                }
+            </main>
         </div>
     }
 </div>
 
 @code {
+    private static readonly IReadOnlyList<WizardStep> SetupSteps =
+    [
+        new(1, "welcome", "Welcome", "Start here"),
+        new(2, "llm-provider", "LLM Provider", "Chat model"),
+        new(3, "model-capability-test", "Capability Test", "Provider checks"),
+        new(4, "storage", "Storage", "Database status"),
+        new(5, "worker-runtime", "Worker Runtime", "Local workers"),
+        new(6, "admin-user", "Admin User", "Owner profile"),
+        new(7, "finish", "Finish", "Unlock app")
+    ];
+
     private SetupStatusResponse? _status;
-    private string? _errorMessage;
+    private IReadOnlyList<LlmProviderProfileResponse> _profiles = [];
+    private ModelCapabilityTestResult? _capabilityResult;
+    private string _activeStepKey = "welcome";
+    private bool _isLoading = true;
+    private bool _isBusy;
+    private string? _pageError;
+    private string? _stepMessage;
+    private bool? _apiHealth;
+    private bool? _workerHealth;
+
+    private string _adminName = string.Empty;
+    private string _adminEmail = string.Empty;
+    private string _adminDisplayName = string.Empty;
+
+    private Guid? _providerProfileId;
+    private LlmProviderType _providerType = LlmProviderType.LmStudio;
+    private string _providerName = "Local LM Studio";
+    private string _baseUrl = "http://localhost:1234/v1";
+    private string _apiKey = "lm-studio";
+    private string _defaultChatModel = string.Empty;
+    private string _defaultEmbeddingModel = string.Empty;
+    private IReadOnlyList<ModelDescriptor> _availableModels = [];
+    private bool _isCheckingModelCatalog;
+    private bool? _modelCatalogSucceeded;
+    private string? _modelCatalogMessage;
+    private int? _contextWindowTokens;
+    private int? _maxOutputTokens;
+    private bool _supportsStreaming = true;
+    private bool _supportsToolCalling;
+    private bool _supportsStructuredOutput;
+    private bool _supportsVision;
+
+    private int CompletedStepCount => SetupSteps.Count(step => IsStepComplete(step.Key));
+    private bool CanFinish => RequiredPriorStepsComplete && _status?.DefaultChatProviderId is not null;
+    private bool RequiredPriorStepsComplete => _status?.Steps.Where(x => x.IsRequired && x.Key != "finish").All(x => x.IsComplete) == true;
+    private bool IsModelSelectDisabled => _isCheckingModelCatalog || (_availableModels.Count == 0 && string.IsNullOrWhiteSpace(_defaultChatModel));
+    private bool SelectedChatModelMissingFromCatalog => !string.IsNullOrWhiteSpace(_defaultChatModel) &&
+        !_availableModels.Any(model => string.Equals(model.Id, _defaultChatModel, StringComparison.Ordinal));
+    private string ModelSelectPlaceholder => _isCheckingModelCatalog
+        ? "Checking models..."
+        : _availableModels.Count == 0
+            ? "Blur Base URL to load models"
+            : "Select a model";
+    private string ModelCatalogFeedbackClass => _modelCatalogSucceeded switch
+    {
+        true => "setup-field-feedback setup-field-feedback-success",
+        false => "setup-field-feedback setup-field-feedback-error",
+        _ => "setup-field-feedback"
+    };
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        _pageError = null;
+
         try
         {
-            var response = await Http.GetAsync("api/setup/status");
+            _status = await SetupApi.GetStatusAsync();
+            _profiles = await LlmProviderApi.ListAsync();
+            _providerProfileId ??= _status.DefaultChatProviderId ?? _profiles.LastOrDefault()?.Id;
 
-            if (!response.IsSuccessStatusCode)
+            if (_status.IsFirstRunComplete)
             {
-                _errorMessage = $"Setup status request failed with {(int)response.StatusCode}.";
+                Navigation.NavigateTo("/business-onboarding");
                 return;
             }
 
-            _status = await response.Content.ReadFromJsonAsync<SetupStatusResponse>();
+            _activeStepKey = SetupWizardState.FirstIncompleteStepKey(SetupSteps.Select(x => x.Key).ToList(), _status);
         }
         catch
         {
-            _errorMessage = "Unable to load setup status from the API.";
+            _pageError = "Unable to load setup status from the API.";
+        }
+        finally
+        {
+            _isLoading = false;
         }
     }
+
+    private Task ContinueFromWelcomeAsync()
+    {
+        return CompleteStepAsync("welcome", "llm-provider");
+    }
+
+    private void BackToWelcome() => SelectStep("welcome");
+    private void BackToProvider() => SelectStep("llm-provider");
+    private void BackToCapabilityTest() => SelectStep("model-capability-test");
+    private void BackToStorage() => SelectStep("storage");
+    private void BackToWorkerRuntime() => SelectStep("worker-runtime");
+    private void BackToAdminUser() => SelectStep("admin-user");
+
+    private RenderFragment RenderActiveStep() => _activeStepKey switch
+    {
+        "welcome" => WelcomeStep,
+        "llm-provider" => LlmProviderStep,
+        "model-capability-test" => CapabilityTestStep,
+        "storage" => StorageStep,
+        "worker-runtime" => WorkerRuntimeStep,
+        "admin-user" => AdminUserStep,
+        "finish" => FinishStep,
+        _ => WelcomeStep
+    };
+
+    private RenderFragment WelcomeStep => @<div>
+        <div class="setup-step-heading">
+            <p class="setup-eyebrow">Step 1</p>
+            <h2>Welcome to C-Sweet.</h2>
+            <p>Before creating your first business, configure how this instance will run AI workers and store its data.</p>
+        </div>
+        <div class="setup-actions">
+            <button class="btn btn-primary" disabled="@_isBusy" @onclick="ContinueFromWelcomeAsync">Continue</button>
+        </div>
+    </div>;
+
+    private RenderFragment LlmProviderStep => @<div>
+        <div class="setup-step-heading">
+            <p class="setup-eyebrow">Step 2</p>
+            <h2>LLM Provider</h2>
+            <p>Create the default chat provider profile. LM Studio is prefilled for local setup.</p>
+        </div>
+
+        <div class="setup-form-grid">
+            <label>
+                Provider Type
+                <select class="form-select" @bind="_providerType" @bind:after="ApplyProviderPreset">
+                    @foreach (var providerType in Enum.GetValues<LlmProviderType>())
+                    {
+                        <option value="@providerType">@ProviderTypeLabel(providerType)</option>
+                    }
+                </select>
+            </label>
+            <label>
+                Provider Name
+                <input class="form-control" @bind="_providerName" />
+            </label>
+            <label class="setup-form-wide">
+                Base URL
+                <input class="form-control" @bind="_baseUrl" @bind:event="oninput" @onblur="PreviewModelCatalogAsync" />
+                @if (!string.IsNullOrWhiteSpace(_modelCatalogMessage))
+                {
+                    <small class="@ModelCatalogFeedbackClass">@_modelCatalogMessage</small>
+                }
+            </label>
+            <label class="setup-form-wide">
+                API Key / Token
+                <input class="form-control" type="password" @bind="_apiKey" autocomplete="off" />
+            </label>
+            <label>
+                Default Chat Model
+                <select class="form-select" @bind="_defaultChatModel" disabled="@IsModelSelectDisabled">
+                    <option value="">@ModelSelectPlaceholder</option>
+                    @if (SelectedChatModelMissingFromCatalog)
+                    {
+                        <option value="@_defaultChatModel">@_defaultChatModel</option>
+                    }
+                    @foreach (var model in _availableModels)
+                    {
+                        <option value="@model.Id">@model.Id</option>
+                    }
+                </select>
+            </label>
+            <label>
+                Default Embedding Model
+                <input class="form-control" @bind="_defaultEmbeddingModel" />
+            </label>
+            <label>
+                Context Window Tokens
+                <input class="form-control" type="number" @bind="_contextWindowTokens" />
+            </label>
+            <label>
+                Max Output Tokens
+                <input class="form-control" type="number" @bind="_maxOutputTokens" />
+            </label>
+        </div>
+
+        <div class="setup-toggle-row">
+            <label><input type="checkbox" @bind="_supportsStreaming" /> Streaming</label>
+            <label><input type="checkbox" @bind="_supportsStructuredOutput" /> Structured output</label>
+            <label><input type="checkbox" @bind="_supportsToolCalling" /> Tool calling</label>
+            <label><input type="checkbox" @bind="_supportsVision" /> Vision</label>
+        </div>
+
+        @if (_profiles.Count > 0)
+        {
+            <div class="setup-inline-list">
+                <span>Existing profiles</span>
+                @foreach (var profile in _profiles)
+                {
+                    <button class="btn btn-sm @(profile.Id == _providerProfileId ? "btn-primary" : "btn-outline-secondary")"
+                            @onclick="@(() => SelectProvider(profile))">
+                        @profile.Name
+                    </button>
+                }
+            </div>
+        }
+
+        @StepMessage()
+        <div class="setup-actions">
+            <button class="btn btn-outline-secondary" @onclick="BackToWelcome">Back</button>
+            <button class="btn btn-primary" disabled="@(_isBusy || _isCheckingModelCatalog || string.IsNullOrWhiteSpace(_defaultChatModel))" @onclick="CreateProviderAsync">
+                @(_isBusy ? "Saving..." : "Save Provider")
+            </button>
+        </div>
+    </div>;
+
+    private RenderFragment CapabilityTestStep => @<div>
+        <div class="setup-step-heading">
+            <p class="setup-eyebrow">Step 3</p>
+            <h2>Model Capability Test</h2>
+            <p>Required checks must pass. Optional capabilities are recorded honestly if unsupported.</p>
+        </div>
+
+        @if (_providerProfileId is null)
+        {
+            <div class="setup-alert setup-alert-warning">Create or select a provider profile before running the capability test.</div>
+        }
+        else
+        {
+            <div class="setup-check-list">
+                @CapabilityRow("Connection", _capabilityResult?.ConnectionSucceeded, required: true)
+                @CapabilityRow("Model list", _capabilityResult?.ConnectionSucceeded, required: false)
+                @CapabilityRow("Chat completion", _capabilityResult?.ChatSucceeded, required: true)
+                @CapabilityRow("Streaming", _capabilityResult?.StreamingSucceeded, required: false)
+                @CapabilityRow("Structured JSON output", _capabilityResult?.StructuredOutputSucceeded, required: false)
+                @CapabilityRow("Tool calling", _capabilityResult?.ToolCallingSucceeded, required: false)
+                @CapabilityRow("Embeddings", null, required: false)
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_capabilityResult?.FailureMessage))
+        {
+            <div class="setup-alert setup-alert-error">@_capabilityResult.FailureMessage</div>
+        }
+
+        @StepMessage()
+        <div class="setup-actions">
+            <button class="btn btn-outline-secondary" @onclick="BackToProvider">Back</button>
+            <button class="btn btn-primary" disabled="@(_isBusy || _providerProfileId is null)" @onclick="RunCapabilityTestAsync">
+                @(_isBusy ? "Testing..." : "Run Test")
+            </button>
+        </div>
+    </div>;
+
+    private RenderFragment StorageStep => @<div>
+        <div class="setup-step-heading">
+            <p class="setup-eyebrow">Step 4</p>
+            <h2>Storage Setup</h2>
+            <p>Check API and configuration persistence before continuing.</p>
+        </div>
+        <div class="setup-check-list">
+            @CapabilityRow("API can reach database", _apiHealth, required: true)
+            @CapabilityRow("Migrations are applied", _status is not null, required: true)
+            @CapabilityRow("System configuration row exists", _status is not null, required: true)
+        </div>
+        @StepMessage()
+        <div class="setup-actions">
+            <button class="btn btn-outline-secondary" @onclick="BackToCapabilityTest">Back</button>
+            <button class="btn btn-primary" disabled="@_isBusy" @onclick="CheckStorageAsync">Run Storage Check</button>
+        </div>
+    </div>;
+
+    private RenderFragment WorkerRuntimeStep => @<div>
+        <div class="setup-step-heading">
+            <p class="setup-eyebrow">Step 5</p>
+            <h2>Worker Runtime</h2>
+            <p>Worker runtime checks are recorded as a setup warning until the worker health endpoint is added.</p>
+        </div>
+        <div class="setup-check-list">
+            @CapabilityRow("Worker host reachable", _workerHealth, required: false)
+            @CapabilityRow("Worker version reported", null, required: false)
+            @CapabilityRow("Built-in local strategy worker available", null, required: false)
+        </div>
+        <div class="setup-alert setup-alert-warning">You can continue without worker health in this first UI pass.</div>
+        @StepMessage()
+        <div class="setup-actions">
+            <button class="btn btn-outline-secondary" @onclick="BackToStorage">Back</button>
+            <button class="btn btn-primary" disabled="@_isBusy" @onclick="CompleteWorkerStepAsync">Continue</button>
+        </div>
+    </div>;
+
+    private RenderFragment AdminUserStep => @<div>
+        <div class="setup-step-heading">
+            <p class="setup-eyebrow">Step 6</p>
+            <h2>Admin User</h2>
+            <p>Create the local owner profile for this instance.</p>
+        </div>
+        <div class="setup-form-grid">
+            <label>
+                Name
+                <input class="form-control" @bind="_adminName" />
+            </label>
+            <label>
+                Email
+                <input class="form-control" type="email" @bind="_adminEmail" />
+            </label>
+            <label class="setup-form-wide">
+                Display Name
+                <input class="form-control" @bind="_adminDisplayName" />
+            </label>
+        </div>
+        @StepMessage()
+        <div class="setup-actions">
+            <button class="btn btn-outline-secondary" @onclick="BackToWorkerRuntime">Back</button>
+            <button class="btn btn-primary" disabled="@(_isBusy || string.IsNullOrWhiteSpace(_adminName))" @onclick="CompleteAdminStepAsync">Continue</button>
+        </div>
+    </div>;
+
+    private RenderFragment FinishStep => @<div>
+        <div class="setup-step-heading">
+            <p class="setup-eyebrow">Step 7</p>
+            <h2>Finish Setup</h2>
+            <p>Complete first-run setup and unlock business onboarding.</p>
+        </div>
+
+        <div class="setup-check-list">
+            @CapabilityRow("Required steps complete", RequiredPriorStepsComplete, required: true)
+            @CapabilityRow("Default chat provider selected", _status?.DefaultChatProviderId is not null, required: true)
+            @CapabilityRow("Last capability test had chat success", IsStepComplete("model-capability-test"), required: true)
+            @CapabilityRow("Storage check passed", IsStepComplete("storage"), required: true)
+            @CapabilityRow("Worker runtime checked", IsStepComplete("worker-runtime"), required: false)
+        </div>
+
+        @StepMessage()
+        <div class="setup-actions">
+            <button class="btn btn-outline-secondary" @onclick="BackToAdminUser">Back</button>
+            <button class="btn btn-success" disabled="@(_isBusy || !CanFinish)" @onclick="FinishSetupAsync">
+                @(_isBusy ? "Finishing..." : "Complete Setup")
+            </button>
+        </div>
+    </div>;
+
+    private RenderFragment CapabilityRow(string label, bool? value, bool required) => @<div class="setup-check-row">
+        <span class="@CheckClass(value, required)">@CheckGlyph(value, required)</span>
+        <span>@label</span>
+        <small>@CheckText(value, required)</small>
+    </div>;
+
+    private RenderFragment StepMessage() => @<div>
+        @if (!string.IsNullOrWhiteSpace(_stepMessage))
+        {
+            <div class="setup-alert setup-alert-info">@_stepMessage</div>
+        }
+    </div>;
+
+    private async Task CreateProviderAsync()
+    {
+        _isBusy = true;
+        _stepMessage = null;
+
+        try
+        {
+            var profile = await LlmProviderApi.CreateAsync(new CreateLlmProviderProfileRequest(
+                _providerName,
+                _providerType,
+                _baseUrl,
+                string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey,
+                _defaultChatModel,
+                string.IsNullOrWhiteSpace(_defaultEmbeddingModel) ? null : _defaultEmbeddingModel,
+                _contextWindowTokens,
+                _maxOutputTokens,
+                _supportsStreaming,
+                _supportsToolCalling,
+                _supportsStructuredOutput,
+                _supportsVision));
+
+            _providerProfileId = profile.Id;
+            await CompleteStepAsync("llm-provider", "model-capability-test");
+            _profiles = await LlmProviderApi.ListAsync();
+            _stepMessage = "Provider profile saved.";
+        }
+        catch (Exception ex)
+        {
+            _stepMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task PreviewModelCatalogAsync()
+    {
+        _modelCatalogMessage = null;
+        _modelCatalogSucceeded = null;
+
+        if (!Uri.TryCreate(_baseUrl.Trim(), UriKind.Absolute, out var baseUri) ||
+            (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps))
+        {
+            _availableModels = [];
+            _modelCatalogSucceeded = false;
+            _modelCatalogMessage = "Enter a valid HTTP or HTTPS base URL.";
+            return;
+        }
+
+        _isCheckingModelCatalog = true;
+
+        try
+        {
+            var result = await LlmProviderApi.PreviewModelCatalogAsync(new PreviewModelCatalogRequest(
+                _providerType,
+                _baseUrl.Trim(),
+                string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey));
+
+            _availableModels = result.Models;
+            _modelCatalogSucceeded = result.Succeeded;
+            _modelCatalogMessage = result.Message ?? (result.Succeeded
+                ? $"Found {result.Models.Count} model(s)."
+                : "Unable to load models from this provider.");
+
+            if (result.Models.Count > 0 && (string.IsNullOrWhiteSpace(_defaultChatModel) || SelectedChatModelMissingFromCatalog))
+            {
+                _defaultChatModel = result.Models[0].Id;
+            }
+        }
+        catch
+        {
+            _availableModels = [];
+            _modelCatalogSucceeded = false;
+            _modelCatalogMessage = "Unable to check this provider. Confirm the API is running and the base URL is reachable.";
+        }
+        finally
+        {
+            _isCheckingModelCatalog = false;
+        }
+    }
+
+    private async Task RunCapabilityTestAsync()
+    {
+        if (_providerProfileId is null)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _stepMessage = null;
+        _capabilityResult = null;
+
+        try
+        {
+            _capabilityResult = await LlmProviderApi.TestAsync(_providerProfileId.Value);
+
+            if (_capabilityResult.ConnectionSucceeded && _capabilityResult.ChatSucceeded)
+            {
+                var defaultResult = await LlmProviderApi.SetDefaultChatProviderAsync(_providerProfileId.Value);
+                if (!defaultResult.Succeeded)
+                {
+                    _stepMessage = defaultResult.Message;
+                    return;
+                }
+
+                await CompleteStepAsync("model-capability-test", "storage");
+                _stepMessage = SetupWizardState.ProviderTestMessage(_capabilityResult);
+            }
+            else
+            {
+                _stepMessage = SetupWizardState.ProviderTestMessage(_capabilityResult);
+            }
+        }
+        catch (Exception ex)
+        {
+            _stepMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task CheckStorageAsync()
+    {
+        _isBusy = true;
+        _stepMessage = null;
+
+        _apiHealth = await SetupApi.CheckHealthAsync();
+        if (_apiHealth == true && _status is not null)
+        {
+            await CompleteStepAsync("storage", "worker-runtime");
+            _stepMessage = "Storage checks passed.";
+        }
+        else
+        {
+            _stepMessage = "Storage checks could not be completed. Confirm the API and database are running.";
+        }
+
+        _isBusy = false;
+    }
+
+    private async Task CompleteWorkerStepAsync()
+    {
+        _workerHealth = false;
+        await CompleteStepAsync("worker-runtime", "admin-user");
+        _stepMessage = "Worker runtime recorded with warnings.";
+    }
+
+    private async Task CompleteAdminStepAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_adminDisplayName))
+        {
+            _adminDisplayName = _adminName;
+        }
+
+        await CompleteStepAsync("admin-user", "finish");
+        _stepMessage = "Admin profile recorded for first-run setup.";
+    }
+
+    private async Task FinishSetupAsync()
+    {
+        _isBusy = true;
+        _stepMessage = null;
+
+        try
+        {
+            var result = await SetupApi.CompleteSetupAsync();
+            _status = result.Status ?? _status;
+
+            if (result.Succeeded)
+            {
+                Navigation.NavigateTo("/business-onboarding");
+                return;
+            }
+
+            _stepMessage = result.Message ?? "Setup could not be completed.";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task CompleteStepAsync(string key, string nextStepKey)
+    {
+        _isBusy = true;
+        _stepMessage = null;
+
+        var result = await SetupApi.CompleteStepAsync(key);
+        _status = result.Status ?? _status;
+
+        if (result.Succeeded)
+        {
+            _activeStepKey = nextStepKey;
+        }
+        else
+        {
+            _stepMessage = result.Message;
+        }
+
+        _isBusy = false;
+    }
+
+    private void SelectStep(string key)
+    {
+        _activeStepKey = key;
+        _stepMessage = null;
+    }
+
+    private void SelectProvider(LlmProviderProfileResponse profile)
+    {
+        _providerProfileId = profile.Id;
+        _providerType = profile.ProviderType;
+        _providerName = profile.Name;
+        _baseUrl = profile.BaseUrl;
+        _defaultChatModel = profile.DefaultChatModel;
+        _defaultEmbeddingModel = profile.DefaultEmbeddingModel ?? string.Empty;
+        _availableModels = string.IsNullOrWhiteSpace(profile.DefaultChatModel)
+            ? []
+            : [new ModelDescriptor(profile.DefaultChatModel, null)];
+        _modelCatalogMessage = null;
+        _modelCatalogSucceeded = null;
+        _contextWindowTokens = profile.ContextWindowTokens;
+        _maxOutputTokens = profile.MaxOutputTokens;
+        _supportsStreaming = profile.SupportsStreaming;
+        _supportsToolCalling = profile.SupportsToolCalling;
+        _supportsStructuredOutput = profile.SupportsStructuredOutput;
+        _supportsVision = profile.SupportsVision;
+    }
+
+    private void ApplyProviderPreset()
+    {
+        _defaultChatModel = string.Empty;
+        _availableModels = [];
+        _modelCatalogMessage = null;
+        _modelCatalogSucceeded = null;
+
+        if (_providerType != LlmProviderType.LmStudio)
+        {
+            return;
+        }
+
+        var defaults = SetupWizardState.LmStudioDefaults();
+        _providerName = defaults.ProviderName;
+        _baseUrl = defaults.BaseUrl;
+        _apiKey = defaults.ApiKey;
+        _supportsStreaming = defaults.SupportsStreaming;
+        _supportsToolCalling = defaults.SupportsToolCalling;
+        _supportsStructuredOutput = defaults.SupportsStructuredOutput;
+        _supportsVision = defaults.SupportsVision;
+    }
+
+    private bool IsStepComplete(string key)
+    {
+        return _status?.Steps.Any(x => x.Key == key && x.IsComplete) == true;
+    }
+
+    private static string ProviderTypeLabel(LlmProviderType providerType)
+    {
+        return providerType switch
+        {
+            LlmProviderType.LmStudio => "LM Studio",
+            LlmProviderType.OpenAiCompatible => "OpenAI-compatible",
+            LlmProviderType.OpenAi => "OpenAI",
+            LlmProviderType.AzureOpenAi => "Azure OpenAI",
+            LlmProviderType.MicrosoftFoundry => "Microsoft Foundry",
+            _ => providerType.ToString()
+        };
+    }
+
+    private static string CheckGlyph(bool? value, bool required)
+    {
+        return value switch
+        {
+            true => "✓",
+            false when required => "!",
+            false => "!",
+            _ => "•"
+        };
+    }
+
+    private static string CheckClass(bool? value, bool required)
+    {
+        return value switch
+        {
+            true => "setup-check setup-check-success",
+            false when required => "setup-check setup-check-error",
+            false => "setup-check setup-check-warning",
+            _ => "setup-check setup-check-muted"
+        };
+    }
+
+    private static string CheckText(bool? value, bool required)
+    {
+        return value switch
+        {
+            true => "Passed",
+            false when required => "Required",
+            false => "Optional unsupported",
+            _ when required => "Required",
+            _ => "Optional"
+        };
+    }
+
+    private sealed record WizardStep(int Number, string Key, string Title, string Description);
 }

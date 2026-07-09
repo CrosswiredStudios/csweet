@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text.Json;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -10,32 +9,15 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace CSweet.IntegrationTests;
 
-public class HealthEndpointTest
+public class CorsPolicyTests
 {
     [Fact]
-    public async Task Get_Health_ReturnsOk()
+    public async Task DevelopmentCors_AllowsDynamicLocalhostOrigins()
     {
-        await using var factory = CreateFactory();
-        var client = factory.CreateClient();
-
-        var response = await client.GetAsync("/api/health");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        var content = await response.Content.ReadAsStringAsync();
-        var doc = JsonDocument.Parse(content);
-        var root = doc.RootElement;
-
-        Assert.Equal("ok", root.GetProperty("status").GetString());
-        Assert.Equal("CSweet.Api", root.GetProperty("service").GetString());
-    }
-
-    private static WebApplicationFactory<Program> CreateFactory()
-    {
-        return new WebApplicationFactory<Program>()
+        await using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
-                builder.UseEnvironment("Testing");
+                builder.UseEnvironment("Development");
                 builder.ConfigureServices(services =>
                 {
                     services.RemoveAll<DbContextOptions<CSweetDbContext>>();
@@ -44,5 +26,16 @@ public class HealthEndpointTest
                         options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
                 });
             });
+
+        var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Options, "/api/setup/status");
+        request.Headers.Add("Origin", "https://localhost:54493");
+        request.Headers.Add("Access-Control-Request-Method", "GET");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("Access-Control-Allow-Origin", out var origins));
+        Assert.Contains("https://localhost:54493", origins);
     }
 }

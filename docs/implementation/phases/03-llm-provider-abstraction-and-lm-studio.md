@@ -290,10 +290,25 @@ Test cases:
 
 ## Acceptance criteria
 
-- [ ] Provider profiles can be created.
-- [ ] LM Studio preset exists.
-- [ ] Provider profile can be tested.
-- [ ] Test result is persisted.
-- [ ] Default chat provider can be selected only after successful chat test.
-- [ ] The application does not hard-code LM Studio outside the preset/factory area.
-- [ ] No API keys appear in logs or responses.
+- [x] Provider profiles can be created.
+- [x] LM Studio preset exists.
+- [x] Provider profile can be tested.
+- [x] Test result is persisted.
+- [x] Default chat provider can be selected only after successful chat test.
+- [x] The application does not hard-code LM Studio outside the preset/factory area.
+- [x] No API keys appear in logs or responses.
+
+## Implementation status
+
+Completed in the phase 3 implementation pass.
+
+Verified:
+
+- `dotnet build CSweet.sln`
+- `dotnet test CSweet.sln`
+
+Notes:
+
+- The OpenAI-compatible provider path is implemented with typed HTTP calls for `/models` and `/chat/completions`, plus a Microsoft.Extensions.AI `IChatClient` factory for runtime chat-client creation.
+- API keys are accepted only on create, stored behind `ApiKeySecretName`, and omitted from provider responses. The current secret-store implementation is in-memory until a durable secret store is added.
+- Automated integration tests use a fake OpenAI-compatible HTTP server path, not real LM Studio.

@@ -12,6 +12,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
   </ItemGroup>
@@ -19,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CSweet.Domain\CSweet.Domain.csproj" />
     <ProjectReference Include="..\CSweet.Application\CSweet.Application.csproj" />
+    <ProjectReference Include="..\CSweet.AI\CSweet.AI.csproj" />
   </ItemGroup>
 
 </Project>

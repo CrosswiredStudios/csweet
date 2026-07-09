@@ -131,7 +131,6 @@ Initial step keys:
 
 ```text
 welcome
-deployment-mode
 llm-provider
 model-capability-test
 storage
@@ -304,6 +303,7 @@ Notes:
 
 - `dotnet ef` was not installed in the local environment, so the initial migration was added directly and validated by build.
 - `CSweet.Migrator` applies migrations and seeds setup state; the API and worker do not apply migrations at startup.
-- Development/test runs without a configured Postgres connection string use EF Core InMemory; production requires `ConnectionStrings:Postgres`.
+- Development runs without a configured Postgres connection string use a durable local SQLite file at `%LOCALAPPDATA%\CSweet\csweet-dev.db` by default; tests override the context with EF Core InMemory; production requires `ConnectionStrings:Postgres`.
+- Local provider API keys/tokens use a durable development file at `%LOCALAPPDATA%\CSweet\provider-secrets.json` by default until an external secret store is introduced.
 - Aspire Postgres credentials are driven by `src/CSweet.AppHost/appsettings.Development.json` via `CSweet:Postgres:*`, not generated secrets, so the local data volume keeps matching credentials across runs.
 - If the `csweet-aspire-postgres` Docker volume was initialized before credentials became config-driven, delete that volume once so Postgres can initialize with the configured `csweet` user/password.

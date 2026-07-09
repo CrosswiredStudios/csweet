@@ -29,6 +29,7 @@
     <ProjectReference Include="..\..\src\CSweet.Domain\CSweet.Domain.csproj" />
     <ProjectReference Include="..\..\src\CSweet.Application\CSweet.Application.csproj" />
     <ProjectReference Include="..\..\src\CSweet.AI\CSweet.AI.csproj" />
+    <ProjectReference Include="..\..\src\CSweet.App\CSweet.App.csproj" />
     <ProjectReference Include="..\..\src\CSweet.Infrastructure\CSweet.Infrastructure.csproj" />
   </ItemGroup>
 

@@ -11,7 +11,6 @@ public sealed class SetupService : ISetupService
     public static readonly IReadOnlyList<(string Key, string DisplayName, bool IsRequired)> RequiredSteps =
     [
         ("welcome", "Welcome", true),
-        ("deployment-mode", "Deployment Mode", true),
         ("llm-provider", "LLM Provider", true),
         ("model-capability-test", "Model Capability Test", true),
         ("storage", "Storage", true),
@@ -67,6 +66,13 @@ public sealed class SetupService : ISetupService
             });
         }
 
+        var activeStepKeys = RequiredSteps.Select(x => x.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var obsoleteStep in existingSteps.Values.Where(x => !activeStepKeys.Contains(x.Key)))
+        {
+            obsoleteStep.IsRequired = false;
+            obsoleteStep.UpdatedAt = now;
+        }
+
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -75,14 +81,19 @@ public sealed class SetupService : ISetupService
         await EnsureSeededAsync(cancellationToken);
 
         var configuration = await GetConfigurationAsync(cancellationToken);
+        var activeStepKeys = RequiredSteps.Select(x => x.Key).ToList();
         var steps = await _dbContext.OnboardingSteps
-            .OrderBy(x => x.CreatedAt)
+            .Where(x => activeStepKeys.Contains(x.Key))
             .Select(x => new OnboardingStepStatusDto(
                 x.Key,
                 x.DisplayName,
                 x.IsRequired,
                 x.IsComplete))
             .ToListAsync(cancellationToken);
+
+        steps = steps
+            .OrderBy(x => activeStepKeys.IndexOf(x.Key))
+            .ToList();
 
         return new SetupStatusResponse(
             configuration.IsFirstRunComplete,
@@ -205,8 +216,13 @@ public sealed class SetupService : ISetupService
 
     private async Task<bool> ArePriorRequiredStepsCompleteAsync(CancellationToken cancellationToken)
     {
+        var requiredPriorStepKeys = RequiredSteps
+            .Where(x => x.IsRequired && x.Key != "finish")
+            .Select(x => x.Key)
+            .ToList();
+
         return !await _dbContext.OnboardingSteps
-            .AnyAsync(x => x.IsRequired && x.Key != "finish" && !x.IsComplete, cancellationToken);
+            .AnyAsync(x => requiredPriorStepKeys.Contains(x.Key) && !x.IsComplete, cancellationToken);
     }
 
     private async Task<SetupActionResponse> SuccessAsync(CancellationToken cancellationToken)
