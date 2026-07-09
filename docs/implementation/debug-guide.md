@@ -110,6 +110,24 @@ For a complete debug experience, create `.vscode/launch.json`:
 
 ## Troubleshooting
 
+### Aspire Postgres Authentication
+
+Aspire uses Postgres credentials from `src/CSweet.AppHost/appsettings.Development.json`:
+
+```text
+CSweet:Postgres:UserName
+CSweet:Postgres:Password
+CSweet:Postgres:Database
+```
+
+If Postgres logs `password authentication failed` after credential changes, the existing Docker volume was likely initialized with older credentials. Delete the Aspire development volume once:
+
+```powershell
+docker volume rm csweet-aspire-postgres
+```
+
+After that, rerun AppHost. The volume should not need to be deleted again unless the configured credentials change.
+
 ### Port Already in Use
 Aspire assigns random ports by default. If you need fixed ports, update the AppHost `Program.cs` with `.WithExternalHttpPorts()`.
 

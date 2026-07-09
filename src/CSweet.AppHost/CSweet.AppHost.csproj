@@ -21,4 +21,8 @@
     <ProjectReference Include="..\CSweet.WorkerHost\CSweet.WorkerHost.csproj" IsAspireProjectResource="true" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

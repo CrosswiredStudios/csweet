@@ -1,21 +1,20 @@
-// Aspire AppHost for local development orchestration.
-using Aspire.Hosting.ApplicationModel;
-
 var builder = DistributedApplication.CreateBuilder(args);
 
-var postgresPassword = builder.AddParameter(
-    "postgres-password",
-    new GenerateParameterDefault
-    {
-        MinLength = 22,
-        Special = false
-    },
-    secret: true,
-    persist: true);
+var postgresUserName = builder.AddParameterFromConfiguration(
+    "postgres-username",
+    "CSweet:Postgres:UserName");
 
-var postgres = builder.AddPostgres("postgres", password: postgresPassword)
+var postgresPassword = builder.AddParameterFromConfiguration(
+    "postgres-password",
+    "CSweet:Postgres:Password",
+    secret: true);
+
+var postgresDatabaseName = builder.Configuration["CSweet:Postgres:Database"]
+    ?? throw new InvalidOperationException("CSweet:Postgres:Database must be configured for AppHost.");
+
+var postgres = builder.AddPostgres("postgres", userName: postgresUserName, password: postgresPassword)
     .WithDataVolume("csweet-aspire-postgres")
-    .AddDatabase("csweet");
+    .AddDatabase("csweet", postgresDatabaseName);
 
 var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
