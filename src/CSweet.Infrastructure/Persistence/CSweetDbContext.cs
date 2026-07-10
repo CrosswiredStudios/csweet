@@ -15,6 +15,7 @@ public sealed class CSweetDbContext : DbContext
     public DbSet<ModelCapabilityTest> ModelCapabilityTests => Set<ModelCapabilityTest>();
     public DbSet<OnboardingStep> OnboardingSteps => Set<OnboardingStep>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<AgentRunLog> AgentRunLogs => Set<AgentRunLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -58,6 +59,15 @@ public sealed class CSweetDbContext : DbContext
             entity.Property(x => x.EventType).HasMaxLength(160).IsRequired();
             entity.Property(x => x.EntityType).HasMaxLength(160).IsRequired();
             entity.Property(x => x.Summary).HasMaxLength(1024);
+        });
+
+        modelBuilder.Entity<AgentRunLog>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.AgentKey).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(80).IsRequired();
+            entity.Property(x => x.PromptHash).HasMaxLength(512).IsRequired();
+            entity.Property(x => x.FailureMessage).HasMaxLength(2048);
         });
     }
 }
