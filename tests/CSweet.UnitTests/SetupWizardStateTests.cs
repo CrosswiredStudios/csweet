@@ -1,4 +1,4 @@
-using CSweet.App.Setup;
+using CSweet.UI.Setup;
 using CSweet.Contracts.Llm;
 using CSweet.Contracts.Setup;
 using CSweet.Domain.Setup;

@@ -69,6 +69,9 @@ Use these official references when implementing:
 - Microsoft.Extensions.AI chat quickstart: https://learn.microsoft.com/en-us/dotnet/ai/quickstarts/build-chat-app
 - .NET Aspire overview: https://learn.microsoft.com/en-ca/dotnet/aspire/get-started/aspire-overview
 - .NET Aspire AppHost: https://learn.microsoft.com/en-us/dotnet/aspire/fundamentals/app-host-overview
+- ASP.NET Core Blazor Hybrid: https://learn.microsoft.com/en-us/aspnet/core/blazor/hybrid/
+- Build a .NET MAUI Blazor Hybrid app: https://learn.microsoft.com/en-us/aspnet/core/blazor/hybrid/tutorials/maui
+- Razor class libraries for shared Blazor components: https://learn.microsoft.com/en-us/aspnet/core/blazor/components/class-libraries
 - EF Core overview: https://learn.microsoft.com/en-us/ef/core/
 - EF Core DbContext configuration: https://learn.microsoft.com/en-us/ef/core/dbcontext-configuration/
 - EF Core migrations: https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying

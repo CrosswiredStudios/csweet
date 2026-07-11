@@ -8,6 +8,8 @@
     <Project Path="src/CSweet.Contracts/CSweet.Contracts.csproj" />
     <Project Path="src/CSweet.Domain/CSweet.Domain.csproj" />
     <Project Path="src/CSweet.Infrastructure/CSweet.Infrastructure.csproj" />
+    <Project Path="src/CSweet.Maui/CSweet.Maui.csproj" />
+    <Project Path="src/CSweet.UI/CSweet.UI.csproj" />
     <Project Path="src/CSweet.ServiceDefaults/CSweet.ServiceDefaults.csproj" />
     <Project Path="src/CSweet.WorkerHost/CSweet.WorkerHost.csproj" />
   </Folder>

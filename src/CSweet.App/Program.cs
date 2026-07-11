@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using CSweet.App;
-using CSweet.App.Services;
+using CSweet.UI.Services;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
@@ -18,10 +18,6 @@ if (!httpBaseAddress.EndsWith('/'))
 }
 
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(httpBaseAddress) });
-builder.Services.AddScoped<ISetupApiClient, SetupApiClient>();
-builder.Services.AddScoped<ILlmProviderApiClient, LlmProviderApiClient>();
-builder.Services.AddScoped<IOrganizationApiClient, OrganizationApiClient>();
-builder.Services.AddScoped<IBusinessOnboardingApiClient, BusinessOnboardingApiClient>();
-builder.Services.AddScoped<IPlanningApiClient, PlanningApiClient>();
+builder.Services.AddCSweetApiClients();
 
 await builder.Build().RunAsync();

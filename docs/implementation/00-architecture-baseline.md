@@ -62,13 +62,23 @@ The system should eventually support:
 Prefer enterprise-ready Microsoft/.NET libraries when they fit:
 
 - ASP.NET Core for APIs.
-- Blazor WASM for the self-hosted app UI.
+- Blazor components for the product UI.
+- Blazor WASM for the self-hosted web host.
+- .NET MAUI Blazor Hybrid for the mobile host.
 - EF Core for relational persistence.
 - .NET Aspire for local orchestration, service discovery, health, and telemetry.
 - Microsoft.Extensions.AI for model/provider abstraction.
 - Microsoft Agent Framework for agents, multi-agent workflows, tool use, human-in-the-loop, and workflow orchestration.
 
-### 6. Agents are not a replacement for normal code
+### 6. One product experience across web and mobile
+
+The web and mobile applications should be different hosts for the same product experience, not separate frontends.
+
+Shared pages, layouts, state containers, validation, API clients, and static assets should live in a host-neutral Razor class library. The Blazor WASM web app and the .NET MAUI Blazor Hybrid mobile app should both reference that shared UI library and provide only platform-specific bootstrapping, configuration, storage, and native integrations.
+
+The mobile application should use MAUI Blazor Hybrid so the same Razor components can run natively on the device inside a `BlazorWebView`. Mobile-only XAML should be limited to native shell concerns that cannot reasonably be expressed in the shared web UI.
+
+### 7. Agents are not a replacement for normal code
 
 Use deterministic code for:
 
@@ -95,7 +105,9 @@ Use Agent Framework for:
 
 ```text
 /src
+  /CSweet.UI
   /CSweet.App
+  /CSweet.Mobile
   /CSweet.Api
   /CSweet.Domain
   /CSweet.Application
@@ -131,7 +143,9 @@ docker-compose.override.yml optional
 
 | Project | Responsibility |
 |---|---|
-| `CSweet.App` | Blazor WASM frontend. No direct database access. Calls `CSweet.Api`. |
+| `CSweet.UI` | Shared Razor components, pages, layouts, UI state, validation, API client abstractions/implementations, and static assets used by web and mobile hosts. No direct database access. Calls `CSweet.Api` through `HttpClient`. |
+| `CSweet.App` | Blazor WASM web host. Owns browser bootstrapping, web configuration, web static asset hosting, and references `CSweet.UI`. No product pages should live here once the shared UI split is complete. |
+| `CSweet.Mobile` | .NET MAUI Blazor Hybrid mobile host. Owns native app bootstrapping, `BlazorWebView`, mobile configuration, secure storage adapters, device permissions, and references `CSweet.UI`. |
 | `CSweet.Api` | ASP.NET Core API. Auth, endpoints, request validation, application service calls. |
 | `CSweet.Domain` | Entities, value objects, enums, domain invariants. No infrastructure dependencies. |
 | `CSweet.Application` | Use cases, command/query handlers, orchestration, workflow coordination. |
@@ -145,8 +159,22 @@ docker-compose.override.yml optional
 
 ## Logical architecture
 
+The product UI is logically shared across hosts:
+
 ```text
-Blazor WASM App
+CSweet.App web host
+  -> CSweet.UI shared Razor experience
+  -> CSweet.Api
+
+CSweet.Mobile MAUI Blazor Hybrid host
+  -> CSweet.UI shared Razor experience
+  -> CSweet.Api
+```
+
+The rest of the system remains host-independent:
+
+```text
+Shared product UI
   ↓ HTTP
 CSweet.Api
   ↓ application services
@@ -282,6 +310,21 @@ Docker Compose startup or Aspire startup
 
 **Reason:** Docker Compose gives self-hosted users a repeatable way to run the API, app, worker, and database with minimal setup. This is likely the easiest distribution path for early users.
 
+### ADR-007: Use a shared Razor UI library for web and mobile parity
+
+**Decision:** Move product UI out of the Blazor WASM host and into `CSweet.UI`, a Razor class library consumed by both `CSweet.App` and `CSweet.Mobile`.
+
+**Reason:** .NET MAUI Blazor Hybrid can reuse Razor components across mobile, desktop, and web. Keeping product UI in a host-neutral library prevents mobile from drifting into a second implementation and makes "identical web experience" a codebase property instead of a manual design goal.
+
+**Implementation notes:**
+
+- `CSweet.UI` owns routes, layouts, reusable components, forms, API clients, CSS, and shared JS interop wrappers.
+- `CSweet.App` owns only WebAssembly startup, browser-specific configuration, and app hosting.
+- `CSweet.Mobile` owns only MAUI startup, `BlazorWebView`, native configuration, secure storage, device permissions, and app packaging.
+- Shared UI code must not depend on `Microsoft.AspNetCore.Components.WebAssembly.Hosting` or MAUI types.
+- Host-specific services should be expressed as small interfaces in `CSweet.UI` and implemented by `CSweet.App` or `CSweet.Mobile`.
+- New product pages must be added to `CSweet.UI` unless they are explicitly host-only diagnostics or platform setup screens.
+
 ## Cross-cutting requirements
 
 ### Auditing
@@ -320,8 +363,18 @@ Each phase must include:
 - Unit tests for domain/application logic.
 - Integration tests for API endpoints.
 - At least one happy-path UI test or manual QA checklist.
+- A web/mobile parity check for shared UI flows once `CSweet.Mobile` exists.
 - Manual test instructions for LM Studio when external local services are involved.
 - Docker startup validation when runtime services are affected.
+
+### Web and mobile parity
+
+- Shared product routes must render from `CSweet.UI`.
+- Web and mobile hosts must use the same DTOs and API client behavior.
+- Responsive layouts must be designed for desktop browser, tablet, and phone widths from the start.
+- Host-specific behavior must be isolated behind interfaces, for example storage, deep links, clipboard, file picker, notifications, and biometric/device auth.
+- Avoid direct browser globals in Razor components. Use JS interop wrappers only when needed and provide no-op or native implementations for MAUI when appropriate.
+- Do not add product workflow pages directly to `CSweet.App` or `CSweet.Mobile`.
 
 ### Security baseline
 

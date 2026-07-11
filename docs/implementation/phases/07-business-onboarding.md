@@ -11,13 +11,14 @@ After system setup, users need to create the business context that agents will o
 ## Deliverables
 
 - `/business-onboarding` route.
-- Organization creation form.
+- Organization creation form implemented in the shared `CSweet.UI` Razor library.
 - Initial context capture.
 - Default role creation.
 - First strategic objective creation.
 - Initial task backlog generation.
 - Default local strategy worker registration.
 - Redirect to organization command center.
+- Shared API client and UI state that can be used by both the Blazor WASM host and the future MAUI Blazor Hybrid host.
 
 ## Business onboarding fields
 
@@ -221,6 +222,31 @@ Pending approvals
 Recommended next action
 ```
 
+## Web and mobile parity requirements
+
+The business onboarding and command center UI must be host-neutral. Product pages, layouts, form models, validation behavior, and API client calls belong in `CSweet.UI`; `CSweet.App` should only host the shared route for the browser.
+
+Do not place onboarding workflow logic directly in the Blazor WASM host. The future `CSweet.Mobile` project must be able to reference the same `CSweet.UI` route and render an identical experience inside MAUI Blazor Hybrid.
+
+Host-specific behavior should be abstracted behind interfaces when needed:
+
+```text
+Local storage / secure storage
+Clipboard
+File picker
+Deep links
+Notifications
+Device/browser detection
+```
+
+The onboarding layout must be responsive enough for:
+
+```text
+Desktop browser
+Tablet viewport
+Phone viewport inside MAUI BlazorWebView
+```
+
 ## Testing requirements
 
 ### Unit tests
@@ -244,6 +270,8 @@ Recommended next action
 - User can submit onboarding form.
 - Validation messages appear for missing business name and primary goal.
 - User lands on command center.
+- Onboarding and command center render correctly at phone, tablet, and desktop widths.
+- Once `CSweet.Mobile` exists, the same `CSweet.UI` onboarding route renders inside the MAUI Blazor Hybrid host without duplicating page code.
 
 ## Acceptance criteria
 
@@ -254,3 +282,5 @@ Recommended next action
 - [ ] Initial tasks are created.
 - [ ] Default local strategy worker is available.
 - [ ] User lands on command center.
+- [ ] Business onboarding and command center product UI live in `CSweet.UI`, not directly in `CSweet.App`.
+- [ ] The implementation has no WebAssembly-only dependency in shared onboarding UI code.
