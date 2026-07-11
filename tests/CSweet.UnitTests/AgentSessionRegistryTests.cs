@@ -98,6 +98,66 @@ public sealed class AgentSessionRegistryTests
         Assert.True(response.CapabilityResult.Succeeded);
     }
 
+    [Fact]
+    public async Task CapabilityResult_FromUnselectedAgent_IsRejectedWithoutConsumingRequest()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var requester = Register(registry, "requester", "business-1");
+        var selectedProvider = Register(
+            registry,
+            "selected-provider",
+            "business-1",
+            capabilities: new[] { "example.lookup.v1" });
+        var attacker = Register(registry, "attacker", "business-1");
+
+        registry.RequestCapability(
+            requester,
+            new RequestCapability
+            {
+                RequestId = "request-2",
+                Capability = "example.lookup.v1",
+                ContentType = "application/json",
+                Payload = ByteString.CopyFromUtf8("{}")
+            },
+            "correlation-2");
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        _ = await selectedProvider.Outbound.ReadAsync(timeout.Token);
+
+        registry.CompleteCapability(
+            attacker,
+            new CapabilityResult
+            {
+                RequestId = "request-2",
+                Succeeded = true,
+                ContentType = "application/json",
+                Payload = ByteString.CopyFromUtf8("{\"spoofed\":true}")
+            },
+            "correlation-2");
+
+        var rejection = await attacker.Outbound.ReadAsync(timeout.Token);
+        Assert.Equal(
+            BrokerToAgentMessage.PayloadOneofCase.Error,
+            rejection.PayloadCase);
+        Assert.Equal("capability_result_denied", rejection.Error.Code);
+        Assert.False(requester.Outbound.TryRead(out _));
+
+        registry.CompleteCapability(
+            selectedProvider,
+            new CapabilityResult
+            {
+                RequestId = "request-2",
+                Succeeded = true,
+                ContentType = "application/json",
+                Payload = ByteString.CopyFromUtf8("{\"value\":42}")
+            },
+            "correlation-2");
+
+        var response = await requester.Outbound.ReadAsync(timeout.Token);
+        Assert.True(response.CapabilityResult.Succeeded);
+        Assert.Equal("{\"value\":42}", response.CapabilityResult.Payload.ToStringUtf8());
+    }
+
     private static AgentSession Register(
         AgentSessionRegistry registry,
         string agentId,
@@ -114,7 +174,7 @@ public sealed class AgentSessionRegistryTests
                 BusinessId = businessId
             },
             new AuthorizedAgentGrant(
-                (capabilities ?? []).ToHashSet(StringComparer.Ordinal),
-                (subscriptions ?? []).ToHashSet(StringComparer.Ordinal),
-                (publications ?? []).ToHashSet(StringComparer.Ordinal)));
+                (capabilities ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
+                (subscriptions ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
+                (publications ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal)));
 }
