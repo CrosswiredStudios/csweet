@@ -15,17 +15,17 @@ public sealed class AgentSessionRegistryTests
             registry,
             "source",
             "business-1",
-            publications: ["com.example.changed.v1"]);
+            publications: new[] { "com.example.changed.v1" });
         var authorized = Register(
             registry,
             "authorized",
             "business-1",
-            subscriptions: ["com.example.changed.v1"]);
+            subscriptions: new[] { "com.example.changed.v1" });
         var otherBusiness = Register(
             registry,
             "other-business",
             "business-2",
-            subscriptions: ["com.example.changed.v1"]);
+            subscriptions: new[] { "com.example.changed.v1" });
 
         registry.PublishEvent(
             source,
@@ -59,7 +59,7 @@ public sealed class AgentSessionRegistryTests
             registry,
             "provider",
             "business-1",
-            capabilities: ["example.lookup.v1"]);
+            capabilities: new[] { "example.lookup.v1" });
 
         registry.RequestCapability(
             requester,
@@ -102,9 +102,9 @@ public sealed class AgentSessionRegistryTests
         AgentSessionRegistry registry,
         string agentId,
         string businessId,
-        IReadOnlySet<string>? capabilities = null,
-        IReadOnlySet<string>? subscriptions = null,
-        IReadOnlySet<string>? publications = null) =>
+        IEnumerable<string>? capabilities = null,
+        IEnumerable<string>? subscriptions = null,
+        IEnumerable<string>? publications = null) =>
         registry.Register(
             new RegisterAgent
             {
@@ -114,7 +114,7 @@ public sealed class AgentSessionRegistryTests
                 BusinessId = businessId
             },
             new AuthorizedAgentGrant(
-                capabilities ?? new HashSet<string>(StringComparer.Ordinal),
-                subscriptions ?? new HashSet<string>(StringComparer.Ordinal),
-                publications ?? new HashSet<string>(StringComparer.Ordinal)));
+                (capabilities ?? []).ToHashSet(StringComparer.Ordinal),
+                (subscriptions ?? []).ToHashSet(StringComparer.Ordinal),
+                (publications ?? []).ToHashSet(StringComparer.Ordinal)));
 }
