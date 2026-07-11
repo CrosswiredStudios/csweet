@@ -1,9 +1,13 @@
+using CSweet.Application.Core;
 using CSweet.Application.Llm;
+using CSweet.Application.Planning;
 using CSweet.Application.Setup;
 using CSweet.AI.AgentFramework;
 using CSweet.AI.Providers;
+using CSweet.Infrastructure.Core;
 using CSweet.Infrastructure.Llm;
 using CSweet.Infrastructure.Persistence;
+using CSweet.Infrastructure.Planning;
 using CSweet.Infrastructure.Setup;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -27,15 +31,7 @@ public static class DependencyInjection
                 return;
             }
 
-            if (builder.Environment.IsProduction())
-            {
-                throw new InvalidOperationException("ConnectionStrings:Postgres must be configured in production.");
-            }
-
-            var sqliteConnectionString = builder.Configuration.GetConnectionString("Sqlite")
-                ?? BuildLocalSqliteConnectionString(builder.Configuration);
-
-            options.UseSqlite(sqliteConnectionString);
+            throw new InvalidOperationException("ConnectionStrings:Postgres or ConnectionStrings:csweet must be configured.");
         });
 
         builder.Services.AddScoped<ISetupService, SetupService>();
@@ -64,13 +60,24 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentRunner, AgentFrameworkAgentRunner>();
         builder.Services.AddScoped<IAgentWorkflowRunner, AgentFrameworkWorkflowRunner>();
 
-        return builder;
-    }
+        // Planning services
+        builder.Services.AddScoped<Application.Planning.IOrganizationService, OrganizationService>();
+        builder.Services.AddScoped<IPlanningRunService, PlanningRunService>();
+        builder.Services.AddScoped<IPlanningDocumentService, PlanningDocumentService>();
+        builder.Services.AddScoped<IPlanningWorkflowService, PlanningWorkflowService>();
 
-    private static string BuildLocalSqliteConnectionString(IConfiguration configuration)
-    {
-        var databasePath = GetLocalStateFilePath(configuration, "CSweet:Database:FilePath", "csweet-dev.db");
-        return $"Data Source={databasePath}";
+        // Core business domain services
+        builder.Services.AddScoped<ICoreOrganizationService, CoreOrganizationService>();
+        builder.Services.AddScoped<IRoleService, RoleService>();
+        builder.Services.AddScoped<IStrategicObjectiveService, StrategicObjectiveService>();
+        builder.Services.AddScoped<IWorkerService, WorkerService>();
+        builder.Services.AddScoped<IWorkTaskService, WorkTaskService>();
+        builder.Services.AddScoped<ITaskRunService, TaskRunService>();
+        builder.Services.AddScoped<IArtifactService, ArtifactService>();
+        builder.Services.AddScoped<IArtifactApprovalService, ArtifactApprovalService>();
+        builder.Services.AddScoped<IOrganizationUserService, OrganizationUserService>();
+
+        return builder;
     }
 
     private static string GetLocalStateFilePath(

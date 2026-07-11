@@ -13,11 +13,7 @@ public static class CSweetDatabaseInitializer
         using var scope = serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
 
-        if (dbContext.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
-        {
-            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
-        }
-        else if (dbContext.Database.IsRelational())
+        if (dbContext.Database.IsRelational())
         {
             await dbContext.Database.MigrateAsync(cancellationToken);
         }

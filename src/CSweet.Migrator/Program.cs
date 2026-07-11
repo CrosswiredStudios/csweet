@@ -8,6 +8,9 @@ using Microsoft.Extensions.Logging;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+
 builder.AddServiceDefaults();
 builder.AddCSweetInfrastructure();
 

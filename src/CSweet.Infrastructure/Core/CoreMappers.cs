@@ -1,0 +1,173 @@
+using CSweet.Contracts.Core;
+using CSweet.Domain.Core;
+
+namespace CSweet.Infrastructure.Core;
+
+internal static class CoreMappers
+{
+    #region Organization
+
+    public static OrganizationResponse ToResponse(this Organization org)
+    {
+        return new OrganizationResponse(
+            org.Id,
+            org.Name,
+            org.Industry,
+            org.Mission,
+            org.Stage,
+            org.PrimaryGoal,
+            org.ConstraintsJson,
+            org.CreatedAt,
+            org.UpdatedAt);
+    }
+
+    #endregion
+
+    #region OrganizationUser
+
+    public static OrganizationUserResponse ToResponse(this OrganizationUser user)
+    {
+        return new OrganizationUserResponse(
+            user.Id,
+            user.OrganizationId,
+            user.DisplayName,
+            user.Email,
+            (int)user.PermissionLevel,
+            user.CreatedAt);
+    }
+
+    #endregion
+
+    #region Role
+
+    public static RoleResponse ToResponse(this Role role)
+    {
+        return new RoleResponse(
+            role.Id,
+            role.OrganizationId,
+            role.Name,
+            role.Description,
+            role.ResponsibilitiesJson,
+            (int)role.AuthorityLevel,
+            role.CreatedAt,
+            role.UpdatedAt);
+    }
+
+    #endregion
+
+    #region StrategicObjective
+
+    public static StrategicObjectiveResponse ToResponse(this StrategicObjective obj)
+    {
+        return new StrategicObjectiveResponse(
+            obj.Id,
+            obj.OrganizationId,
+            obj.Title,
+            obj.Description,
+            (int)obj.Status,
+            obj.TargetDate,
+            obj.CreatedAt,
+            obj.UpdatedAt);
+    }
+
+    #endregion
+
+    #region Worker
+
+    public static WorkerResponse ToResponse(this Worker worker)
+    {
+        return new WorkerResponse(
+            worker.Id,
+            worker.OrganizationId,
+            worker.Name,
+            worker.Description,
+            (int)worker.WorkerType,
+            (int)worker.ExecutionMode,
+            worker.CapabilitiesJson,
+            worker.CostModelJson,
+            worker.EndpointConfigurationJson,
+            worker.IsEnabled,
+            worker.RequiresHumanApproval,
+            worker.CreatedAt,
+            worker.UpdatedAt);
+    }
+
+    #endregion
+
+    #region WorkTask
+
+    public static WorkTaskResponse ToResponse(this WorkTask task)
+    {
+        return new WorkTaskResponse(
+            task.Id,
+            task.OrganizationId,
+            task.StrategicObjectiveId,
+            task.AssignedRoleId,
+            task.AssignedWorkerId,
+            task.Title,
+            task.Description,
+            (int)task.Status,
+            (int)task.Priority,
+            task.DueDate,
+            task.RequiresApproval,
+            task.CreatedAt,
+            task.UpdatedAt);
+    }
+
+    #endregion
+
+    #region TaskRun
+
+    public static TaskRunResponse ToResponse(this TaskRun run)
+    {
+        return new TaskRunResponse(
+            run.Id,
+            run.TaskId,
+            run.WorkerId,
+            (int)run.Status,
+            run.StartedAt,
+            run.CompletedAt,
+            run.InputJson,
+            run.OutputJson,
+            run.FailureMessage,
+            run.CostAmount,
+            run.CostCurrency);
+    }
+
+    #endregion
+
+    #region Artifact
+
+    public static ArtifactResponse ToResponse(this Artifact artifact)
+    {
+        return new ArtifactResponse(
+            artifact.Id,
+            artifact.OrganizationId,
+            artifact.TaskId,
+            artifact.TaskRunId,
+            (int)artifact.Type,
+            artifact.Title,
+            artifact.Content,
+            artifact.Version,
+            (int)artifact.ApprovalStatus,
+            artifact.CreatedAt,
+            artifact.UpdatedAt);
+    }
+
+    #endregion
+
+    #region Approval
+
+    public static ApprovalResponse ToResponse(this Approval approval)
+    {
+        return new ApprovalResponse(
+            approval.Id,
+            approval.ArtifactId,
+            (int)approval.Status,
+            approval.Comment,
+            approval.DecidedAt,
+            approval.CreatedAt);
+    }
+
+    #endregion
+}

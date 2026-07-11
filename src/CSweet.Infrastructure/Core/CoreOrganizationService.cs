@@ -1,0 +1,140 @@
+using CSweet.Application.Core;
+using CSweet.Application.Setup;
+using CSweet.Contracts.Core;
+using CSweet.Domain.Core;
+using CSweet.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+
+namespace CSweet.Infrastructure.Core;
+
+public sealed class CoreOrganizationService : ICoreOrganizationService
+{
+    private readonly CSweetDbContext _dbContext;
+    private readonly IAuditEventWriter _auditEventWriter;
+    private readonly IRoleService _roleService;
+
+    public CoreOrganizationService(CSweetDbContext dbContext, IAuditEventWriter auditEventWriter, IRoleService roleService)
+    {
+        _dbContext = dbContext;
+        _auditEventWriter = auditEventWriter;
+        _roleService = roleService;
+    }
+
+    public async Task<IReadOnlyList<OrganizationResponse>> ListAsync(CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.CoreOrganizations
+            .OrderBy(x => x.Name)
+            .Select(x => x.ToResponse())
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<OrganizationResponse?> GetAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var org = await _dbContext.CoreOrganizations
+            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        return org?.ToResponse();
+    }
+
+    public async Task<CoreActionResponse> CreateAsync(CreateOrganizationRequest request, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return Failure("validation_error", "Organization name is required.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var org = new Organization
+        {
+            Id = Guid.NewGuid(),
+            Name = request.Name.Trim(),
+            Industry = TrimOrNull(request.Industry),
+            Mission = TrimOrNull(request.Mission),
+            Stage = TrimOrNull(request.Stage),
+            PrimaryGoal = TrimOrNull(request.PrimaryGoal),
+            ConstraintsJson = request.ConstraintsJson,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        _dbContext.CoreOrganizations.Add(org);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        // Seed default roles for new organization
+        await _roleService.EnsureDefaultsAsync(org.Id, cancellationToken);
+
+        await _auditEventWriter.WriteAsync(
+            "organization.created",
+            "Organization",
+            org.Id,
+            $"Organization '{org.Name}' created.",
+            cancellationToken: cancellationToken);
+
+        return new CoreActionResponse(true, null, "Organization created successfully.", Organization: org.ToResponse());
+    }
+
+    public async Task<CoreActionResponse> UpdateAsync(Guid id, UpdateOrganizationRequest request, CancellationToken cancellationToken = default)
+    {
+        var org = await _dbContext.CoreOrganizations
+            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (org is null)
+        {
+            return Failure("not_found", "Organization was not found.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Name))
+            org.Name = request.Name.Trim();
+        if (request.Industry is not null)
+            org.Industry = TrimOrNull(request.Industry);
+        if (request.Mission is not null)
+            org.Mission = TrimOrNull(request.Mission);
+        if (request.Stage is not null)
+            org.Stage = TrimOrNull(request.Stage);
+        if (request.PrimaryGoal is not null)
+            org.PrimaryGoal = TrimOrNull(request.PrimaryGoal);
+        if (request.ConstraintsJson is not null)
+            org.ConstraintsJson = request.ConstraintsJson;
+
+        org.UpdatedAt = DateTimeOffset.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditEventWriter.WriteAsync(
+            "organization.updated",
+            "Organization",
+            org.Id,
+            $"Organization '{org.Name}' updated.",
+            cancellationToken: cancellationToken);
+
+        return new CoreActionResponse(true, null, "Organization updated successfully.", Organization: org.ToResponse());
+    }
+
+    public async Task<CoreActionResponse> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var org = await _dbContext.CoreOrganizations
+            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (org is null)
+        {
+            return Failure("not_found", "Organization was not found.");
+        }
+
+        var name = org.Name;
+        _dbContext.CoreOrganizations.Remove(org);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditEventWriter.WriteAsync(
+            "organization.deleted",
+            "Organization",
+            org.Id,
+            $"Organization '{name}' deleted.",
+            cancellationToken: cancellationToken);
+
+        return new CoreActionResponse(true, null, "Organization deleted successfully.");
+    }
+
+    static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    static CoreActionResponse Failure(string errorCode, string message) =>
+        new CoreActionResponse(false, errorCode, message);
+}

@@ -1,0 +1,273 @@
+@page "/organizations"
+@using CSweet.Contracts.Planning
+@using Microsoft.JSInterop
+@inject IOrganizationApiClient OrganizationApi
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Organizations - C-Sweet</PageTitle>
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Organizations</h1>
+        <button class="btn btn-primary" @onclick="ShowCreateForm">
+            <i class="bi bi-plus-lg"></i> New Organization
+        </button>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2 text-muted">Loading organizations...</p>
+        </div>
+    }
+    else if (_organizations.Count == 0)
+    {
+        <div class="alert alert-info">
+            No organizations yet. Create your first organization to get started with business planning.
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            @foreach (var org in _organizations)
+            {
+                <div class="col-md-6 col-lg-4 mb-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <h5 class="card-title">@org.Name</h5>
+                            @if (!string.IsNullOrEmpty(org.Industry))
+                            {
+                                <p class="text-muted mb-1"><small>Industry: @org.Industry</small></p>
+                            }
+                            @if (!string.IsNullOrEmpty(org.Stage))
+                            {
+                                <span class="badge bg-secondary">@org.Stage</span>
+                            }
+                            @if (!string.IsNullOrEmpty(org.Description))
+                            {
+                                <p class="card-text mt-2">@Truncate(org.Description, 150)</p>
+                            }
+                        </div>
+                        <div class="card-footer bg-white border-top-0">
+                            <div class="btn-group w-100">
+                                <button class="btn btn-outline-primary btn-sm" @onclick="() => NavigateToPlanning(org.Id)">
+                                    Plan
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => ShowEditForm(org)">
+                                    Edit
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => ConfirmDelete(org)">
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<!-- Create/Edit Modal -->
+@if (_showForm)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(_editingOrg != null ? "Edit Organization" : "New Organization")</h5>
+                    <button type="button" class="btn-close" @onclick="HideForm"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Name <span class="text-danger">*</span></label>
+                            <input @bind="_formName" class="form-control" placeholder="Acme Corp" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Industry</label>
+                            <input @bind="_formIndustry" class="form-control" placeholder="Retail, SaaS, Manufacturing..." />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Stage</label>
+                            <select @bind="_formStage" class="form-select">
+                                <option value="">Select stage...</option>
+                                <option value="Idea">Idea</option>
+                                <option value="Pre-seed">Pre-seed</option>
+                                <option value="Seed">Seed</option>
+                                <option value="Early-stage">Early-stage</option>
+                                <option value="Growth">Growth</option>
+                                <option value="Mature">Mature</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Location</label>
+                            <input @bind="_formLocation" class="form-control" placeholder="City, Country" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Team Size</label>
+                            <input @bind="_formTeamSize" class="form-control" placeholder="1-10, 11-50..." />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Description</label>
+                            <textarea @bind="_formDescription" class="form-control" rows="3" placeholder="What does your organization do?"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Strategic Goals</label>
+                            <textarea @bind="_formStrategicGoals" class="form-control" rows="2" placeholder="Key strategic objectives..."></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Key Challenges</label>
+                            <textarea @bind="_formKeyChallenges" class="form-control" rows="2" placeholder="Main challenges you're facing..."></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Competitive Advantages</label>
+                            <textarea @bind="_formCompetitiveAdvantages" class="form-control" rows="2" placeholder="What sets you apart?"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="HideForm">Cancel</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
+                        @_saving ? "Saving..." : "Save"
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<OrganizationResponse> _organizations = Array.Empty<OrganizationResponse>();
+    private bool _loading = true;
+    private bool _showForm = false;
+    private bool _saving = false;
+
+    private OrganizationResponse? _editingOrg;
+    private string _formName = string.Empty;
+    private string _formIndustry = string.Empty;
+    private string _formDescription = string.Empty;
+    private string _formStage = string.Empty;
+    private string _formLocation = string.Empty;
+    private string _formTeamSize = string.Empty;
+    private string _formStrategicGoals = string.Empty;
+    private string _formKeyChallenges = string.Empty;
+    private string _formCompetitiveAdvantages = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadOrganizations();
+    }
+
+    async Task LoadOrganizations()
+    {
+        _loading = true;
+        try
+        {
+            _organizations = await OrganizationApi.ListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to load organizations: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    void ShowCreateForm()
+    {
+        _editingOrg = null;
+        _formName = string.Empty;
+        _formIndustry = string.Empty;
+        _formDescription = string.Empty;
+        _formStage = string.Empty;
+        _formLocation = string.Empty;
+        _formTeamSize = string.Empty;
+        _formStrategicGoals = string.Empty;
+        _formKeyChallenges = string.Empty;
+        _formCompetitiveAdvantages = string.Empty;
+        _showForm = true;
+    }
+
+    void ShowEditForm(OrganizationResponse org)
+    {
+        _editingOrg = org;
+        _formName = org.Name;
+        _formIndustry = org.Industry ?? string.Empty;
+        _formDescription = org.Description ?? string.Empty;
+        _formStage = org.Stage ?? string.Empty;
+        _formLocation = org.Location ?? string.Empty;
+        _formTeamSize = org.TeamSize ?? string.Empty;
+        _formStrategicGoals = org.StrategicGoals ?? string.Empty;
+        _formKeyChallenges = org.KeyChallenges ?? string.Empty;
+        _formCompetitiveAdvantages = org.CompetitiveAdvantages ?? string.Empty;
+        _showForm = true;
+    }
+
+    void HideForm() => _showForm = false;
+
+    async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(_formName)) return;
+
+        _saving = true;
+        try
+        {
+            if (_editingOrg is null)
+            {
+                var request = new CreateOrganizationRequest(
+                    _formName, _formIndustry, _formDescription, _formStage,
+                    _formLocation, _formTeamSize, null,
+                    _formStrategicGoals, _formKeyChallenges, _formCompetitiveAdvantages);
+                await OrganizationApi.CreateAsync(request);
+            }
+            else
+            {
+                var request = new UpdateOrganizationRequest(
+                    _formName, _formIndustry, _formDescription, _formStage,
+                    _formLocation, _formTeamSize, null,
+                    _formStrategicGoals, _formKeyChallenges, _formCompetitiveAdvantages);
+                await OrganizationApi.UpdateAsync(_editingOrg.Id, request);
+            }
+
+            HideForm();
+            await LoadOrganizations();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to save organization: {ex.Message}");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    async Task ConfirmDelete(OrganizationResponse org)
+    {
+        if (await JSRuntime.InvokeAsync<bool>("confirm", $"Are you sure you want to delete '{org.Name}'? This will also delete all associated planning data."))
+        {
+            try
+            {
+                await OrganizationApi.DeleteAsync(org.Id);
+                await LoadOrganizations();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to delete organization: {ex.Message}");
+            }
+        }
+    }
+
+    void NavigateToPlanning(Guid orgId) => Navigation.NavigateTo($"/organizations/{orgId}/planning");
+
+    static string Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        return value.Length <= maxLength ? value : value[..maxLength] + "...";
+    }
+}

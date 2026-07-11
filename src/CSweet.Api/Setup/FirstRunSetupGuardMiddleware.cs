@@ -7,8 +7,15 @@ public sealed class FirstRunSetupGuardMiddleware
     private static readonly string[] AllowedApiPrefixes =
     [
         "/api/setup",
+        "/api/core",
         "/api/llm-provider-profiles",
-        "/api/model-capability-tests"
+        "/api/model-capability-tests",
+        "/api/organizations",
+        "/api/tasks",
+        "/api/artifacts",
+        "/api/planning-runs",
+        "/api/documents",
+        "/api/planning-workflows"
     ];
 
     private readonly RequestDelegate _next;

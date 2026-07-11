@@ -20,5 +20,7 @@ if (!httpBaseAddress.EndsWith('/'))
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(httpBaseAddress) });
 builder.Services.AddScoped<ISetupApiClient, SetupApiClient>();
 builder.Services.AddScoped<ILlmProviderApiClient, LlmProviderApiClient>();
+builder.Services.AddScoped<IOrganizationApiClient, OrganizationApiClient>();
+builder.Services.AddScoped<IPlanningApiClient, PlanningApiClient>();
 
 await builder.Build().RunAsync();

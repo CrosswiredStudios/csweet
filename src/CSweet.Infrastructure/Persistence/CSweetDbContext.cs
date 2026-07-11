@@ -1,3 +1,5 @@
+using CSweet.Domain.Core;
+using CSweet.Domain.Planning;
 using CSweet.Domain.Setup;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,6 +12,7 @@ public sealed class CSweetDbContext : DbContext
     {
     }
 
+    // Setup entities
     public DbSet<SystemConfiguration> SystemConfigurations => Set<SystemConfiguration>();
     public DbSet<LlmProviderProfile> LlmProviderProfiles => Set<LlmProviderProfile>();
     public DbSet<ModelCapabilityTest> ModelCapabilityTests => Set<ModelCapabilityTest>();
@@ -17,8 +20,30 @@ public sealed class CSweetDbContext : DbContext
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<AgentRunLog> AgentRunLogs => Set<AgentRunLog>();
 
+    // Planning entities
+    public DbSet<Domain.Planning.Organization> Organizations => Set<Domain.Planning.Organization>();
+    public DbSet<PlanningTask> PlanningTasks => Set<PlanningTask>();
+    public DbSet<PlanningDocument> PlanningDocuments => Set<PlanningDocument>();
+    public DbSet<PlanningWorkflow> PlanningWorkflows => Set<PlanningWorkflow>();
+
+    // Core business domain entities
+    public DbSet<Domain.Core.Organization> CoreOrganizations => Set<Domain.Core.Organization>();
+    public DbSet<OrganizationUser> CoreOrganizationUsers => Set<OrganizationUser>();
+    public DbSet<Role> CoreRoles => Set<Role>();
+    public DbSet<StrategicObjective> CoreStrategicObjectives => Set<StrategicObjective>();
+    public DbSet<Worker> CoreWorkers => Set<Worker>();
+    public DbSet<WorkTask> CoreWorkTasks => Set<WorkTask>();
+    public DbSet<TaskRun> CoreTaskRuns => Set<TaskRun>();
+    public DbSet<Artifact> CoreArtifacts => Set<Artifact>();
+    public DbSet<Approval> CoreApprovals => Set<Approval>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Apply planning entity configurations
+        PlanningConfigurations.Apply(modelBuilder);
+        
+        // Apply core business domain entity configurations
+        CoreConfigurations.Apply(modelBuilder);
         modelBuilder.Entity<SystemConfiguration>(entity =>
         {
             entity.HasKey(x => x.Id);

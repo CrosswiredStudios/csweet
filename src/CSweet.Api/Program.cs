@@ -1,5 +1,8 @@
+using CSweet.Api.Core;
 using CSweet.Api.Llm;
+using CSweet.Api.Planning;
 using CSweet.Api.Setup;
+using CSweet.Application.Planning;
 using CSweet.Infrastructure;
 using CSweet.Infrastructure.Persistence;
 
@@ -27,6 +30,13 @@ if (app.Environment.IsDevelopment())
 {
     await CSweetDatabaseInitializer.EnsureDatabaseReadyAsync(app.Services);
     app.UseCors("DevelopmentBlazorApp");
+
+    // Seed planning workflows on startup in development
+    using (var scope = app.Services.CreateScope())
+    {
+        var workflowService = scope.ServiceProvider.GetRequiredService<IPlanningWorkflowService>();
+        await workflowService.EnsureSeededAsync();
+    }
 }
 
 app.UseMiddleware<FirstRunSetupGuardMiddleware>();
@@ -37,6 +47,21 @@ app.MapHealthChecks("/health");
 
 app.MapLlmProviderProfileEndpoints();
 app.MapSetupEndpoints();
+app.MapOrganizationEndpoints();
+app.MapPlanningRunEndpoints();
+app.MapPlanningDocumentEndpoints();
+app.MapPlanningWorkflowEndpoints();
+
+// Core business domain endpoints
+app.MapCoreOrganizationEndpoints();
+app.MapOrganizationUserEndpoints();
+app.MapRoleEndpoints();
+app.MapStrategicObjectiveEndpoints();
+app.MapWorkerEndpoints();
+app.MapWorkTaskEndpoints();
+app.MapTaskRunEndpoints();
+app.MapArtifactEndpoints();
+
 app.MapControllers();
 
 app.Run();
