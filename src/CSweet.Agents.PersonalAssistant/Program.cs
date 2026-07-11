@@ -1,6 +1,7 @@
 using CSweet.Agent.SDK;
 using CSweet.Agents.PersonalAssistant;
 using CSweet.Infrastructure;
+using Microsoft.Extensions.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
 
