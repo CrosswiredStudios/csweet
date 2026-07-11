@@ -31,18 +31,21 @@ public sealed class AgentAuthorizationPolicyTests
             InstallationId = "install-1",
             BusinessId = "business-1"
         };
-        registration.DeclaredCapabilities.AddRange([
+        registration.DeclaredCapabilities.AddRange(new[]
+        {
             "allowed.capability.v1",
             "unapproved.capability.v1"
-        ]);
-        registration.RequestedSubscriptions.AddRange([
+        });
+        registration.RequestedSubscriptions.AddRange(new[]
+        {
             "allowed.event.v1",
             "secret.event.v1"
-        ]);
-        registration.RequestedPublications.AddRange([
+        });
+        registration.RequestedPublications.AddRange(new[]
+        {
             "allowed.result.v1",
             "admin.changed.v1"
-        ]);
+        });
 
         var accepted = policy.TryAuthorize(
             registration,
@@ -51,9 +54,12 @@ public sealed class AgentAuthorizationPolicyTests
 
         Assert.True(accepted, rejectionReason);
         Assert.NotNull(grant);
-        Assert.Equal(["allowed.capability.v1"], grant.Capabilities);
-        Assert.Equal(["allowed.event.v1"], grant.Subscriptions);
-        Assert.Equal(["allowed.result.v1"], grant.Publications);
+        Assert.Single(grant.Capabilities);
+        Assert.Contains("allowed.capability.v1", grant.Capabilities);
+        Assert.Single(grant.Subscriptions);
+        Assert.Contains("allowed.event.v1", grant.Subscriptions);
+        Assert.Single(grant.Publications);
+        Assert.Contains("allowed.result.v1", grant.Publications);
     }
 
     [Fact]
