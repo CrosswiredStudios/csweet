@@ -1,6 +1,6 @@
 # C-Sweet Implementation Plans
 
-Last updated: 2026-07-08
+Last updated: 2026-07-11
 
 ## Purpose
 
@@ -25,9 +25,10 @@ Read these files in order:
 9. [07 Phase 7 - Business Onboarding](./phases/07-business-onboarding.md)
 10. [08 Phase 8 - First Agent Workflow](./phases/08-first-agent-workflow.md)
 11. [09 Phase 9 - Worker Runtime and Worker Contract](./phases/09-worker-runtime-and-worker-contract.md)
-12. [10 Phase 10 - Observability, Security, and Operations](./phases/10-observability-security-operations.md)
-13. [11 Marketplace Readiness](./11-marketplace-readiness.md)
-14. [12 Junior Developer Task Checklist](./12-junior-developer-task-checklist.md)
+12. [09A Phase 9A - Agent Broker and Personal Assistant](./phases/09a-agent-broker-and-personal-assistant.md)
+13. [10 Phase 10 - Observability, Security, and Operations](./phases/10-observability-security-operations.md)
+14. [11 Marketplace Readiness](./11-marketplace-readiness.md)
+15. [12 Junior Developer Task Checklist](./12-junior-developer-task-checklist.md)
 
 ## Recommended implementation order
 
@@ -43,8 +44,9 @@ Do not start by building the marketplace or a complex autonomous company brain. 
 8. Business onboarding.
 9. One useful agent workflow: generate a 30-day operating plan.
 10. Worker runtime and worker contract.
-11. Observability, security, and deployment hardening.
-12. Marketplace integration points.
+11. Brokered Personal Assistant agent vertical slice.
+12. Observability, security, and deployment hardening.
+13. Marketplace integration points.
 
 ## Core architectural assumptions
 
