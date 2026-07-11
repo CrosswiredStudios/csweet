@@ -4,11 +4,14 @@ using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace CSweet.Infrastructure.Core;
 
 public sealed class RoleService : IRoleService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly CSweetDbContext _dbContext;
     private readonly IAuditEventWriter _auditEventWriter;
 
@@ -34,11 +37,31 @@ public sealed class RoleService : IRoleService
 
         var defaultRoles = new[]
         {
-            ("CEO", "Chief Executive Officer", AuthorityLevel.Autonomous),
-            ("Operations", "Operations Manager", AuthorityLevel.ExecutionWithApproval),
-            ("Finance", "Finance Manager", AuthorityLevel.ExecutionWithApproval),
-            ("Marketing", "Marketing Manager", AuthorityLevel.ExecutionWithApproval),
-            ("Product", "Product Manager", AuthorityLevel.ExecutionWithApproval),
+            new DefaultRole(
+                "CEO",
+                "Defines company direction, prioritizes objectives, approves major decisions, and coordinates roles.",
+                ["Define company direction.", "Prioritize objectives.", "Approve major decisions.", "Coordinate roles."],
+                AuthorityLevel.ExecutionWithApproval),
+            new DefaultRole(
+                "Operations",
+                "Identifies operational bottlenecks, creates processes, and tracks execution.",
+                ["Identify operational bottlenecks.", "Create processes.", "Track execution."],
+                AuthorityLevel.ExecutionWithApproval),
+            new DefaultRole(
+                "Finance",
+                "Estimates costs, evaluates revenue assumptions, and identifies financial risks.",
+                ["Estimate costs.", "Evaluate revenue assumptions.", "Identify financial risks."],
+                AuthorityLevel.ExecutionWithApproval),
+            new DefaultRole(
+                "Marketing",
+                "Defines target customers, suggests channels, and drafts messaging.",
+                ["Define target customer.", "Suggest channels.", "Draft messaging."],
+                AuthorityLevel.ExecutionWithApproval),
+            new DefaultRole(
+                "Product",
+                "Clarifies the offering, prioritizes features or services, and converts goals into deliverables.",
+                ["Clarify offering.", "Prioritize features or services.", "Convert goals into deliverables."],
+                AuthorityLevel.ExecutionWithApproval),
         };
 
         var existingNames = await _dbContext.CoreRoles
@@ -47,19 +70,19 @@ public sealed class RoleService : IRoleService
             .ToHashSetAsync(cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
-        foreach (var (name, description, authorityLevel) in defaultRoles)
+        foreach (var roleDefinition in defaultRoles)
         {
-            if (existingNames.Contains(name))
+            if (existingNames.Contains(roleDefinition.Name))
                 continue;
 
             _dbContext.CoreRoles.Add(new Role
             {
                 Id = Guid.NewGuid(),
                 OrganizationId = organizationId,
-                Name = name,
-                Description = description,
-                ResponsibilitiesJson = "[]",
-                AuthorityLevel = authorityLevel,
+                Name = roleDefinition.Name,
+                Description = roleDefinition.Description,
+                ResponsibilitiesJson = JsonSerializer.Serialize(roleDefinition.Responsibilities, JsonOptions),
+                AuthorityLevel = roleDefinition.AuthorityLevel,
                 CreatedAt = now,
                 UpdatedAt = now
             });
@@ -191,4 +214,10 @@ public sealed class RoleService : IRoleService
 
     static CoreActionResponse Failure(string errorCode, string message) =>
         new CoreActionResponse(false, errorCode, message);
+
+    private sealed record DefaultRole(
+        string Name,
+        string Description,
+        IReadOnlyList<string> Responsibilities,
+        AuthorityLevel AuthorityLevel);
 }

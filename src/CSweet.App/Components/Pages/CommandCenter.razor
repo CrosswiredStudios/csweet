@@ -1,0 +1,176 @@
+@page "/organizations/{OrganizationId:guid}/command-center"
+@using CSweet.Contracts.Core
+@inject HttpClient Http
+
+<PageTitle>Command Center - C-Sweet</PageTitle>
+
+<div class="setup-shell command-center">
+    <section class="setup-header">
+        <div>
+            <p class="setup-eyebrow">Command center</p>
+            <h1>@(_organization?.Name ?? "Organization")</h1>
+            <p>@(_organization?.PrimaryGoal ?? "Your initial operating workspace is ready.")</p>
+        </div>
+    </section>
+
+    @if (_loading)
+    {
+        <section class="setup-panel">
+            <p class="setup-status-text">Loading command center...</p>
+        </section>
+    }
+    else if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <section class="setup-panel">
+            <div class="setup-alert setup-alert-error">@_errorMessage</div>
+        </section>
+    }
+    else
+    {
+        <section class="command-grid">
+            <article class="command-section command-section-wide">
+                <h2>Company summary</h2>
+                <dl class="command-summary">
+                    <div>
+                        <dt>Industry</dt>
+                        <dd>@Display(_organization?.Industry)</dd>
+                    </div>
+                    <div>
+                        <dt>Stage</dt>
+                        <dd>@Display(_organization?.Stage)</dd>
+                    </div>
+                    <div>
+                        <dt>Primary goal</dt>
+                        <dd>@Display(_organization?.PrimaryGoal)</dd>
+                    </div>
+                </dl>
+            </article>
+
+            <article class="command-section">
+                <h2>Roles</h2>
+                <ul class="command-list">
+                    @foreach (var role in _roles)
+                    {
+                        <li>
+                            <strong>@role.Name</strong>
+                            <span>@role.Description</span>
+                        </li>
+                    }
+                </ul>
+            </article>
+
+            <article class="command-section">
+                <h2>Primary goal</h2>
+                <ul class="command-list">
+                    @foreach (var objective in _objectives)
+                    {
+                        <li>
+                            <strong>@objective.Title</strong>
+                            <span>@objective.Description</span>
+                        </li>
+                    }
+                </ul>
+            </article>
+
+            <article class="command-section command-section-wide">
+                <h2>Open tasks</h2>
+                <ul class="command-list command-task-list">
+                    @foreach (var task in _tasks)
+                    {
+                        <li>
+                            <strong>@task.Title</strong>
+                            <span>@task.Description</span>
+                            @if (task.AssignedWorkerId is not null)
+                            {
+                                <small>Agent ready</small>
+                            }
+                        </li>
+                    }
+                </ul>
+            </article>
+
+            <article class="command-section">
+                <h2>Workers</h2>
+                <ul class="command-list">
+                    @foreach (var worker in _workers)
+                    {
+                        <li>
+                            <strong>@worker.Name</strong>
+                            <span>@(worker.RequiresHumanApproval ? "Human approval required" : "Approval not required")</span>
+                        </li>
+                    }
+                </ul>
+            </article>
+
+            <article class="command-section">
+                <h2>Recent artifacts</h2>
+                @if (_artifacts.Count == 0)
+                {
+                    <p class="setup-status-text">No artifacts yet.</p>
+                }
+                else
+                {
+                    <ul class="command-list">
+                        @foreach (var artifact in _artifacts.Take(3))
+                        {
+                            <li>
+                                <strong>@artifact.Title</strong>
+                                <span>Version @artifact.Version</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </article>
+
+            <article class="command-section">
+                <h2>Pending approvals</h2>
+                <p class="command-metric">@_artifacts.Count(x => x.ApprovalStatus == 1)</p>
+            </article>
+
+            <article class="command-section">
+                <h2>Recommended next action</h2>
+                <p>@(_tasks.FirstOrDefault(x => x.AssignedWorkerId is not null)?.Title ?? "Review the initial backlog.")</p>
+            </article>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public Guid OrganizationId { get; set; }
+
+    private OrganizationResponse? _organization;
+    private IReadOnlyList<RoleResponse> _roles = [];
+    private IReadOnlyList<StrategicObjectiveResponse> _objectives = [];
+    private IReadOnlyList<WorkTaskResponse> _tasks = [];
+    private IReadOnlyList<WorkerResponse> _workers = [];
+    private IReadOnlyList<ArtifactResponse> _artifacts = [];
+    private bool _loading = true;
+    private string? _errorMessage;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _errorMessage = null;
+
+        try
+        {
+            _organization = await Http.GetFromJsonAsync<OrganizationResponse>($"api/organizations/{OrganizationId}");
+            _roles = await Http.GetFromJsonAsync<IReadOnlyList<RoleResponse>>($"api/organizations/{OrganizationId}/roles") ?? [];
+            _objectives = await Http.GetFromJsonAsync<IReadOnlyList<StrategicObjectiveResponse>>($"api/core/objectives/organization/{OrganizationId}") ?? [];
+            _tasks = await Http.GetFromJsonAsync<IReadOnlyList<WorkTaskResponse>>($"api/organizations/{OrganizationId}/tasks") ?? [];
+            _workers = await Http.GetFromJsonAsync<IReadOnlyList<WorkerResponse>>($"api/organizations/{OrganizationId}/workers") ?? [];
+            _artifacts = await Http.GetFromJsonAsync<IReadOnlyList<ArtifactResponse>>($"api/core/artifacts/organization/{OrganizationId}") ?? [];
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string Display(string? value) => string.IsNullOrWhiteSpace(value) ? "Not set" : value;
+}

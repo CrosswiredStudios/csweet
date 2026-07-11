@@ -16,14 +16,34 @@ main {
     background-color: #f7f7f7;
     border-bottom: 1px solid #d6d5d5;
     justify-content: flex-end;
+    gap: 1rem;
     height: 3.5rem;
     display: flex;
     align-items: center;
 }
 
+    .top-row ::deep .business-switcher {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        min-width: min(22rem, 60vw);
+        margin-right: auto;
+    }
+
+    .top-row ::deep .business-switcher label {
+        margin: 0;
+        color: #52606d;
+        font-size: 0.82rem;
+        font-weight: 700;
+    }
+
+    .top-row ::deep .business-switcher select {
+        min-width: 0;
+        max-width: 16rem;
+    }
+
     .top-row ::deep a, .top-row ::deep .btn-link {
         white-space: nowrap;
-        margin-left: 1.5rem;
         text-decoration: none;
     }
 
@@ -39,10 +59,24 @@ main {
 @media (max-width: 640.98px) {
     .top-row {
         justify-content: space-between;
+        gap: 0.75rem;
     }
 
     .top-row ::deep a, .top-row ::deep .btn-link {
         margin-left: 0;
+    }
+
+    .top-row ::deep .business-switcher {
+        min-width: 0;
+        flex: 1;
+    }
+
+    .top-row ::deep .business-switcher label {
+        display: none;
+    }
+
+    .top-row ::deep .business-switcher select {
+        max-width: 100%;
     }
 }
 

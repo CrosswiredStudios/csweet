@@ -1,13 +1,215 @@
 @page "/business-onboarding"
+@using System.ComponentModel.DataAnnotations
+@using CSweet.Contracts.BusinessOnboarding
+@inject IBusinessOnboardingApiClient BusinessOnboardingApi
+@inject ISetupApiClient SetupApi
+@inject NavigationManager Navigation
 
-<PageTitle>Business Onboarding</PageTitle>
+<PageTitle>Business Onboarding - C-Sweet</PageTitle>
 
 <div class="setup-shell">
     <section class="setup-header">
         <div>
-            <p class="setup-eyebrow">Next step</p>
-            <h1>Business Onboarding</h1>
-            <p>System setup is complete. This is the handoff point for creating the first business profile.</p>
+            <p class="setup-eyebrow">Business onboarding</p>
+            <h1>Create your operating context</h1>
+            <p>Capture enough context for C-Sweet to create roles, a first objective, an initial backlog, and a local strategy worker.</p>
         </div>
     </section>
+
+    @if (_loadingSetup)
+    {
+        <div class="setup-panel setup-panel-narrow">
+            <p class="setup-status-text">Checking setup status...</p>
+        </div>
+    }
+    else if (!_isFirstRunComplete)
+    {
+        <div class="setup-panel setup-panel-narrow">
+            <div class="setup-alert setup-alert-warning">
+                First-run setup must be complete before business onboarding.
+            </div>
+            <div class="setup-actions">
+                <button class="btn btn-primary" @onclick="NavigateToSetup">Go to setup</button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SubmitAsync">
+            <DataAnnotationsValidator />
+
+            <section class="setup-panel">
+                <div class="setup-step-heading">
+                    <h2>Company profile</h2>
+                    <p>This becomes the first organization command center.</p>
+                </div>
+
+                <ValidationSummary />
+
+                <div class="setup-form-grid">
+                    <label>
+                        Business name
+                        <InputText class="form-control" @bind-Value="_model.BusinessName" />
+                        <ValidationMessage For="() => _model.BusinessName" />
+                    </label>
+
+                    <label>
+                        Industry
+                        <InputText class="form-control" @bind-Value="_model.Industry" />
+                    </label>
+
+                    <label>
+                        Stage
+                        <InputSelect class="form-select" @bind-Value="_model.Stage">
+                            @foreach (var stage in Stages)
+                            {
+                                <option value="@stage">@stage</option>
+                            }
+                        </InputSelect>
+                    </label>
+
+                    <label>
+                        Preferred operating style
+                        <InputSelect class="form-select" @bind-Value="_model.PreferredOperatingStyle">
+                            @foreach (var style in OperatingStyles)
+                            {
+                                <option value="@style">@style</option>
+                            }
+                        </InputSelect>
+                    </label>
+
+                    <label class="setup-form-wide">
+                        Primary goal
+                        <InputTextArea class="form-control" rows="3" @bind-Value="_model.PrimaryGoal" />
+                        <ValidationMessage For="() => _model.PrimaryGoal" />
+                    </label>
+
+                    <label class="setup-form-wide">
+                        Current constraints
+                        <InputTextArea class="form-control" rows="4" @bind-Value="_model.ConstraintsText" />
+                        <span class="setup-field-feedback">Use one constraint per line, or separate short constraints with commas.</span>
+                    </label>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_errorMessage))
+                {
+                    <div class="setup-alert setup-alert-error">@_errorMessage</div>
+                }
+
+                <div class="setup-actions">
+                    <button class="btn btn-primary" type="submit" disabled="@_saving">
+                        @(_saving ? "Creating..." : "Create command center")
+                    </button>
+                </div>
+            </section>
+        </EditForm>
+    }
 </div>
+
+@code {
+    private static readonly string[] Stages =
+    [
+        "Idea",
+        "Pre-revenue",
+        "Early revenue",
+        "Growing",
+        "Established"
+    ];
+
+    private static readonly string[] OperatingStyles =
+    [
+        "Conservative and careful",
+        "Balanced and practical",
+        "Aggressive growth",
+        "Experimental"
+    ];
+
+    private readonly BusinessOnboardingFormModel _model = new()
+    {
+        Stage = "Idea",
+        PreferredOperatingStyle = "Balanced and practical"
+    };
+
+    private bool _loadingSetup = true;
+    private bool _isFirstRunComplete;
+    private bool _saving;
+    private string? _errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var setupStatus = await SetupApi.GetStatusAsync();
+            _isFirstRunComplete = setupStatus.IsFirstRunComplete;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Unable to check setup status: {ex.Message}";
+        }
+        finally
+        {
+            _loadingSetup = false;
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        _saving = true;
+        _errorMessage = null;
+
+        try
+        {
+            var request = new CompleteBusinessOnboardingRequest(
+                _model.BusinessName,
+                _model.Industry,
+                _model.Stage,
+                _model.PrimaryGoal,
+                ParseConstraints(_model.ConstraintsText),
+                _model.PreferredOperatingStyle);
+
+            var response = await BusinessOnboardingApi.CompleteAsync(request);
+            Navigation.NavigateTo(response.NextRoute);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void NavigateToSetup() => Navigation.NavigateTo("/setup");
+
+    private static IReadOnlyList<string> ParseConstraints(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        return value
+            .Split(['\r', '\n', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private sealed class BusinessOnboardingFormModel
+    {
+        [Required(ErrorMessage = "Business name is required.")]
+        public string BusinessName { get; set; } = string.Empty;
+
+        public string? Industry { get; set; }
+
+        public string Stage { get; set; } = "Idea";
+
+        [Required(ErrorMessage = "Primary goal is required.")]
+        public string PrimaryGoal { get; set; } = string.Empty;
+
+        public string? ConstraintsText { get; set; }
+
+        public string PreferredOperatingStyle { get; set; } = "Balanced and practical";
+    }
+}

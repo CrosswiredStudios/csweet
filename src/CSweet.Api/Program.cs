@@ -1,3 +1,4 @@
+using CSweet.Api.BusinessOnboarding;
 using CSweet.Api.Core;
 using CSweet.Api.Llm;
 using CSweet.Api.Planning;
@@ -53,6 +54,7 @@ app.MapPlanningDocumentEndpoints();
 app.MapPlanningWorkflowEndpoints();
 
 // Core business domain endpoints
+app.MapBusinessOnboardingEndpoints();
 app.MapCoreOrganizationEndpoints();
 app.MapOrganizationUserEndpoints();
 app.MapRoleEndpoints();

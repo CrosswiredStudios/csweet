@@ -21,6 +21,7 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(httpBase
 builder.Services.AddScoped<ISetupApiClient, SetupApiClient>();
 builder.Services.AddScoped<ILlmProviderApiClient, LlmProviderApiClient>();
 builder.Services.AddScoped<IOrganizationApiClient, OrganizationApiClient>();
+builder.Services.AddScoped<IBusinessOnboardingApiClient, BusinessOnboardingApiClient>();
 builder.Services.AddScoped<IPlanningApiClient, PlanningApiClient>();
 
 await builder.Build().RunAsync();

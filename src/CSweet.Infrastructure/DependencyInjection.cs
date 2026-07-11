@@ -1,9 +1,11 @@
 using CSweet.Application.Core;
+using CSweet.Application.BusinessOnboarding;
 using CSweet.Application.Llm;
 using CSweet.Application.Planning;
 using CSweet.Application.Setup;
 using CSweet.AI.AgentFramework;
 using CSweet.AI.Providers;
+using CSweet.Infrastructure.BusinessOnboarding;
 using CSweet.Infrastructure.Core;
 using CSweet.Infrastructure.Llm;
 using CSweet.Infrastructure.Persistence;
@@ -67,6 +69,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IPlanningWorkflowService, PlanningWorkflowService>();
 
         // Core business domain services
+        builder.Services.AddScoped<IBusinessOnboardingService, BusinessOnboardingService>();
         builder.Services.AddScoped<ICoreOrganizationService, CoreOrganizationService>();
         builder.Services.AddScoped<IRoleService, RoleService>();
         builder.Services.AddScoped<IStrategicObjectiveService, StrategicObjectiveService>();

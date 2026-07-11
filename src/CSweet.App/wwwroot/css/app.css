@@ -224,6 +224,11 @@ code {
     background: #ffffff;
 }
 
+.setup-panel-narrow {
+    min-height: auto;
+    margin-top: 1.5rem;
+}
+
 .setup-step-heading {
     margin-bottom: 1.25rem;
 }
@@ -402,6 +407,110 @@ code {
     color: #52606d;
 }
 
+.command-center .setup-header {
+    margin-bottom: 1.5rem;
+}
+
+.command-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.command-section {
+    padding: 1rem;
+    border: 1px solid #d9e2ea;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.command-section-wide {
+    grid-column: 1 / -1;
+}
+
+.command-section h2 {
+    margin: 0 0 0.8rem;
+    color: #18212b;
+    font-size: 1.05rem;
+}
+
+.command-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 0;
+}
+
+.command-summary div,
+.command-list li {
+    min-width: 0;
+}
+
+.command-summary dt,
+.command-list small {
+    color: #667380;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.command-summary dd {
+    margin: 0.2rem 0 0;
+    color: #27313c;
+}
+
+.command-list {
+    display: grid;
+    gap: 0.65rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.command-list li {
+    display: grid;
+    gap: 0.15rem;
+    padding: 0.65rem 0;
+    border-top: 1px solid #e5ebf0;
+}
+
+.command-list li:first-child {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.command-list strong {
+    color: #27313c;
+}
+
+.command-list span,
+.command-section p {
+    color: #52606d;
+}
+
+.command-task-list li {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.command-task-list span {
+    grid-column: 1 / -1;
+}
+
+.command-task-list small {
+    align-self: start;
+    padding: 0.2rem 0.45rem;
+    border-radius: 999px;
+    background: #edf8f1;
+    color: #1f5d39;
+}
+
+.command-metric {
+    margin: 0;
+    color: #18212b;
+    font-size: 2rem;
+    font-weight: 700;
+}
+
 @media (max-width: 860px) {
     .setup-header,
     .setup-grid {
@@ -418,7 +527,9 @@ code {
     }
 
     .setup-form-grid,
-    .setup-option-grid {
+    .setup-option-grid,
+    .command-grid,
+    .command-summary {
         grid-template-columns: 1fr;
     }
 
