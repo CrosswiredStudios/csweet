@@ -224,7 +224,7 @@ public sealed class AgentSessionRegistry
         CapabilityResult result,
         string correlationId)
     {
-        if (!_pendingCapabilities.TryRemove(result.RequestId, out var pending))
+        if (!_pendingCapabilities.TryGetValue(result.RequestId, out var pending))
         {
             SendError(
                 provider,
@@ -244,6 +244,16 @@ public sealed class AgentSessionRegistry
                 correlationId,
                 "capability_result_denied",
                 "This session was not selected to provide the capability result.");
+            return;
+        }
+
+        if (!_pendingCapabilities.TryRemove(result.RequestId, out _))
+        {
+            SendError(
+                provider,
+                correlationId,
+                "capability_result_already_completed",
+                "The capability request was already completed.");
             return;
         }
 
