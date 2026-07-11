@@ -26,6 +26,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\CSweet.Agent.Contracts\CSweet.Agent.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj" />
+    <ProjectReference Include="..\..\src\CSweet.AgentHost\CSweet.AgentHost.csproj" />
+    <ProjectReference Include="..\..\src\CSweet.Agents.PersonalAssistant\CSweet.Agents.PersonalAssistant.csproj" />
     <ProjectReference Include="..\..\src\CSweet.Domain\CSweet.Domain.csproj" />
     <ProjectReference Include="..\..\src\CSweet.Application\CSweet.Application.csproj" />
     <ProjectReference Include="..\..\src\CSweet.AI\CSweet.AI.csproj" />
