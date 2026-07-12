@@ -29,6 +29,8 @@ var migrator = builder.AddExecutable(
     .WithReference(postgres)
     .WaitFor(postgres);
 
+var agentHost = builder.AddProject<Projects.CSweet_AgentHost>("agenthost");
+
 var api = builder.AddProject<Projects.CSweet_Api>("api")
     .WithReference(postgres)
     .WaitFor(postgres)
@@ -44,5 +46,12 @@ builder.AddProject<Projects.CSweet_WorkerHost>("workerhost")
     .WaitFor(postgres)
     .WaitForCompletion(migrator)
     .WaitFor(api);
+
+builder.AddProject<Projects.CSweet_Agents_PersonalAssistant>("personal-assistant")
+    .WithReference(agentHost)
+    .WithReference(postgres)
+    .WaitFor(agentHost)
+    .WaitFor(postgres)
+    .WaitForCompletion(migrator);
 
 builder.Build().Run();

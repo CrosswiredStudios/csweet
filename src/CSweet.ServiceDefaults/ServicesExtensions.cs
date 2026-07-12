@@ -21,6 +21,13 @@ public static class ServicesExtensions
         // Configure open telemetry
         builder.AddOpenTelemetry();
 
+        // Resolve Aspire resource names such as https+http://agenthost.
+        builder.Services.AddServiceDiscovery();
+        builder.Services.ConfigureHttpClientDefaults(http =>
+        {
+            http.AddServiceDiscovery();
+        });
+
         // Configure HTTP client with resilience and service discovery
         builder.Services.AddHttpClient("healthcheck", (httpClient) =>
         {

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj" />
+    <ProjectReference Include="..\CSweet.Application\CSweet.Application.csproj" />
+    <ProjectReference Include="..\CSweet.Contracts\CSweet.Contracts.csproj" />
+    <ProjectReference Include="..\CSweet.Infrastructure\CSweet.Infrastructure.csproj" />
+    <ProjectReference Include="..\CSweet.ServiceDefaults\CSweet.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="csweet-agent.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
