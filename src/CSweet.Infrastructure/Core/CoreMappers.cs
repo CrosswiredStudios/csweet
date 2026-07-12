@@ -30,8 +30,12 @@ internal static class CoreMappers
         return new OrganizationUserResponse(
             user.Id,
             user.OrganizationId,
+            user.ReportsToOrganizationUserId,
+            user.RoleId,
+            user.WorkerId,
             user.DisplayName,
             user.Email,
+            (int)user.EmployeeType,
             (int)user.PermissionLevel,
             user.CreatedAt);
     }

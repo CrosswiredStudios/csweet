@@ -1,0 +1,82 @@
+.command-master-layout {
+    min-height: 100vh;
+    background: #eef3f6;
+}
+
+.command-master-rail {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 1200;
+    display: flex;
+    width: 4.5rem;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 0.75rem 0.65rem;
+    background: #12252b;
+    color: #dde7ea;
+}
+
+.command-master-nav {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.command-master-main {
+    padding-left: 4.5rem;
+}
+
+.command-master-appbar {
+    left: 4.5rem;
+    width: calc(100% - 4.5rem);
+    border-bottom: 1px solid #d9e2ea;
+}
+
+.command-master-title {
+    min-width: 0;
+    font-weight: 700;
+}
+
+.command-master-appbar ::deep .business-switcher {
+    width: min(24rem, 44vw);
+    min-width: 12rem;
+}
+
+.command-master-content {
+    min-height: calc(100vh - var(--mud-appbar-height));
+    padding: 1.5rem;
+}
+
+@media (max-width: 720px) {
+    .command-master-rail {
+        inset: auto 0 0 0;
+        width: 100%;
+        height: 4rem;
+        flex-direction: row;
+        justify-content: center;
+        padding: 0.5rem;
+    }
+
+    .command-master-nav {
+        display: flex;
+    }
+
+    .command-master-main {
+        padding-left: 0;
+        padding-bottom: 4rem;
+    }
+
+    .command-master-appbar {
+        left: 0;
+        width: 100%;
+    }
+
+    .command-master-appbar ::deep .business-switcher {
+        width: min(13rem, 48vw);
+        min-width: 0;
+    }
+
+    .command-master-content {
+        padding: 1rem;
+    }
+}

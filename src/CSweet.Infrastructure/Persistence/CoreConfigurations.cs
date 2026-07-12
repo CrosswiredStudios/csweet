@@ -24,12 +24,29 @@ internal static class CoreConfigurations
         entity.HasKey(x => x.Id);
         entity.Property(x => x.DisplayName).HasMaxLength(160).IsRequired();
         entity.Property(x => x.Email).HasMaxLength(256);
+        entity.Property(x => x.EmployeeType).HasConversion<string>().HasMaxLength(16).IsRequired();
         entity.Property(x => x.PermissionLevel).HasConversion<string>().HasMaxLength(16).IsRequired();
 
         entity.HasOne(x => x.Organization)
             .WithMany()
             .HasForeignKey(x => x.OrganizationId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        entity.HasOne(x => x.ReportsToOrganizationUser)
+            .WithMany()
+            .HasForeignKey(x => x.ReportsToOrganizationUserId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("FK_CoreOrganizationUsers_Manager");
+
+        entity.HasOne(x => x.Role)
+            .WithMany()
+            .HasForeignKey(x => x.RoleId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        entity.HasOne(x => x.Worker)
+            .WithMany()
+            .HasForeignKey(x => x.WorkerId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 
     static void ConfigureCoreOrganization(EntityTypeBuilder<Organization> entity)

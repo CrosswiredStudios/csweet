@@ -47,13 +47,50 @@ public sealed class OrganizationUserService : IOrganizationUserService
             return Failure("validation_error", "Display name is required.");
         }
 
+        if (request.ReportsToOrganizationUserId.HasValue)
+        {
+            var managerExists = await _dbContext.CoreOrganizationUsers
+                .AnyAsync(x => x.Id == request.ReportsToOrganizationUserId && x.OrganizationId == organizationId, cancellationToken);
+
+            if (!managerExists)
+            {
+                return Failure("invalid_manager", "Reporting manager must belong to the same organization.");
+            }
+        }
+
+        if (request.RoleId.HasValue)
+        {
+            var roleExists = await _dbContext.CoreRoles
+                .AnyAsync(x => x.Id == request.RoleId && x.OrganizationId == organizationId, cancellationToken);
+
+            if (!roleExists)
+            {
+                return Failure("invalid_role", "Role must belong to the same organization.");
+            }
+        }
+
+        if (request.WorkerId.HasValue)
+        {
+            var workerExists = await _dbContext.CoreWorkers
+                .AnyAsync(x => x.Id == request.WorkerId && (x.OrganizationId == organizationId || x.OrganizationId == null), cancellationToken);
+
+            if (!workerExists)
+            {
+                return Failure("invalid_worker", "Worker must belong to the same organization or be global.");
+            }
+        }
+
         var now = DateTimeOffset.UtcNow;
         var user = new OrganizationUser
         {
             Id = Guid.NewGuid(),
             OrganizationId = organizationId,
+            ReportsToOrganizationUserId = request.ReportsToOrganizationUserId,
+            RoleId = request.RoleId,
+            WorkerId = request.WorkerId,
             DisplayName = request.DisplayName.Trim(),
-            Email = request.Email,
+            Email = TrimOrNull(request.Email),
+            EmployeeType = (EmployeeType)request.EmployeeType,
             PermissionLevel = (OrganizationPermissionLevel)request.PermissionLevel,
             CreatedAt = now
         };
@@ -94,6 +131,8 @@ public sealed class OrganizationUserService : IOrganizationUserService
 
         return new CoreActionResponse(true, null, "User removed successfully.");
     }
+
+    static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     static CoreActionResponse Failure(string errorCode, string message) =>
         new CoreActionResponse(false, errorCode, message);

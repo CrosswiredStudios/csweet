@@ -1,10 +1,11 @@
 @page "/organizations/{OrganizationId:guid}/command-center"
+@layout CommandCenterLayout
 @using CSweet.Contracts.Core
 @inject HttpClient Http
 
 <PageTitle>Command Center - C-Sweet</PageTitle>
 
-<div class="setup-shell command-center">
+<div class="command-center-shell command-center">
     <MudPaper Elevation="0" Class="page-header">
         <div>
             <MudText Typo="Typo.overline" Color="Color.Primary">Command center</MudText>
@@ -99,6 +100,14 @@
                         </li>
                     }
                 </ul>
+            </MudPaper>
+
+            <MudPaper Elevation="1" Class="surface-panel">
+                <MudText Typo="Typo.h6">Employees</MudText>
+                <MudText Color="Color.Secondary">View human staff, agent teammates, and reporting lines.</MudText>
+                <MudButton Href="@($"/organizations/{OrganizationId}/employees")" Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4" StartIcon="@Icons.Material.Filled.AccountTree">
+                    Open graph
+                </MudButton>
             </MudPaper>
 
             <MudPaper Elevation="1" Class="surface-panel">

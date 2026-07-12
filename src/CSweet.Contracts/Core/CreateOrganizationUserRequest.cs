@@ -5,4 +5,8 @@ namespace CSweet.Contracts.Core;
 public sealed record CreateOrganizationUserRequest(
     [Required] string DisplayName,
     string? Email,
-    int PermissionLevel);
+    int PermissionLevel,
+    int EmployeeType = 0,
+    Guid? RoleId = null,
+    Guid? WorkerId = null,
+    Guid? ReportsToOrganizationUserId = null);

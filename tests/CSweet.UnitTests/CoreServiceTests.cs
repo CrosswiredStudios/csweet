@@ -79,6 +79,41 @@ public class CoreServiceTests
     }
 
     [Fact]
+    public async Task OrganizationCreation_SeedsCeoAndPersonalAssistantHierarchy()
+    {
+        await using var dbContext = CreateDbContext();
+        var auditWriter = new TestAuditEventWriter();
+        var roleService = new RoleService(dbContext, auditWriter);
+        var service = new CoreOrganizationService(dbContext, auditWriter, roleService);
+
+        var result = await service.CreateAsync(new CreateOrganizationRequest(
+            Name: "Acme Corp", Industry: null, Mission: null, Stage: null,
+            PrimaryGoal: null, ConstraintsJson: "{\"personalAssistant\":{\"avatar\":\"strategist\",\"demeanor\":\"Balanced and practical\"}}"));
+
+        Assert.True(result.Succeeded);
+
+        var organizationId = result.Organization!.Id;
+        var employees = await dbContext.CoreOrganizationUsers
+            .Where(x => x.OrganizationId == organizationId)
+            .ToListAsync();
+        var personalAssistantWorker = await dbContext.CoreWorkers
+            .SingleAsync(x => x.OrganizationId == organizationId && x.Name == "Personal Assistant");
+        var ceoRole = await dbContext.CoreRoles
+            .SingleAsync(x => x.OrganizationId == organizationId && x.Name == "CEO");
+
+        var ceo = Assert.Single(employees, x => x.DisplayName == "Self");
+        var assistant = Assert.Single(employees, x => x.DisplayName == "Personal Assistant");
+
+        Assert.Equal(EmployeeType.Human, ceo.EmployeeType);
+        Assert.Equal(OrganizationPermissionLevel.Owner, ceo.PermissionLevel);
+        Assert.Equal(ceoRole.Id, ceo.RoleId);
+        Assert.Equal(EmployeeType.Agent, assistant.EmployeeType);
+        Assert.Equal(ceo.Id, assistant.ReportsToOrganizationUserId);
+        Assert.Equal(personalAssistantWorker.Id, assistant.WorkerId);
+        Assert.Contains("Balanced and practical", personalAssistantWorker.EndpointConfigurationJson);
+    }
+
+    [Fact]
     public async Task OrganizationUpdate_RequiresExistingOrganization()
     {
         await using var dbContext = CreateDbContext();

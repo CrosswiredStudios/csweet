@@ -1,0 +1,230 @@
+@page "/organizations/{OrganizationId:guid}/employees"
+@layout CommandCenterLayout
+@using CSweet.Contracts.Core
+@inject HttpClient Http
+
+<PageTitle>Employees - C-Sweet</PageTitle>
+
+<div class="command-center-shell employees-page">
+    <MudPaper Elevation="0" Class="page-header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Employees</MudText>
+            <MudText Typo="Typo.h3">@(_organization?.Name ?? "Organization")</MudText>
+            <MudText Color="Color.Secondary">A reporting graph of human teammates and agent employees.</MudText>
+        </div>
+        <MudButton Href="@($"/organizations/{OrganizationId}/command-center")" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Dashboard">
+            Command Center
+        </MudButton>
+    </MudPaper>
+
+    @if (_loading)
+    {
+        <MudPaper Elevation="1" Class="surface-panel">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <MudText Color="Color.Secondary">Loading employees...</MudText>
+        </MudPaper>
+    }
+    else if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled">@_errorMessage</MudAlert>
+    }
+    else if (_employees.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            No employees are assigned to this business yet.
+        </MudAlert>
+    }
+    else
+    {
+        <MudPaper Elevation="1" Class="surface-panel employee-graph-panel">
+            <div class="employee-graph">
+                <svg viewBox="@ViewBox" role="img" aria-label="Employee reporting graph">
+                    @foreach (var edge in GraphEdges)
+                    {
+                        <line x1="@edge.From.X" y1="@edge.From.Y" x2="@edge.To.X" y2="@edge.To.Y" class="employee-graph-edge" />
+                    }
+                    @foreach (var node in GraphNodes)
+                    {
+                        <g class="employee-graph-node @(node.Employee.EmployeeType == 1 ? "agent" : "human")" transform="translate(@node.X @node.Y)">
+                            <rect x="-98" y="-36" width="196" height="72" rx="8" />
+                            <circle cx="-70" cy="0" r="18" />
+                            <text x="-70" y="5" text-anchor="middle" class="employee-graph-avatar">@NodeInitials(node.Employee)</text>
+                            <text x="-42" y="-8" class="employee-graph-name">@node.Employee.DisplayName</text>
+                            <text x="-42" y="12" class="employee-graph-meta">@EmployeeLabel(node.Employee)</text>
+                        </g>
+                    }
+                </svg>
+            </div>
+        </MudPaper>
+
+        <section class="employee-directory-grid">
+            @foreach (var employee in _employees)
+            {
+                <MudCard Elevation="1" Class="employee-card">
+                    <MudCardContent>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudAvatar Color="@(employee.EmployeeType == 1 ? Color.Secondary : Color.Primary)" Variant="Variant.Filled">
+                                @NodeInitials(employee)
+                            </MudAvatar>
+                            <div>
+                                <MudText Typo="Typo.subtitle1">@employee.DisplayName</MudText>
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">@EmployeeLabel(employee)</MudText>
+                            </div>
+                        </MudStack>
+                        <dl class="employee-card-details">
+                            <div>
+                                <dt>Reports to</dt>
+                                <dd>@ReportsTo(employee)</dd>
+                            </div>
+                            <div>
+                                <dt>Subordinates</dt>
+                                <dd>@SubordinateCount(employee)</dd>
+                            </div>
+                        </dl>
+                    </MudCardContent>
+                </MudCard>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public Guid OrganizationId { get; set; }
+
+    private OrganizationResponse? _organization;
+    private IReadOnlyList<OrganizationUserResponse> _employees = [];
+    private IReadOnlyList<RoleResponse> _roles = [];
+    private IReadOnlyList<WorkerResponse> _workers = [];
+    private bool _loading = true;
+    private string? _errorMessage;
+
+    private IReadOnlyList<EmployeeGraphNode> GraphNodes => BuildGraph().Nodes;
+
+    private IReadOnlyList<EmployeeGraphEdge> GraphEdges => BuildGraph().Edges;
+
+    private string ViewBox
+    {
+        get
+        {
+            var graph = BuildGraph();
+            var maxX = graph.Nodes.Count == 0 ? 640 : graph.Nodes.Max(x => x.X) + 140;
+            var maxY = graph.Nodes.Count == 0 ? 320 : graph.Nodes.Max(x => x.Y) + 90;
+            return $"0 0 {Math.Max(640, maxX)} {Math.Max(300, maxY)}";
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _errorMessage = null;
+
+        try
+        {
+            _organization = await Http.GetFromJsonAsync<OrganizationResponse>($"api/organizations/{OrganizationId}");
+            _employees = await Http.GetFromJsonAsync<IReadOnlyList<OrganizationUserResponse>>($"api/core/organizations/{OrganizationId}/users") ?? [];
+            _roles = await Http.GetFromJsonAsync<IReadOnlyList<RoleResponse>>($"api/organizations/{OrganizationId}/roles") ?? [];
+            _workers = await Http.GetFromJsonAsync<IReadOnlyList<WorkerResponse>>($"api/organizations/{OrganizationId}/workers") ?? [];
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private EmployeeGraph BuildGraph()
+    {
+        var ordered = _employees
+            .OrderBy(x => Depth(x, []))
+            .ThenBy(x => x.DisplayName)
+            .ToList();
+
+        var levels = ordered
+            .GroupBy(x => Depth(x, []))
+            .OrderBy(x => x.Key)
+            .ToList();
+
+        var nodes = new List<EmployeeGraphNode>();
+        const int xSpacing = 250;
+        const int ySpacing = 150;
+
+        foreach (var level in levels)
+        {
+            var employees = level.ToList();
+            var totalWidth = Math.Max(0, employees.Count - 1) * xSpacing;
+            var startX = 140 + Math.Max(0, (420 - totalWidth) / 2);
+
+            for (var index = 0; index < employees.Count; index++)
+            {
+                nodes.Add(new EmployeeGraphNode(employees[index], startX + (index * xSpacing), 70 + (level.Key * ySpacing)));
+            }
+        }
+
+        var nodeById = nodes.ToDictionary(x => x.Employee.Id);
+        var edges = nodes
+            .Where(x => x.Employee.ReportsToOrganizationUserId.HasValue && nodeById.ContainsKey(x.Employee.ReportsToOrganizationUserId.Value))
+            .Select(x => new EmployeeGraphEdge(nodeById[x.Employee.ReportsToOrganizationUserId!.Value], x))
+            .ToList();
+
+        return new EmployeeGraph(nodes, edges);
+    }
+
+    private int Depth(OrganizationUserResponse employee, HashSet<Guid> visited)
+    {
+        if (!employee.ReportsToOrganizationUserId.HasValue || !visited.Add(employee.Id))
+        {
+            return 0;
+        }
+
+        var manager = _employees.FirstOrDefault(x => x.Id == employee.ReportsToOrganizationUserId.Value);
+        return manager is null ? 0 : Depth(manager, visited) + 1;
+    }
+
+    private string EmployeeLabel(OrganizationUserResponse employee)
+    {
+        var role = employee.RoleId.HasValue
+            ? _roles.FirstOrDefault(x => x.Id == employee.RoleId.Value)?.Name
+            : null;
+        var worker = employee.WorkerId.HasValue
+            ? _workers.FirstOrDefault(x => x.Id == employee.WorkerId.Value)?.Name
+            : null;
+
+        return employee.EmployeeType == 1
+            ? worker ?? "Agent"
+            : role ?? "Employee";
+    }
+
+    private string ReportsTo(OrganizationUserResponse employee)
+    {
+        if (!employee.ReportsToOrganizationUserId.HasValue)
+        {
+            return "Nobody";
+        }
+
+        return _employees.FirstOrDefault(x => x.Id == employee.ReportsToOrganizationUserId.Value)?.DisplayName ?? "Unknown";
+    }
+
+    private int SubordinateCount(OrganizationUserResponse employee) =>
+        _employees.Count(x => x.ReportsToOrganizationUserId == employee.Id);
+
+    private static string NodeInitials(OrganizationUserResponse employee)
+    {
+        var words = employee.DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Length switch
+        {
+            0 => "?",
+            1 => words[0][..1].ToUpperInvariant(),
+            _ => $"{words[0][..1]}{words[^1][..1]}".ToUpperInvariant()
+        };
+    }
+
+    private sealed record EmployeeGraph(IReadOnlyList<EmployeeGraphNode> Nodes, IReadOnlyList<EmployeeGraphEdge> Edges);
+
+    private sealed record EmployeeGraphNode(OrganizationUserResponse Employee, int X, int Y);
+
+    private sealed record EmployeeGraphEdge(EmployeeGraphNode From, EmployeeGraphNode To);
+}

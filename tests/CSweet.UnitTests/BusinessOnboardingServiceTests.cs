@@ -45,6 +45,7 @@ public class BusinessOnboardingServiceTests
         var organizationId = result.Onboarding.OrganizationId;
         var organization = await dbContext.CoreOrganizations.SingleAsync(x => x.Id == organizationId);
         var roles = await dbContext.CoreRoles.Where(x => x.OrganizationId == organizationId).ToListAsync();
+        var employees = await dbContext.CoreOrganizationUsers.Where(x => x.OrganizationId == organizationId).ToListAsync();
         var objective = await dbContext.CoreStrategicObjectives.SingleAsync(x => x.OrganizationId == organizationId);
         var tasks = await dbContext.CoreWorkTasks.Where(x => x.OrganizationId == organizationId).ToListAsync();
         var worker = await dbContext.CoreWorkers.SingleAsync(x => x.Id == result.Onboarding.DefaultWorkerId);
@@ -55,6 +56,8 @@ public class BusinessOnboardingServiceTests
         Assert.Equal("Launch a paid MVP in 30 days", organization.PrimaryGoal);
         Assert.Contains("Balanced and practical", organization.ConstraintsJson);
         Assert.Contains(roles, x => x.Name == "CEO" && x.AuthorityLevel == AuthorityLevel.ExecutionWithApproval);
+        Assert.Contains(employees, x => x.DisplayName == "Self" && x.EmployeeType == EmployeeType.Human);
+        Assert.Contains(employees, x => x.DisplayName == "Personal Assistant" && x.EmployeeType == EmployeeType.Agent);
         Assert.Contains(roles, x => x.Name == "Marketing" && x.ResponsibilitiesJson.Contains("Define target customer"));
         Assert.Equal(ObjectiveStatus.Active, objective.Status);
         Assert.Equal("Launch a paid MVP in 30 days", objective.Title);
