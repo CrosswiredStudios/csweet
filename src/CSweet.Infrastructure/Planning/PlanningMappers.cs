@@ -5,28 +5,6 @@ namespace CSweet.Infrastructure.Planning;
 
 internal static class PlanningMappers
 {
-    #region Organization
-
-    public static OrganizationResponse ToResponse(this Organization org)
-    {
-        return new OrganizationResponse(
-            org.Id,
-            org.Name,
-            org.Industry,
-            org.Description,
-            org.Stage,
-            org.Location,
-            org.TeamSize,
-            org.AnnualRevenue,
-            org.StrategicGoals,
-            org.KeyChallenges,
-            org.CompetitiveAdvantages,
-            org.CreatedAt,
-            org.UpdatedAt);
-    }
-
-    #endregion
-
     #region PlanningTask
 
     public static PlanningTaskResponse ToResponse(this PlanningTask task)

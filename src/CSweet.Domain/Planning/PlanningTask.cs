@@ -4,7 +4,7 @@ public sealed class PlanningTask
 {
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
-    public Organization? Organization { get; set; }
+    public CSweet.Domain.Core.Organization? Organization { get; set; }
     public string TaskKey { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public PlanningTaskStatus Status { get; set; }

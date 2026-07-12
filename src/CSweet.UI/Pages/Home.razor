@@ -3,47 +3,56 @@
 
 <PageTitle>C-Sweet</PageTitle>
 
-<div class="container mt-5">
-    <div class="row justify-content-center">
-        <div class="col-md-8 text-center">
-            <h1 class="display-4 mb-3">C-Sweet</h1>
-            <p class="lead text-muted mb-4">Executive Operating System for Small Businesses</p>
+<MudContainer MaxWidth="MaxWidth.Medium" Class="page-stack">
+    <MudStack Spacing="4" AlignItems="AlignItems.Center" Class="home-hero">
+        <MudText Typo="Typo.h2" Align="Align.Center">C-Sweet</MudText>
+        <MudText Typo="Typo.h5" Align="Align.Center" Color="Color.Secondary">
+            Executive Operating System for Small Businesses
+        </MudText>
 
-            <div class="card mb-4 shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">Environment Status</h5>
-                    <p class="mb-0">
-                        <strong>API Connectivity:</strong>
-                        @if (_apiStatus == null)
-                        {
-                            <span class="badge bg-secondary">Checking...</span>
-                        }
-                        else if (_apiStatus.Value)
-                        {
-                            <span class="badge bg-success">Connected</span>
-                        }
-                        else
-                        {
-                            <span class="badge bg-danger">Disconnected</span>
-                        }
-                    </p>
+        <MudPaper Elevation="1" Class="surface-panel home-status">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="3">
+                <div>
+                    <MudText Typo="Typo.subtitle1">Environment Status</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">API Connectivity</MudText>
                 </div>
-            </div>
+                <MudChip T="string" Color="@ApiStatusColor" Variant="Variant.Filled">@ApiStatusLabel</MudChip>
+            </MudStack>
+        </MudPaper>
 
-            @if (_apiStatus == false)
-            {
-                <div class="alert alert-warning" role="alert">
-                    Unable to reach the API service. Ensure the backend is running and accessible.
-                </div>
-            }
+        @if (_apiStatus == false)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                Unable to reach the API service. Ensure the backend is running and accessible.
+            </MudAlert>
+        }
 
-            <a href="/setup" class="btn btn-primary btn-lg">Setup Wizard</a>
-        </div>
-    </div>
-</div>
+        <MudButton Href="/configuration"
+                   Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Size="Size.Large"
+                   StartIcon="@Icons.Material.Filled.Settings">
+            Configuration
+        </MudButton>
+    </MudStack>
+</MudContainer>
 
 @code {
     private bool? _apiStatus;
+
+    private string ApiStatusLabel => _apiStatus switch
+    {
+        true => "Connected",
+        false => "Disconnected",
+        _ => "Checking..."
+    };
+
+    private Color ApiStatusColor => _apiStatus switch
+    {
+        true => Color.Success,
+        false => Color.Error,
+        _ => Color.Default
+    };
 
     protected override async Task OnInitializedAsync()
     {

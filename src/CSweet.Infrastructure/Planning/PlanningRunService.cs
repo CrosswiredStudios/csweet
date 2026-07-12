@@ -28,7 +28,7 @@ public sealed class PlanningRunService : IPlanningRunService
 
     public async Task<PlanningActionResponse> StartAsync(StartPlanningRunRequest request, CancellationToken cancellationToken = default)
     {
-        var org = await _dbContext.Set<Organization>()
+        var org = await _dbContext.CoreOrganizations
             .SingleOrDefaultAsync(x => x.Id == request.OrganizationId, cancellationToken);
 
         if (org is null)
@@ -93,7 +93,7 @@ public sealed class PlanningRunService : IPlanningRunService
             tasks.Select(t => t.ToResponse()).ToList(),
             now);
 
-        return new PlanningActionResponse(true, null, null, null, runResponse);
+        return new PlanningActionResponse(true, null, null, runResponse);
     }
 
     public async Task<PlanningStatusResponse?> GetStatusAsync(Guid organizationId, string workflowKey, CancellationToken cancellationToken = default)
@@ -126,7 +126,7 @@ public sealed class PlanningRunService : IPlanningRunService
 
     public async Task<PlanningActionResponse> RunNextTaskAsync(Guid organizationId, string workflowKey, CancellationToken cancellationToken = default)
     {
-        var org = await _dbContext.Set<Organization>()
+        var org = await _dbContext.CoreOrganizations
             .SingleOrDefaultAsync(x => x.Id == organizationId, cancellationToken);
 
         if (org is null)
@@ -242,7 +242,7 @@ public sealed class PlanningRunService : IPlanningRunService
     static PlanningActionResponse Failure(string errorCode, string message) =>
         new PlanningActionResponse(false, errorCode, message);
 
-    static Dictionary<string, string> BuildOrganizationContext(Organization org)
+    static Dictionary<string, string> BuildOrganizationContext(CSweet.Domain.Core.Organization org)
     {
         var context = new Dictionary<string, string>
         {
@@ -253,23 +253,17 @@ public sealed class PlanningRunService : IPlanningRunService
             context["Industry"] = org.Industry;
         if (!string.IsNullOrWhiteSpace(org.Stage))
             context["Stage"] = org.Stage;
-        if (!string.IsNullOrWhiteSpace(org.Location))
-            context["Location"] = org.Location;
-        if (!string.IsNullOrWhiteSpace(org.TeamSize))
-            context["TeamSize"] = org.TeamSize;
-        if (!string.IsNullOrWhiteSpace(org.AnnualRevenue))
-            context["AnnualRevenue"] = org.AnnualRevenue;
-        if (!string.IsNullOrWhiteSpace(org.StrategicGoals))
-            context["StrategicGoals"] = org.StrategicGoals;
-        if (!string.IsNullOrWhiteSpace(org.KeyChallenges))
-            context["KeyChallenges"] = org.KeyChallenges;
-        if (!string.IsNullOrWhiteSpace(org.CompetitiveAdvantages))
-            context["CompetitiveAdvantages"] = org.CompetitiveAdvantages;
+        if (!string.IsNullOrWhiteSpace(org.Mission))
+            context["Mission"] = org.Mission;
+        if (!string.IsNullOrWhiteSpace(org.PrimaryGoal))
+            context["PrimaryGoal"] = org.PrimaryGoal;
+        if (!string.IsNullOrWhiteSpace(org.ConstraintsJson))
+            context["Constraints"] = org.ConstraintsJson;
 
         return context;
     }
 
-    async Task<string> BuildUserPrompt(PlanningTask task, Organization org, string workflowKey, CancellationToken cancellationToken)
+    async Task<string> BuildUserPrompt(PlanningTask task, CSweet.Domain.Core.Organization org, string workflowKey, CancellationToken cancellationToken)
     {
         var sb = new System.Text.StringBuilder();
 
@@ -277,9 +271,14 @@ public sealed class PlanningRunService : IPlanningRunService
             sb.AppendLine(task.UserPrompt);
 
         // Include output from previously completed tasks as context
-        if (!string.IsNullOrWhiteSpace(org.Description))
+        if (!string.IsNullOrWhiteSpace(org.Mission))
         {
-            sb.AppendLine($"\n--- Organization Description ---\n{org.Description}");
+            sb.AppendLine($"\n--- Business Mission ---\n{org.Mission}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(org.PrimaryGoal))
+        {
+            sb.AppendLine($"\n--- Primary Goal ---\n{org.PrimaryGoal}");
         }
 
         var previousTasks = await _dbContext.Set<PlanningTask>()

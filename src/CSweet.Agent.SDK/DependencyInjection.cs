@@ -6,6 +6,12 @@ namespace CSweet.Agent.SDK;
 
 public static class DependencyInjection
 {
+    private static readonly HashSet<string> SupportedGrpcSchemes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        Uri.UriSchemeHttps,
+        Uri.UriSchemeHttp
+    };
+
     public static IHostApplicationBuilder AddCSweetAgent<TAgent>(
         this IHostApplicationBuilder builder)
         where TAgent : class, ICSweetAgent
@@ -27,7 +33,7 @@ public static class DependencyInjection
 
         builder.Services.AddGrpcClient<AgentBroker.AgentBrokerClient>(options =>
         {
-            options.Address = new Uri(brokerEndpoint, UriKind.Absolute);
+            options.Address = CreateGrpcAddress(brokerEndpoint);
         });
 
         builder.Services.AddSingleton<TAgent>();
@@ -35,5 +41,26 @@ public static class DependencyInjection
         builder.Services.AddHostedService<AgentRuntimeWorker<TAgent>>();
 
         return builder;
+    }
+
+    internal static Uri CreateGrpcAddress(string brokerEndpoint)
+    {
+        var endpoint = new Uri(brokerEndpoint.Trim(), UriKind.Absolute);
+        if (SupportedGrpcSchemes.Contains(endpoint.Scheme))
+        {
+            return endpoint;
+        }
+
+        var scheme = endpoint.Scheme
+            .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(SupportedGrpcSchemes.Contains);
+
+        if (scheme is null)
+        {
+            throw new InvalidOperationException(
+                $"Agent broker endpoint scheme '{endpoint.Scheme}' is not supported. Use http, https, or an Aspire composite scheme such as https+http.");
+        }
+
+        return new Uri($"{scheme}://{endpoint.Authority}{endpoint.PathAndQuery}{endpoint.Fragment}", UriKind.Absolute);
     }
 }

@@ -8,100 +8,91 @@
 <PageTitle>Business Onboarding - C-Sweet</PageTitle>
 
 <div class="setup-shell">
-    <section class="setup-header">
+    <MudPaper Elevation="0" Class="page-header">
         <div>
-            <p class="setup-eyebrow">Business onboarding</p>
-            <h1>Create your operating context</h1>
-            <p>Capture enough context for C-Sweet to create roles, a first objective, an initial backlog, and a local strategy worker.</p>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Business onboarding</MudText>
+            <MudText Typo="Typo.h3">Create your operating context</MudText>
+            <MudText Color="Color.Secondary">Capture enough context for C-Sweet to create roles, a first objective, an initial backlog, and a local strategy worker.</MudText>
         </div>
-    </section>
+    </MudPaper>
 
     @if (_loadingSetup)
     {
-        <div class="setup-panel setup-panel-narrow">
-            <p class="setup-status-text">Checking setup status...</p>
-        </div>
+        <MudPaper Elevation="1" Class="surface-panel surface-panel-narrow">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <MudText Color="Color.Secondary">Checking setup status...</MudText>
+        </MudPaper>
     }
     else if (!_isFirstRunComplete)
     {
-        <div class="setup-panel setup-panel-narrow">
-            <div class="setup-alert setup-alert-warning">
+        <MudPaper Elevation="1" Class="surface-panel surface-panel-narrow">
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
                 First-run setup must be complete before business onboarding.
-            </div>
-            <div class="setup-actions">
-                <button class="btn btn-primary" @onclick="NavigateToSetup">Go to setup</button>
-            </div>
-        </div>
+            </MudAlert>
+            <MudStack Row="true" Class="setup-actions">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="NavigateToSetup" StartIcon="@Icons.Material.Filled.Tune">Go to setup</MudButton>
+            </MudStack>
+        </MudPaper>
     }
     else
     {
         <EditForm Model="_model" OnValidSubmit="SubmitAsync">
             <DataAnnotationsValidator />
 
-            <section class="setup-panel">
+            <MudPaper Elevation="1" Class="surface-panel">
                 <div class="setup-step-heading">
-                    <h2>Company profile</h2>
-                    <p>This becomes the first organization command center.</p>
+                    <MudText Typo="Typo.h5">Company profile</MudText>
+                    <MudText Color="Color.Secondary">This becomes the first organization command center.</MudText>
                 </div>
 
                 <ValidationSummary />
 
                 <div class="setup-form-grid">
-                    <label>
-                        Business name
-                        <InputText class="form-control" @bind-Value="_model.BusinessName" />
+                    <div>
+                        <MudTextField Label="Business name" @bind-Value="_model.BusinessName" For="@(() => _model.BusinessName)" Required="true" Variant="Variant.Outlined" />
                         <ValidationMessage For="() => _model.BusinessName" />
-                    </label>
+                    </div>
 
-                    <label>
-                        Industry
-                        <InputText class="form-control" @bind-Value="_model.Industry" />
-                    </label>
+                    <MudTextField Label="Industry" @bind-Value="_model.Industry" Variant="Variant.Outlined" />
 
-                    <label>
-                        Stage
-                        <InputSelect class="form-select" @bind-Value="_model.Stage">
+                    <MudSelect T="string" Label="Stage" @bind-Value="_model.Stage" Variant="Variant.Outlined">
                             @foreach (var stage in Stages)
                             {
-                                <option value="@stage">@stage</option>
+                            <MudSelectItem T="string" Value="@stage">@stage</MudSelectItem>
                             }
-                        </InputSelect>
-                    </label>
+                    </MudSelect>
 
-                    <label>
-                        Preferred operating style
-                        <InputSelect class="form-select" @bind-Value="_model.PreferredOperatingStyle">
+                    <MudSelect T="string" Label="Preferred operating style" @bind-Value="_model.PreferredOperatingStyle" Variant="Variant.Outlined">
                             @foreach (var style in OperatingStyles)
                             {
-                                <option value="@style">@style</option>
+                            <MudSelectItem T="string" Value="@style">@style</MudSelectItem>
                             }
-                        </InputSelect>
-                    </label>
+                    </MudSelect>
 
-                    <label class="setup-form-wide">
-                        Primary goal
-                        <InputTextArea class="form-control" rows="3" @bind-Value="_model.PrimaryGoal" />
+                    <div class="setup-form-wide">
+                        <MudTextField Label="Primary goal" @bind-Value="_model.PrimaryGoal" For="@(() => _model.PrimaryGoal)" Required="true" Lines="3" Variant="Variant.Outlined" />
                         <ValidationMessage For="() => _model.PrimaryGoal" />
-                    </label>
+                    </div>
 
-                    <label class="setup-form-wide">
-                        Current constraints
-                        <InputTextArea class="form-control" rows="4" @bind-Value="_model.ConstraintsText" />
-                        <span class="setup-field-feedback">Use one constraint per line, or separate short constraints with commas.</span>
-                    </label>
+                    <MudTextField Class="setup-form-wide"
+                                  Label="Current constraints"
+                                  @bind-Value="_model.ConstraintsText"
+                                  HelperText="Use one constraint per line, or separate short constraints with commas."
+                                  Lines="4"
+                                  Variant="Variant.Outlined" />
                 </div>
 
                 @if (!string.IsNullOrWhiteSpace(_errorMessage))
                 {
-                    <div class="setup-alert setup-alert-error">@_errorMessage</div>
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="mt-4">@_errorMessage</MudAlert>
                 }
 
-                <div class="setup-actions">
-                    <button class="btn btn-primary" type="submit" disabled="@_saving">
+                <MudStack Row="true" Class="setup-actions">
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Disabled="@_saving" StartIcon="@Icons.Material.Filled.AddBusiness">
                         @(_saving ? "Creating..." : "Create command center")
-                    </button>
-                </div>
-            </section>
+                    </MudButton>
+                </MudStack>
+            </MudPaper>
         </EditForm>
     }
 </div>

@@ -8,25 +8,9 @@ internal static class PlanningConfigurations
 {
     public static void Apply(this ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<Organization>(ConfigureOrganization);
         modelBuilder.Entity<PlanningTask>(ConfigurePlanningTask);
         modelBuilder.Entity<PlanningDocument>(ConfigurePlanningDocument);
         modelBuilder.Entity<PlanningWorkflow>(ConfigurePlanningWorkflow);
-    }
-
-    static void ConfigureOrganization(EntityTypeBuilder<Organization> entity)
-    {
-        entity.HasKey(x => x.Id);
-        entity.Property(x => x.Name).HasMaxLength(256).IsRequired();
-        entity.Property(x => x.Industry).HasMaxLength(160);
-        entity.Property(x => x.Description).HasMaxLength(4096);
-        entity.Property(x => x.Stage).HasMaxLength(80);
-        entity.Property(x => x.Location).HasMaxLength(256);
-        entity.Property(x => x.TeamSize).HasMaxLength(80);
-        entity.Property(x => x.AnnualRevenue).HasMaxLength(128);
-        entity.Property(x => x.StrategicGoals).HasMaxLength(4096);
-        entity.Property(x => x.KeyChallenges).HasMaxLength(4096);
-        entity.Property(x => x.CompetitiveAdvantages).HasMaxLength(4096);
     }
 
     static void ConfigurePlanningTask(EntityTypeBuilder<PlanningTask> entity)

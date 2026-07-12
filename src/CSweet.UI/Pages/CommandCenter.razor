@@ -5,31 +5,30 @@
 <PageTitle>Command Center - C-Sweet</PageTitle>
 
 <div class="setup-shell command-center">
-    <section class="setup-header">
+    <MudPaper Elevation="0" Class="page-header">
         <div>
-            <p class="setup-eyebrow">Command center</p>
-            <h1>@(_organization?.Name ?? "Organization")</h1>
-            <p>@(_organization?.PrimaryGoal ?? "Your initial operating workspace is ready.")</p>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Command center</MudText>
+            <MudText Typo="Typo.h3">@(_organization?.Name ?? "Organization")</MudText>
+            <MudText Color="Color.Secondary">@(_organization?.PrimaryGoal ?? "Your initial operating workspace is ready.")</MudText>
         </div>
-    </section>
+    </MudPaper>
 
     @if (_loading)
     {
-        <section class="setup-panel">
-            <p class="setup-status-text">Loading command center...</p>
-        </section>
+        <MudPaper Elevation="1" Class="surface-panel">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <MudText Color="Color.Secondary">Loading command center...</MudText>
+        </MudPaper>
     }
     else if (!string.IsNullOrWhiteSpace(_errorMessage))
     {
-        <section class="setup-panel">
-            <div class="setup-alert setup-alert-error">@_errorMessage</div>
-        </section>
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled">@_errorMessage</MudAlert>
     }
     else
     {
         <section class="command-grid">
-            <article class="command-section command-section-wide">
-                <h2>Company summary</h2>
+            <MudPaper Elevation="1" Class="surface-panel command-section-wide">
+                <MudText Typo="Typo.h6">Company summary</MudText>
                 <dl class="command-summary">
                     <div>
                         <dt>Industry</dt>
@@ -44,10 +43,10 @@
                         <dd>@Display(_organization?.PrimaryGoal)</dd>
                     </div>
                 </dl>
-            </article>
+            </MudPaper>
 
-            <article class="command-section">
-                <h2>Roles</h2>
+            <MudPaper Elevation="1" Class="surface-panel">
+                <MudText Typo="Typo.h6">Roles</MudText>
                 <ul class="command-list">
                     @foreach (var role in _roles)
                     {
@@ -57,10 +56,10 @@
                         </li>
                     }
                 </ul>
-            </article>
+            </MudPaper>
 
-            <article class="command-section">
-                <h2>Primary goal</h2>
+            <MudPaper Elevation="1" Class="surface-panel">
+                <MudText Typo="Typo.h6">Primary goal</MudText>
                 <ul class="command-list">
                     @foreach (var objective in _objectives)
                     {
@@ -70,10 +69,10 @@
                         </li>
                     }
                 </ul>
-            </article>
+            </MudPaper>
 
-            <article class="command-section command-section-wide">
-                <h2>Open tasks</h2>
+            <MudPaper Elevation="1" Class="surface-panel command-section-wide">
+                <MudText Typo="Typo.h6">Open tasks</MudText>
                 <ul class="command-list command-task-list">
                     @foreach (var task in _tasks)
                     {
@@ -82,15 +81,15 @@
                             <span>@task.Description</span>
                             @if (task.AssignedWorkerId is not null)
                             {
-                                <small>Agent ready</small>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Agent ready</MudChip>
                             }
                         </li>
                     }
                 </ul>
-            </article>
+            </MudPaper>
 
-            <article class="command-section">
-                <h2>Workers</h2>
+            <MudPaper Elevation="1" Class="surface-panel">
+                <MudText Typo="Typo.h6">Workers</MudText>
                 <ul class="command-list">
                     @foreach (var worker in _workers)
                     {
@@ -100,13 +99,13 @@
                         </li>
                     }
                 </ul>
-            </article>
+            </MudPaper>
 
-            <article class="command-section">
-                <h2>Recent artifacts</h2>
+            <MudPaper Elevation="1" Class="surface-panel">
+                <MudText Typo="Typo.h6">Recent artifacts</MudText>
                 @if (_artifacts.Count == 0)
                 {
-                    <p class="setup-status-text">No artifacts yet.</p>
+                    <MudText Color="Color.Secondary">No artifacts yet.</MudText>
                 }
                 else
                 {
@@ -120,17 +119,17 @@
                         }
                     </ul>
                 }
-            </article>
+            </MudPaper>
 
-            <article class="command-section">
-                <h2>Pending approvals</h2>
-                <p class="command-metric">@_artifacts.Count(x => x.ApprovalStatus == 1)</p>
-            </article>
+            <MudPaper Elevation="1" Class="surface-panel">
+                <MudText Typo="Typo.h6">Pending approvals</MudText>
+                <MudText Typo="Typo.h3" Color="Color.Primary">@_artifacts.Count(x => x.ApprovalStatus == 1)</MudText>
+            </MudPaper>
 
-            <article class="command-section">
-                <h2>Recommended next action</h2>
-                <p>@(_tasks.FirstOrDefault(x => x.AssignedWorkerId is not null)?.Title ?? "Review the initial backlog.")</p>
-            </article>
+            <MudPaper Elevation="1" Class="surface-panel">
+                <MudText Typo="Typo.h6">Recommended next action</MudText>
+                <MudText>@(_tasks.FirstOrDefault(x => x.AssignedWorkerId is not null)?.Title ?? "Review the initial backlog.")</MudText>
+            </MudPaper>
         </section>
     }
 </div>

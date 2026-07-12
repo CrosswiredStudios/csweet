@@ -55,29 +55,6 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Organizations",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    Name = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false),
-                    Industry = table.Column<string>(type: "character varying(160)", maxLength: 160, nullable: true),
-                    Description = table.Column<string>(type: "character varying(4096)", maxLength: 4096, nullable: true),
-                    Stage = table.Column<string>(type: "character varying(80)", maxLength: 80, nullable: true),
-                    Location = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
-                    TeamSize = table.Column<string>(type: "character varying(80)", maxLength: 80, nullable: true),
-                    AnnualRevenue = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
-                    StrategicGoals = table.Column<string>(type: "character varying(4096)", maxLength: 4096, nullable: true),
-                    KeyChallenges = table.Column<string>(type: "character varying(4096)", maxLength: 4096, nullable: true),
-                    CompetitiveAdvantages = table.Column<string>(type: "character varying(4096)", maxLength: 4096, nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Organizations", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "PlanningWorkflows",
                 columns: table => new
                 {
@@ -217,9 +194,9 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                 {
                     table.PrimaryKey("PK_PlanningDocuments", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_PlanningDocuments_Organizations_OrganizationId",
+                        name: "FK_PlanningDocuments_CoreOrganizations_OrganizationId",
                         column: x => x.OrganizationId,
-                        principalTable: "Organizations",
+                        principalTable: "CoreOrganizations",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -254,9 +231,9 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                 {
                     table.PrimaryKey("PK_PlanningTasks", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_PlanningTasks_Organizations_OrganizationId",
+                        name: "FK_PlanningTasks_CoreOrganizations_OrganizationId",
                         column: x => x.OrganizationId,
-                        principalTable: "Organizations",
+                        principalTable: "CoreOrganizations",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -513,9 +490,6 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
             migrationBuilder.DropTable(
                 name: "CoreArtifacts");
-
-            migrationBuilder.DropTable(
-                name: "Organizations");
 
             migrationBuilder.DropTable(
                 name: "CoreTaskRuns");

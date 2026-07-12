@@ -11,9 +11,10 @@
 </Router>
 
 @code {
-    private async Task GuardFirstRunAsync(NavigationContext context)
+    private async Task GuardFirstRunAsync(Microsoft.AspNetCore.Components.Routing.NavigationContext context)
     {
-        if (context.Path.StartsWith("setup", StringComparison.OrdinalIgnoreCase))
+        if (context.Path.StartsWith("setup", StringComparison.OrdinalIgnoreCase) ||
+            context.Path.StartsWith("configuration", StringComparison.OrdinalIgnoreCase))
         {
             return;
         }

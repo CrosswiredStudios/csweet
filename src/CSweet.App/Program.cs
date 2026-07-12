@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using CSweet.App;
 using CSweet.UI.Services;
+using MudBlazor.Services;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
@@ -19,5 +20,6 @@ if (!httpBaseAddress.EndsWith('/'))
 
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(httpBaseAddress) });
 builder.Services.AddCSweetApiClients();
+builder.Services.AddMudServices();
 
 await builder.Build().RunAsync();

@@ -6,13 +6,19 @@
 @if (_organizations.Count > 0)
 {
     <div class="business-switcher">
-        <label for="business-switcher-select">Business</label>
-        <select id="business-switcher-select" class="form-select form-select-sm" value="@_selectedOrganizationId" @onchange="SwitchBusinessAsync">
+        <MudSelect T="string"
+                   Label="Business"
+                   Value="_selectedOrganizationId"
+                   ValueChanged="SwitchBusinessAsync"
+                   Dense="true"
+                   Margin="Margin.Dense"
+                   Variant="Variant.Outlined"
+                   Class="business-switcher-select">
             @foreach (var organization in _organizations)
             {
-                <option value="@organization.Id">@organization.Name</option>
+                <MudSelectItem T="string" Value="@organization.Id.ToString()">@organization.Name</MudSelectItem>
             }
-        </select>
+        </MudSelect>
     </div>
 }
 
@@ -39,9 +45,8 @@
         }
     }
 
-    private async Task SwitchBusinessAsync(ChangeEventArgs args)
+    private async Task SwitchBusinessAsync(string? value)
     {
-        var value = args.Value?.ToString();
         if (!Guid.TryParse(value, out var organizationId))
         {
             return;

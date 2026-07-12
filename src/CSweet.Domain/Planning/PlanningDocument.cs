@@ -4,7 +4,7 @@ public sealed class PlanningDocument
 {
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
-    public Organization? Organization { get; set; }
+    public CSweet.Domain.Core.Organization? Organization { get; set; }
     public string Title { get; set; } = string.Empty;
     public string DocumentType { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;

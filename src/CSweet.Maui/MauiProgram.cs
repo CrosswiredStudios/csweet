@@ -1,5 +1,6 @@
 using CSweet.UI.Services;
 using Microsoft.Extensions.Logging;
+using MudBlazor.Services;
 
 namespace CSweet.Maui;
 
@@ -18,6 +19,7 @@ public static class MauiProgram
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddScoped(_ => new HttpClient { BaseAddress = new Uri(ApiBaseUrl) });
         builder.Services.AddCSweetApiClients();
+        builder.Services.AddMudServices();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

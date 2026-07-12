@@ -63,7 +63,6 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentWorkflowRunner, AgentFrameworkWorkflowRunner>();
 
         // Planning services
-        builder.Services.AddScoped<Application.Planning.IOrganizationService, OrganizationService>();
         builder.Services.AddScoped<IPlanningRunService, PlanningRunService>();
         builder.Services.AddScoped<IPlanningDocumentService, PlanningDocumentService>();
         builder.Services.AddScoped<IPlanningWorkflowService, PlanningWorkflowService>();

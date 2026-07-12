@@ -439,64 +439,6 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.ToTable("CoreWorkers");
                 });
 
-            modelBuilder.Entity("CSweet.Domain.Planning.Organization", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("AnnualRevenue")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("CompetitiveAdvantages")
-                        .HasMaxLength(4096)
-                        .HasColumnType("character varying(4096)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(4096)
-                        .HasColumnType("character varying(4096)");
-
-                    b.Property<string>("Industry")
-                        .HasMaxLength(160)
-                        .HasColumnType("character varying(160)");
-
-                    b.Property<string>("KeyChallenges")
-                        .HasMaxLength(4096)
-                        .HasColumnType("character varying(4096)");
-
-                    b.Property<string>("Location")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<string>("Stage")
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<string>("StrategicGoals")
-                        .HasMaxLength(4096)
-                        .HasColumnType("character varying(4096)");
-
-                    b.Property<string>("TeamSize")
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Organizations");
-                });
-
             modelBuilder.Entity("CSweet.Domain.Planning.PlanningDocument", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1081,7 +1023,7 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("CSweet.Domain.Planning.PlanningDocument", b =>
                 {
-                    b.HasOne("CSweet.Domain.Planning.Organization", "Organization")
+                    b.HasOne("CSweet.Domain.Core.Organization", "Organization")
                         .WithMany()
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -1092,7 +1034,7 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("CSweet.Domain.Planning.PlanningTask", b =>
                 {
-                    b.HasOne("CSweet.Domain.Planning.Organization", "Organization")
+                    b.HasOne("CSweet.Domain.Core.Organization", "Organization")
                         .WithMany()
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)

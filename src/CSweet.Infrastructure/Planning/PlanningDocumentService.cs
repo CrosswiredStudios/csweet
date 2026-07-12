@@ -50,7 +50,7 @@ public sealed class PlanningDocumentService : IPlanningDocumentService
 
     public async Task<PlanningActionResponse> GenerateAsync(GeneratePlanningDocumentRequest request, CancellationToken cancellationToken = default)
     {
-        var org = await _dbContext.Set<Organization>()
+        var org = await _dbContext.CoreOrganizations
             .SingleOrDefaultAsync(x => x.Id == request.OrganizationId, cancellationToken);
 
         if (org is null)
@@ -102,7 +102,7 @@ public sealed class PlanningDocumentService : IPlanningDocumentService
         _dbContext.Set<PlanningDocument>().Add(document);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        return new PlanningActionResponse(true, null, null, null, null, document.ToResponse());
+        return new PlanningActionResponse(true, null, null, Document: document.ToResponse());
     }
 
     public async Task<PlanningActionResponse> UpdateContentAsync(Guid id, string content, CancellationToken cancellationToken = default)
@@ -118,7 +118,7 @@ public sealed class PlanningDocumentService : IPlanningDocumentService
         doc.UpdatedAt = DateTimeOffset.UtcNow;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
-        return new PlanningActionResponse(true, null, null, null, null, doc.ToResponse());
+        return new PlanningActionResponse(true, null, null, Document: doc.ToResponse());
     }
 
     public async Task<PlanningActionResponse> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -140,31 +140,23 @@ public sealed class PlanningDocumentService : IPlanningDocumentService
     static PlanningActionResponse Failure(string errorCode, string message) =>
         new PlanningActionResponse(false, errorCode, message);
 
-    static string BuildGenerationPrompt(string documentType, Organization org)
+    static string BuildGenerationPrompt(string documentType, CSweet.Domain.Core.Organization org)
     {
         var sb = new System.Text.StringBuilder();
 
         sb.AppendLine($"Generate a comprehensive {DocumentTypeToTitle(documentType)} for {org.Name}.");
         sb.AppendLine();
 
-        if (!string.IsNullOrWhiteSpace(org.Description))
-            sb.AppendLine($"Organization description: {org.Description}");
+        if (!string.IsNullOrWhiteSpace(org.Mission))
+            sb.AppendLine($"Business mission: {org.Mission}");
         if (!string.IsNullOrWhiteSpace(org.Industry))
             sb.AppendLine($"Industry: {org.Industry}");
         if (!string.IsNullOrWhiteSpace(org.Stage))
             sb.AppendLine($"Stage: {org.Stage}");
-        if (!string.IsNullOrWhiteSpace(org.Location))
-            sb.AppendLine($"Location: {org.Location}");
-        if (!string.IsNullOrWhiteSpace(org.TeamSize))
-            sb.AppendLine($"Team size: {org.TeamSize}");
-        if (!string.IsNullOrWhiteSpace(org.AnnualRevenue))
-            sb.AppendLine($"Annual revenue: {org.AnnualRevenue}");
-        if (!string.IsNullOrWhiteSpace(org.StrategicGoals))
-            sb.AppendLine($"Strategic goals: {org.StrategicGoals}");
-        if (!string.IsNullOrWhiteSpace(org.KeyChallenges))
-            sb.AppendLine($"Key challenges: {org.KeyChallenges}");
-        if (!string.IsNullOrWhiteSpace(org.CompetitiveAdvantages))
-            sb.AppendLine($"Competitive advantages: {org.CompetitiveAdvantages}");
+        if (!string.IsNullOrWhiteSpace(org.PrimaryGoal))
+            sb.AppendLine($"Primary goal: {org.PrimaryGoal}");
+        if (!string.IsNullOrWhiteSpace(org.ConstraintsJson))
+            sb.AppendLine($"Constraints: {org.ConstraintsJson}");
 
         sb.AppendLine();
         sb.AppendLine("Provide a well-structured, professional document with clear sections, actionable insights, and practical recommendations.");
@@ -172,17 +164,14 @@ public sealed class PlanningDocumentService : IPlanningDocumentService
         return sb.ToString();
     }
 
-    static Dictionary<string, string> BuildOrganizationContext(Organization org)
+    static Dictionary<string, string> BuildOrganizationContext(CSweet.Domain.Core.Organization org)
     {
         var context = new Dictionary<string, string> { ["OrganizationName"] = org.Name };
         if (!string.IsNullOrWhiteSpace(org.Industry)) context["Industry"] = org.Industry;
         if (!string.IsNullOrWhiteSpace(org.Stage)) context["Stage"] = org.Stage;
-        if (!string.IsNullOrWhiteSpace(org.Location)) context["Location"] = org.Location;
-        if (!string.IsNullOrWhiteSpace(org.TeamSize)) context["TeamSize"] = org.TeamSize;
-        if (!string.IsNullOrWhiteSpace(org.AnnualRevenue)) context["AnnualRevenue"] = org.AnnualRevenue;
-        if (!string.IsNullOrWhiteSpace(org.StrategicGoals)) context["StrategicGoals"] = org.StrategicGoals;
-        if (!string.IsNullOrWhiteSpace(org.KeyChallenges)) context["KeyChallenges"] = org.KeyChallenges;
-        if (!string.IsNullOrWhiteSpace(org.CompetitiveAdvantages)) context["CompetitiveAdvantages"] = org.CompetitiveAdvantages;
+        if (!string.IsNullOrWhiteSpace(org.Mission)) context["Mission"] = org.Mission;
+        if (!string.IsNullOrWhiteSpace(org.PrimaryGoal)) context["PrimaryGoal"] = org.PrimaryGoal;
+        if (!string.IsNullOrWhiteSpace(org.ConstraintsJson)) context["Constraints"] = org.ConstraintsJson;
         return context;
     }
 

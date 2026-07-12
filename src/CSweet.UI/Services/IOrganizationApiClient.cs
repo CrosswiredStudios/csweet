@@ -1,4 +1,4 @@
-using CSweet.Contracts.Planning;
+using CSweet.Contracts.Core;
 
 namespace CSweet.UI.Services;
 

@@ -10,28 +10,29 @@
 <PageTitle>C-Sweet Setup</PageTitle>
 
 <div class="setup-shell">
-    <section class="setup-header">
+    <MudPaper Elevation="0" Class="page-header">
         <div>
-            <p class="setup-eyebrow">First-run configuration</p>
-            <h1>C-Sweet Setup</h1>
-            <p>Configure the local infrastructure C-Sweet needs before business onboarding starts.</p>
+            <MudText Typo="Typo.overline" Color="Color.Primary">First-run configuration</MudText>
+            <MudText Typo="Typo.h3">C-Sweet Setup</MudText>
+            <MudText Color="Color.Secondary">Configure the local infrastructure C-Sweet needs before business onboarding starts.</MudText>
         </div>
-        <div class="setup-progress-summary">
-            <span>@CompletedStepCount / @SetupSteps.Count</span>
-            <small>steps complete</small>
-        </div>
-    </section>
+        <MudStack AlignItems="AlignItems.End" Spacing="0">
+            <MudText Typo="Typo.h4" Color="Color.Primary">@CompletedStepCount / @SetupSteps.Count</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">steps complete</MudText>
+        </MudStack>
+    </MudPaper>
 
     @if (_isLoading)
     {
-        <div class="setup-panel">
-            <p class="setup-status-text">Loading setup status...</p>
-        </div>
+        <MudPaper Elevation="1" Class="surface-panel">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <MudText Color="Color.Secondary">Loading setup status...</MudText>
+        </MudPaper>
     }
     else if (!string.IsNullOrWhiteSpace(_pageError))
     {
-        <div class="setup-alert setup-alert-error">@_pageError</div>
-        <button class="btn btn-primary" @onclick="LoadAsync">Retry</button>
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled">@_pageError</MudAlert>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync" Class="mt-4">Retry</MudButton>
     }
     else
     {
@@ -41,27 +42,28 @@
                 {
                     var isActive = step.Key == _activeStepKey;
                     var isComplete = IsStepComplete(step.Key);
-                    <button class="setup-step @(isActive ? "active" : null) @(isComplete ? "complete" : null)"
-                            @onclick="@(() => SelectStep(step.Key))">
+                    <MudButton Class="@($"setup-step {(isActive ? "active" : null)} {(isComplete ? "complete" : null)}")"
+                               Variant="Variant.Text"
+                               OnClick="@(() => SelectStep(step.Key))">
                         <span class="setup-step-index">@step.Number</span>
                         <span>
                             <strong>@step.Title</strong>
                             <small>@(isComplete ? "Complete" : step.Description)</small>
                         </span>
-                    </button>
+                    </MudButton>
                 }
             </aside>
 
-            <main class="setup-panel">
+            <MudPaper Elevation="1" Class="surface-panel">
                 @if (_status?.IsFirstRunComplete == true)
                 {
-                    <div class="setup-alert setup-alert-success">Setup is complete. Redirecting to business onboarding...</div>
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Filled">Setup is complete. Redirecting to business onboarding...</MudAlert>
                 }
                 else
                 {
                     @RenderActiveStep()
                 }
-            </main>
+            </MudPaper>
         </div>
     }
 </div>
@@ -189,116 +191,96 @@
 
     private RenderFragment WelcomeStep => @<div>
         <div class="setup-step-heading">
-            <p class="setup-eyebrow">Step 1</p>
-            <h2>Welcome to C-Sweet.</h2>
-            <p>Before creating your first business, configure how this instance will run AI workers and store its data.</p>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Step 1</MudText>
+            <MudText Typo="Typo.h5">Welcome to C-Sweet.</MudText>
+            <MudText Color="Color.Secondary">Before creating your first business, configure how this instance will run AI workers and store its data.</MudText>
         </div>
-        <div class="setup-actions">
-            <button class="btn btn-primary" disabled="@_isBusy" @onclick="ContinueFromWelcomeAsync">Continue</button>
-        </div>
+        <MudStack Row="true" Class="setup-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="ContinueFromWelcomeAsync">Continue</MudButton>
+        </MudStack>
     </div>;
 
     private RenderFragment LlmProviderStep => @<div>
         <div class="setup-step-heading">
-            <p class="setup-eyebrow">Step 2</p>
-            <h2>LLM Provider</h2>
-            <p>Create the default chat provider profile. LM Studio is prefilled for local setup.</p>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Step 2</MudText>
+            <MudText Typo="Typo.h5">LLM Provider</MudText>
+            <MudText Color="Color.Secondary">Create the default chat provider profile. LM Studio is prefilled for local setup.</MudText>
         </div>
 
         <div class="setup-form-grid">
-            <label>
-                Provider Type
-                <select class="form-select" @bind="_providerType" @bind:after="ApplyProviderPreset">
-                    @foreach (var providerType in Enum.GetValues<LlmProviderType>())
-                    {
-                        <option value="@providerType">@ProviderTypeLabel(providerType)</option>
-                    }
-                </select>
-            </label>
-            <label>
-                Provider Name
-                <input class="form-control" @bind="_providerName" />
-            </label>
-            <label class="setup-form-wide">
-                Base URL
-                <input class="form-control" @bind="_baseUrl" @bind:event="oninput" @onblur="PreviewModelCatalogAsync" />
+            <MudSelect T="LlmProviderType" Label="Provider Type" Value="_providerType" ValueChanged="OnProviderTypeChanged" Variant="Variant.Outlined">
+                @foreach (var providerType in Enum.GetValues<LlmProviderType>())
+                {
+                    <MudSelectItem T="LlmProviderType" Value="@providerType">@ProviderTypeLabel(providerType)</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField Label="Provider Name" @bind-Value="_providerName" Variant="Variant.Outlined" />
+            <div class="setup-form-wide">
+                <MudTextField Label="Base URL" @bind-Value="_baseUrl" Immediate="true" OnBlur="@(_ => PreviewModelCatalogAsync())" Variant="Variant.Outlined" />
                 @if (!string.IsNullOrWhiteSpace(_modelCatalogMessage))
                 {
-                    <small class="@ModelCatalogFeedbackClass">@_modelCatalogMessage</small>
+                    <MudText Typo="Typo.caption" Class="@ModelCatalogFeedbackClass">@_modelCatalogMessage</MudText>
                 }
-            </label>
-            <label class="setup-form-wide">
-                API Key / Token
-                <input class="form-control" type="password" @bind="_apiKey" autocomplete="off" />
-            </label>
-            <label>
-                Default Chat Model
-                <select class="form-select" @bind="_defaultChatModel" disabled="@IsModelSelectDisabled">
-                    <option value="">@ModelSelectPlaceholder</option>
-                    @if (SelectedChatModelMissingFromCatalog)
-                    {
-                        <option value="@_defaultChatModel">@_defaultChatModel</option>
-                    }
-                    @foreach (var model in _availableModels)
-                    {
-                        <option value="@model.Id">@model.Id</option>
-                    }
-                </select>
-            </label>
-            <label>
-                Default Embedding Model
-                <input class="form-control" @bind="_defaultEmbeddingModel" />
-            </label>
-            <label>
-                Context Window Tokens
-                <input class="form-control" type="number" @bind="_contextWindowTokens" />
-            </label>
-            <label>
-                Max Output Tokens
-                <input class="form-control" type="number" @bind="_maxOutputTokens" />
-            </label>
+            </div>
+            <MudTextField Class="setup-form-wide" Label="API Key / Token" @bind-Value="_apiKey" InputType="InputType.Password" autocomplete="off" Variant="Variant.Outlined" />
+            <MudSelect T="string" Label="Default Chat Model" @bind-Value="_defaultChatModel" Disabled="@IsModelSelectDisabled" Variant="Variant.Outlined">
+                <MudSelectItem T="string" Value="@string.Empty">@ModelSelectPlaceholder</MudSelectItem>
+                @if (SelectedChatModelMissingFromCatalog)
+                {
+                    <MudSelectItem T="string" Value="@_defaultChatModel">@_defaultChatModel</MudSelectItem>
+                }
+                @foreach (var model in _availableModels)
+                {
+                    <MudSelectItem T="string" Value="@model.Id">@model.Id</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField Label="Default Embedding Model" @bind-Value="_defaultEmbeddingModel" Variant="Variant.Outlined" />
+            <MudNumericField T="int?" Label="Context Window Tokens" @bind-Value="_contextWindowTokens" Variant="Variant.Outlined" />
+            <MudNumericField T="int?" Label="Max Output Tokens" @bind-Value="_maxOutputTokens" Variant="Variant.Outlined" />
         </div>
 
-        <div class="setup-toggle-row">
-            <label><input type="checkbox" @bind="_supportsStreaming" /> Streaming</label>
-            <label><input type="checkbox" @bind="_supportsStructuredOutput" /> Structured output</label>
-            <label><input type="checkbox" @bind="_supportsToolCalling" /> Tool calling</label>
-            <label><input type="checkbox" @bind="_supportsVision" /> Vision</label>
-        </div>
+        <MudStack Row="true" Class="setup-toggle-row">
+            <MudCheckBox T="bool" Label="Streaming" @bind-Value="_supportsStreaming" />
+            <MudCheckBox T="bool" Label="Structured output" @bind-Value="_supportsStructuredOutput" />
+            <MudCheckBox T="bool" Label="Tool calling" @bind-Value="_supportsToolCalling" />
+            <MudCheckBox T="bool" Label="Vision" @bind-Value="_supportsVision" />
+        </MudStack>
 
         @if (_profiles.Count > 0)
         {
-            <div class="setup-inline-list">
-                <span>Existing profiles</span>
+            <MudStack Row="true" Class="setup-inline-list">
+                <MudText Color="Color.Secondary">Existing profiles</MudText>
                 @foreach (var profile in _profiles)
                 {
-                    <button class="btn btn-sm @(profile.Id == _providerProfileId ? "btn-primary" : "btn-outline-secondary")"
-                            @onclick="@(() => SelectProvider(profile))">
+                    <MudButton Size="Size.Small"
+                               Variant="@(profile.Id == _providerProfileId ? Variant.Filled : Variant.Outlined)"
+                               Color="@(profile.Id == _providerProfileId ? Color.Primary : Color.Secondary)"
+                               OnClick="@(() => SelectProvider(profile))">
                         @profile.Name
-                    </button>
+                    </MudButton>
                 }
-            </div>
+            </MudStack>
         }
 
         @StepMessage()
-        <div class="setup-actions">
-            <button class="btn btn-outline-secondary" @onclick="BackToWelcome">Back</button>
-            <button class="btn btn-primary" disabled="@(_isBusy || _isCheckingModelCatalog || string.IsNullOrWhiteSpace(_defaultChatModel))" @onclick="CreateProviderAsync">
+        <MudStack Row="true" Class="setup-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToWelcome">Back</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_isBusy || _isCheckingModelCatalog || string.IsNullOrWhiteSpace(_defaultChatModel))" OnClick="CreateProviderAsync">
                 @(_isBusy ? "Saving..." : "Save Provider")
-            </button>
-        </div>
+            </MudButton>
+        </MudStack>
     </div>;
 
     private RenderFragment CapabilityTestStep => @<div>
         <div class="setup-step-heading">
-            <p class="setup-eyebrow">Step 3</p>
-            <h2>Model Capability Test</h2>
-            <p>Required checks must pass. Optional capabilities are recorded honestly if unsupported.</p>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Step 3</MudText>
+            <MudText Typo="Typo.h5">Model Capability Test</MudText>
+            <MudText Color="Color.Secondary">Required checks must pass. Optional capabilities are recorded honestly if unsupported.</MudText>
         </div>
 
         @if (_providerProfileId is null)
         {
-            <div class="setup-alert setup-alert-warning">Create or select a provider profile before running the capability test.</div>
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">Create or select a provider profile before running the capability test.</MudAlert>
         }
         else
         {
@@ -315,23 +297,23 @@
 
         @if (!string.IsNullOrWhiteSpace(_capabilityResult?.FailureMessage))
         {
-            <div class="setup-alert setup-alert-error">@_capabilityResult.FailureMessage</div>
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="mt-4">@_capabilityResult.FailureMessage</MudAlert>
         }
 
         @StepMessage()
-        <div class="setup-actions">
-            <button class="btn btn-outline-secondary" @onclick="BackToProvider">Back</button>
-            <button class="btn btn-primary" disabled="@(_isBusy || _providerProfileId is null)" @onclick="RunCapabilityTestAsync">
+        <MudStack Row="true" Class="setup-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToProvider">Back</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_isBusy || _providerProfileId is null)" OnClick="RunCapabilityTestAsync">
                 @(_isBusy ? "Testing..." : "Run Test")
-            </button>
-        </div>
+            </MudButton>
+        </MudStack>
     </div>;
 
     private RenderFragment StorageStep => @<div>
         <div class="setup-step-heading">
-            <p class="setup-eyebrow">Step 4</p>
-            <h2>Storage Setup</h2>
-            <p>Check API and configuration persistence before continuing.</p>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Step 4</MudText>
+            <MudText Typo="Typo.h5">Storage Setup</MudText>
+            <MudText Color="Color.Secondary">Check API and configuration persistence before continuing.</MudText>
         </div>
         <div class="setup-check-list">
             @CapabilityRow("API can reach database", _apiHealth, required: true)
@@ -339,63 +321,54 @@
             @CapabilityRow("System configuration row exists", _status is not null, required: true)
         </div>
         @StepMessage()
-        <div class="setup-actions">
-            <button class="btn btn-outline-secondary" @onclick="BackToCapabilityTest">Back</button>
-            <button class="btn btn-primary" disabled="@_isBusy" @onclick="CheckStorageAsync">Run Storage Check</button>
-        </div>
+        <MudStack Row="true" Class="setup-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToCapabilityTest">Back</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="CheckStorageAsync">Run Storage Check</MudButton>
+        </MudStack>
     </div>;
 
     private RenderFragment WorkerRuntimeStep => @<div>
         <div class="setup-step-heading">
-            <p class="setup-eyebrow">Step 5</p>
-            <h2>Worker Runtime</h2>
-            <p>Worker runtime checks are recorded as a setup warning until the worker health endpoint is added.</p>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Step 5</MudText>
+            <MudText Typo="Typo.h5">Worker Runtime</MudText>
+            <MudText Color="Color.Secondary">Worker runtime checks are recorded as a setup warning until the worker health endpoint is added.</MudText>
         </div>
         <div class="setup-check-list">
             @CapabilityRow("Worker host reachable", _workerHealth, required: false)
             @CapabilityRow("Worker version reported", null, required: false)
             @CapabilityRow("Built-in local strategy worker available", null, required: false)
         </div>
-        <div class="setup-alert setup-alert-warning">You can continue without worker health in this first UI pass.</div>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mt-4">You can continue without worker health in this first UI pass.</MudAlert>
         @StepMessage()
-        <div class="setup-actions">
-            <button class="btn btn-outline-secondary" @onclick="BackToStorage">Back</button>
-            <button class="btn btn-primary" disabled="@_isBusy" @onclick="CompleteWorkerStepAsync">Continue</button>
-        </div>
+        <MudStack Row="true" Class="setup-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToStorage">Back</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="CompleteWorkerStepAsync">Continue</MudButton>
+        </MudStack>
     </div>;
 
     private RenderFragment AdminUserStep => @<div>
         <div class="setup-step-heading">
-            <p class="setup-eyebrow">Step 6</p>
-            <h2>Admin User</h2>
-            <p>Create the local owner profile for this instance.</p>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Step 6</MudText>
+            <MudText Typo="Typo.h5">Admin User</MudText>
+            <MudText Color="Color.Secondary">Create the local owner profile for this instance.</MudText>
         </div>
         <div class="setup-form-grid">
-            <label>
-                Name
-                <input class="form-control" @bind="_adminName" />
-            </label>
-            <label>
-                Email
-                <input class="form-control" type="email" @bind="_adminEmail" />
-            </label>
-            <label class="setup-form-wide">
-                Display Name
-                <input class="form-control" @bind="_adminDisplayName" />
-            </label>
+            <MudTextField Label="Name" @bind-Value="_adminName" Variant="Variant.Outlined" />
+            <MudTextField Label="Email" @bind-Value="_adminEmail" InputType="InputType.Email" Variant="Variant.Outlined" />
+            <MudTextField Class="setup-form-wide" Label="Display Name" @bind-Value="_adminDisplayName" Variant="Variant.Outlined" />
         </div>
         @StepMessage()
-        <div class="setup-actions">
-            <button class="btn btn-outline-secondary" @onclick="BackToWorkerRuntime">Back</button>
-            <button class="btn btn-primary" disabled="@(_isBusy || string.IsNullOrWhiteSpace(_adminName))" @onclick="CompleteAdminStepAsync">Continue</button>
-        </div>
+        <MudStack Row="true" Class="setup-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToWorkerRuntime">Back</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_isBusy || string.IsNullOrWhiteSpace(_adminName))" OnClick="CompleteAdminStepAsync">Continue</MudButton>
+        </MudStack>
     </div>;
 
     private RenderFragment FinishStep => @<div>
         <div class="setup-step-heading">
-            <p class="setup-eyebrow">Step 7</p>
-            <h2>Finish Setup</h2>
-            <p>Complete first-run setup and unlock business onboarding.</p>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Step 7</MudText>
+            <MudText Typo="Typo.h5">Finish Setup</MudText>
+            <MudText Color="Color.Secondary">Complete first-run setup and unlock business onboarding.</MudText>
         </div>
 
         <div class="setup-check-list">
@@ -407,12 +380,12 @@
         </div>
 
         @StepMessage()
-        <div class="setup-actions">
-            <button class="btn btn-outline-secondary" @onclick="BackToAdminUser">Back</button>
-            <button class="btn btn-success" disabled="@(_isBusy || !CanFinish)" @onclick="FinishSetupAsync">
+        <MudStack Row="true" Class="setup-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToAdminUser">Back</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Success" Disabled="@(_isBusy || !CanFinish)" OnClick="FinishSetupAsync">
                 @(_isBusy ? "Finishing..." : "Complete Setup")
-            </button>
-        </div>
+            </MudButton>
+        </MudStack>
     </div>;
 
     private RenderFragment CapabilityRow(string label, bool? value, bool required) => @<div class="setup-check-row">
@@ -424,9 +397,15 @@
     private RenderFragment StepMessage() => @<div>
         @if (!string.IsNullOrWhiteSpace(_stepMessage))
         {
-            <div class="setup-alert setup-alert-info">@_stepMessage</div>
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mt-4">@_stepMessage</MudAlert>
         }
     </div>;
+
+    private void OnProviderTypeChanged(LlmProviderType providerType)
+    {
+        _providerType = providerType;
+        ApplyProviderPreset();
+    }
 
     private async Task CreateProviderAsync()
     {

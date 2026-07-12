@@ -21,7 +21,6 @@ public sealed class CSweetDbContext : DbContext
     public DbSet<AgentRunLog> AgentRunLogs => Set<AgentRunLog>();
 
     // Planning entities
-    public DbSet<Domain.Planning.Organization> Organizations => Set<Domain.Planning.Organization>();
     public DbSet<PlanningTask> PlanningTasks => Set<PlanningTask>();
     public DbSet<PlanningDocument> PlanningDocuments => Set<PlanningDocument>();
     public DbSet<PlanningWorkflow> PlanningWorkflows => Set<PlanningWorkflow>();
