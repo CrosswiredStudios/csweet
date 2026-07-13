@@ -30,6 +30,14 @@ Read these files in order:
 14. [11 Marketplace Readiness](./11-marketplace-readiness.md)
 15. [12 Junior Developer Task Checklist](./12-junior-developer-task-checklist.md)
 
+## Feature plans
+
+Cross-cutting features are documented as a phased series in their own folder:
+
+- [Personal Assistant Chat](./features/personal-assistant-chat/README.md) - click an agent
+  employee to open a streaming chat with the Personal Assistant (MAF agent plugin, governed
+  API gateway, conversation persistence, SSE streaming).
+
 ## Recommended implementation order
 
 Do not start by building the marketplace or a complex autonomous company brain. Build in this order:
