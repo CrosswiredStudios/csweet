@@ -2,6 +2,7 @@
 @layout CommandCenterLayout
 @using CSweet.Contracts.Core
 @inject HttpClient Http
+@inject NavigationManager Navigation
 
 <PageTitle>Employees - C-Sweet</PageTitle>
 
@@ -60,7 +61,9 @@
         <section class="employee-directory-grid">
             @foreach (var employee in _employees)
             {
-                <MudCard Elevation="1" Class="employee-card">
+                <MudCard Elevation="1"
+                         Class="@($"employee-card {(IsChattableAgent(employee) ? "employee-card-clickable" : string.Empty)}")"
+                         @onclick="@(() => OpenChat(employee))">
                     <MudCardContent>
                         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                             <MudAvatar Color="@(employee.EmployeeType == 1 ? Color.Secondary : Color.Primary)" Variant="Variant.Filled">
@@ -81,6 +84,17 @@
                                 <dd>@SubordinateCount(employee)</dd>
                             </div>
                         </dl>
+                        @if (IsChattableAgent(employee))
+                        {
+                            <MudButton Variant="Variant.Text"
+                                       Color="Color.Primary"
+                                       Size="Size.Small"
+                                       Class="employee-chat-button"
+                                       StartIcon="@Icons.Material.Filled.Chat"
+                                       OnClick="@(() => OpenChat(employee))">
+                                Open chat
+                            </MudButton>
+                        }
                     </MudCardContent>
                 </MudCard>
             }
@@ -210,6 +224,18 @@
 
     private int SubordinateCount(OrganizationUserResponse employee) =>
         _employees.Count(x => x.ReportsToOrganizationUserId == employee.Id);
+
+    private static bool IsChattableAgent(OrganizationUserResponse employee) =>
+        employee.EmployeeType == 1 &&
+        !string.Equals(employee.DisplayName, "Self", StringComparison.OrdinalIgnoreCase);
+
+    private void OpenChat(OrganizationUserResponse employee)
+    {
+        if (IsChattableAgent(employee))
+        {
+            Navigation.NavigateTo($"/organizations/{OrganizationId}/chat/{employee.Id}");
+        }
+    }
 
     private static string NodeInitials(OrganizationUserResponse employee)
     {

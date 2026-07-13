@@ -24,3 +24,9 @@ public sealed record ProposedAction(
     string Summary,
     string ParametersJson,
     bool RequiresApproval);
+
+public sealed record AssistantResponseChunk(
+    string ConversationId,
+    int Sequence,
+    string Delta,
+    bool IsFinal);

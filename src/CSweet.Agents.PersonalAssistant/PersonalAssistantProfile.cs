@@ -18,6 +18,8 @@ public static class PersonalAssistantProfile
 
     public const string AssistantResponseCreatedEvent = "com.csweet.assistant.response.created.v1";
 
+    public const string AssistantResponseChunkEvent = "com.csweet.assistant.response.chunk.v1";
+
     public static readonly string SystemPrompt = """
 You are the Personal Assistant and Chief of Staff inside C-Sweet.
 You are the primary communication channel between the business owner and the company's workforce.

@@ -37,6 +37,16 @@ public sealed class ConversationService : IConversationService
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<Guid?> GetDefaultProviderProfileIdAsync(CancellationToken cancellationToken = default)
+    {
+        var profile = await _dbContext.LlmProviderProfiles
+            .Where(x => x.IsEnabled)
+            .OrderBy(x => x.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return profile?.Id;
+    }
+
     public async Task<ConversationActionResponse> StartAsync(
         Guid organizationId,
         StartConversationRequest request,

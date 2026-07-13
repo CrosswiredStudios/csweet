@@ -427,6 +427,17 @@ code {
     height: 100%;
 }
 
+.employee-card-clickable {
+    cursor: pointer;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.employee-card-clickable:hover {
+    border-color: #b9ccd6;
+    box-shadow: 0 0.45rem 1.1rem rgba(18, 37, 43, 0.12);
+    transform: translateY(-1px);
+}
+
 .employee-card-details {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -444,6 +455,91 @@ code {
 .employee-card-details dd {
     margin: 0.2rem 0 0;
     color: #27313c;
+}
+
+.employee-chat-button {
+    margin-top: 0.75rem;
+}
+
+.chat-page {
+    max-width: 1040px;
+}
+
+.chat-page-header {
+    align-items: center;
+}
+
+.chat-loading-panel {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.chat-alert {
+    margin-bottom: 1rem;
+}
+
+.chat-transcript {
+    display: flex;
+    min-height: 28rem;
+    max-height: min(62vh, 44rem);
+    flex-direction: column;
+    gap: 0.75rem;
+    overflow-y: auto;
+    background: #fbfcfd;
+}
+
+.chat-empty-state {
+    display: grid;
+    min-height: 22rem;
+    place-items: center;
+    align-content: center;
+    gap: 0.35rem;
+    color: #52606d;
+    text-align: center;
+}
+
+.chat-row {
+    display: flex;
+    width: 100%;
+}
+
+.chat-row-user {
+    justify-content: flex-end;
+}
+
+.chat-row-assistant {
+    justify-content: flex-start;
+}
+
+.chat-bubble {
+    max-width: min(75%, 44rem);
+    padding: 0.75rem 0.95rem;
+    border-radius: 8px;
+    overflow-wrap: anywhere;
+}
+
+.chat-bubble-user {
+    background: #dcecef;
+    color: #18212b;
+}
+
+.chat-bubble-assistant {
+    border: 1px solid #d9e2ea;
+    background: #ffffff;
+    color: #27313c;
+}
+
+.chat-input {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    align-items: end;
+    margin-top: 1rem;
+}
+
+.chat-input-field {
+    min-width: 0;
 }
 
 .configuration-section-header,
@@ -618,8 +714,13 @@ code {
     .configuration-grid,
     .configuration-details,
     .employee-directory-grid,
-    .employee-card-details {
+    .employee-card-details,
+    .chat-input {
         grid-template-columns: 1fr;
+    }
+
+    .chat-bubble {
+        max-width: 100%;
     }
 
     .configuration-section-header,

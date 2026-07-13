@@ -2,6 +2,7 @@ using CSweet.Application.Core;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
+using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Core;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -570,6 +571,43 @@ public class ConversationServiceTests
 
     #endregion
 
+    #region Provider Selection Tests
+
+    [Fact]
+    public async Task GetDefaultProviderProfileIdAsync_ReturnsFirstEnabledProvider()
+    {
+        await using var dbContext = CreateDbContext();
+        var auditWriter = new TestAuditEventWriter();
+        var service = new ConversationService(dbContext, auditWriter);
+        var disabled = CreateProvider(DateTimeOffset.UtcNow, isEnabled: false);
+        var firstEnabled = CreateProvider(DateTimeOffset.UtcNow.AddSeconds(1), isEnabled: true);
+        var secondEnabled = CreateProvider(DateTimeOffset.UtcNow.AddSeconds(2), isEnabled: true);
+
+        dbContext.LlmProviderProfiles.AddRange(disabled, secondEnabled, firstEnabled);
+        await dbContext.SaveChangesAsync();
+
+        var providerId = await service.GetDefaultProviderProfileIdAsync();
+
+        Assert.Equal(firstEnabled.Id, providerId);
+    }
+
+    [Fact]
+    public async Task GetDefaultProviderProfileIdAsync_ReturnsNullWhenNoProviderIsEnabled()
+    {
+        await using var dbContext = CreateDbContext();
+        var auditWriter = new TestAuditEventWriter();
+        var service = new ConversationService(dbContext, auditWriter);
+
+        dbContext.LlmProviderProfiles.Add(CreateProvider(DateTimeOffset.UtcNow, isEnabled: false));
+        await dbContext.SaveChangesAsync();
+
+        var providerId = await service.GetDefaultProviderProfileIdAsync();
+
+        Assert.Null(providerId);
+    }
+
+    #endregion
+
     #region Helpers
 
     private static DbContextOptions<CSweetDbContext> CreateDbContextOptions()
@@ -592,6 +630,22 @@ public class ConversationServiceTests
             Name = "Test Org",
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    private static LlmProviderProfile CreateProvider(DateTimeOffset createdAt, bool isEnabled)
+    {
+        return new LlmProviderProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Provider {Guid.NewGuid():N}",
+            ProviderType = LlmProviderType.LmStudio,
+            BaseUrl = "http://localhost:1234",
+            DefaultChatModel = "local-model",
+            SupportsStreaming = true,
+            IsEnabled = isEnabled,
+            CreatedAt = createdAt,
+            UpdatedAt = createdAt
         };
     }
 

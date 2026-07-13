@@ -1,0 +1,126 @@
+using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using CSweet.Contracts.Core;
+
+namespace CSweet.UI.Services;
+
+public sealed class ChatApiClient : IChatApiClient
+{
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly HttpClient _httpClient;
+
+    public ChatApiClient(HttpClient httpClient)
+    {
+        _httpClient = httpClient;
+    }
+
+    public async Task<ConversationResponse> StartConversationAsync(
+        Guid organizationId,
+        Guid agentOrganizationUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsJsonAsync(
+            $"api/core/organizations/{organizationId}/conversations",
+            new StartConversationRequest(agentOrganizationUserId),
+            cancellationToken);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return await response.Content.ReadFromJsonAsync<ConversationResponse>(cancellationToken)
+                ?? throw new ApiClientException(response.StatusCode, "Empty conversation response.");
+        }
+
+        var error = await response.Content.ReadFromJsonAsync<ConversationActionResponse>(cancellationToken);
+        throw new ApiClientException(response.StatusCode, error?.Message ?? "Failed to start conversation.");
+    }
+
+    public async Task<IReadOnlyList<ConversationMessageResponse>> GetMessagesAsync(
+        Guid organizationId,
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _httpClient.GetFromJsonAsync<IReadOnlyList<ConversationMessageResponse>>(
+            $"api/core/organizations/{organizationId}/conversations/{conversationId}/messages",
+            cancellationToken) ?? [];
+    }
+
+    public async IAsyncEnumerable<string> SendMessageAsync(
+        Guid organizationId,
+        Guid conversationId,
+        string message,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"api/core/organizations/{organizationId}/conversations/{conversationId}/messages/stream")
+        {
+            Content = JsonContent.Create(new SendChatMessageRequest(message))
+        };
+
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await TryReadErrorAsync(response, cancellationToken);
+            throw new ApiClientException(response.StatusCode, error ?? "Failed to send message.");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            if (string.IsNullOrWhiteSpace(line) ||
+                !line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var json = line["data:".Length..].Trim();
+            var chunk = JsonSerializer.Deserialize<StreamChunk>(json, SerializerOptions);
+            if (chunk is null)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(chunk.Error))
+            {
+                throw new InvalidOperationException(chunk.Delta);
+            }
+
+            if (chunk.IsFinal)
+            {
+                yield break;
+            }
+
+            if (!string.IsNullOrEmpty(chunk.Delta))
+            {
+                yield return chunk.Delta;
+            }
+        }
+    }
+
+    private static async Task<string?> TryReadErrorAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var error = await response.Content.ReadFromJsonAsync<ApiErrorResponse>(cancellationToken);
+            return error?.Message ?? error?.Error;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private sealed record StreamChunk(int Sequence, string Delta, bool IsFinal, string? Error);
+
+    private sealed record ApiErrorResponse(string? Error, string? Message);
+}

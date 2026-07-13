@@ -1,0 +1,224 @@
+@page "/organizations/{OrganizationId:guid}/chat/{AgentUserId:guid}"
+@layout CommandCenterLayout
+@using CSweet.Contracts.Core
+@implements IDisposable
+@inject HttpClient Http
+@inject IChatApiClient ChatApi
+
+<PageTitle>Chat - C-Sweet</PageTitle>
+
+<div class="command-center-shell chat-page">
+    <MudPaper Elevation="0" Class="page-header chat-page-header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Conversation</MudText>
+            <MudText Typo="Typo.h3">@(_agent?.DisplayName ?? "Agent")</MudText>
+            <MudText Color="Color.Secondary">@(_conversation?.Title ?? "Live assistant chat")</MudText>
+        </div>
+        <MudButton Href="@($"/organizations/{OrganizationId}/employees")"
+                   Variant="Variant.Outlined"
+                   Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.ArrowBack">
+            Employees
+        </MudButton>
+    </MudPaper>
+
+    @if (_loading)
+    {
+        <MudPaper Elevation="1" Class="surface-panel chat-loading-panel">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <MudText Color="Color.Secondary">Opening conversation...</MudText>
+        </MudPaper>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="chat-alert">@_errorMessage</MudAlert>
+        }
+
+        <MudPaper Elevation="1" Class="surface-panel chat-transcript" role="log" aria-live="polite">
+            @if (_messages.Count == 0 && !_streaming)
+            {
+                <div class="chat-empty-state">
+                    <MudIcon Icon="@Icons.Material.Filled.Chat" Color="Color.Primary" Size="Size.Large" />
+                    <MudText Typo="Typo.h6">Start the conversation</MudText>
+                    <MudText Color="Color.Secondary">Send a message when you are ready.</MudText>
+                </div>
+            }
+
+            @foreach (var message in _messages)
+            {
+                <div class="chat-row @(message.Role == UserRole ? "chat-row-user" : "chat-row-assistant")">
+                    <div class="chat-bubble @(message.Role == UserRole ? "chat-bubble-user" : "chat-bubble-assistant")">
+                        <MudText Typo="Typo.body1">@message.Content</MudText>
+                    </div>
+                </div>
+            }
+
+            @if (_streaming)
+            {
+                <div class="chat-row chat-row-assistant">
+                    <div class="chat-bubble chat-bubble-assistant">
+                        @if (string.IsNullOrEmpty(_streamingText))
+                        {
+                            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body1">@_streamingText</MudText>
+                        }
+                    </div>
+                </div>
+            }
+        </MudPaper>
+
+        <MudPaper Elevation="1" Class="surface-panel chat-input">
+            <MudTextField @bind-Value="_draft"
+                          Placeholder="Message your assistant..."
+                          Variant="Variant.Outlined"
+                          Lines="2"
+                          Immediate="true"
+                          OnKeyDown="OnKeyDownAsync"
+                          Disabled="_streaming"
+                          Class="chat-input-field" />
+            <MudButton Color="Color.Primary"
+                       Variant="Variant.Filled"
+                       OnClick="SendAsync"
+                       Disabled="@(_streaming || string.IsNullOrWhiteSpace(_draft) || _conversation is null)"
+                       EndIcon="@Icons.Material.Filled.Send">
+                Send
+            </MudButton>
+        </MudPaper>
+    }
+</div>
+
+@code {
+    private const int UserRole = 0;
+    private const int AssistantRole = 1;
+
+    [Parameter]
+    public Guid OrganizationId { get; set; }
+
+    [Parameter]
+    public Guid AgentUserId { get; set; }
+
+    private readonly List<ConversationMessageResponse> _messages = [];
+    private readonly CancellationTokenSource _disposeCts = new();
+    private OrganizationUserResponse? _agent;
+    private ConversationResponse? _conversation;
+    private string _draft = string.Empty;
+    private string _streamingText = string.Empty;
+    private bool _loading = true;
+    private bool _streaming;
+    private string? _errorMessage;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _errorMessage = null;
+        _messages.Clear();
+
+        try
+        {
+            _agent = await Http.GetFromJsonAsync<OrganizationUserResponse>(
+                $"api/core/organizations/{OrganizationId}/users/{AgentUserId}",
+                _disposeCts.Token);
+
+            _conversation = await ChatApi.StartConversationAsync(
+                OrganizationId,
+                AgentUserId,
+                _disposeCts.Token);
+
+            var existing = await ChatApi.GetMessagesAsync(
+                OrganizationId,
+                _conversation.Id,
+                _disposeCts.Token);
+
+            _messages.AddRange(existing);
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !args.ShiftKey)
+        {
+            await SendAsync();
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (_streaming || _conversation is null || string.IsNullOrWhiteSpace(_draft))
+        {
+            return;
+        }
+
+        var text = _draft.Trim();
+        _draft = string.Empty;
+        _errorMessage = null;
+
+        _messages.Add(new ConversationMessageResponse(
+            Guid.NewGuid(),
+            _conversation.Id,
+            UserRole,
+            text,
+            DateTimeOffset.UtcNow));
+
+        _streaming = true;
+        _streamingText = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            await foreach (var delta in ChatApi.SendMessageAsync(
+                OrganizationId,
+                _conversation.Id,
+                text,
+                _disposeCts.Token))
+            {
+                _streamingText += delta;
+                StateHasChanged();
+            }
+
+            if (!string.IsNullOrWhiteSpace(_streamingText))
+            {
+                _messages.Add(new ConversationMessageResponse(
+                    Guid.NewGuid(),
+                    _conversation.Id,
+                    AssistantRole,
+                    _streamingText,
+                    DateTimeOffset.UtcNow));
+            }
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"The assistant could not respond: {ex.Message}";
+        }
+        finally
+        {
+            _streaming = false;
+            _streamingText = string.Empty;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposeCts.Cancel();
+        _disposeCts.Dispose();
+    }
+}

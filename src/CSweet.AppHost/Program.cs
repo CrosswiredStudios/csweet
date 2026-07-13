@@ -33,7 +33,9 @@ var agentHost = builder.AddProject<Projects.CSweet_AgentHost>("agenthost");
 
 var api = builder.AddProject<Projects.CSweet_Api>("api")
     .WithReference(postgres)
+    .WithReference(agentHost)
     .WaitFor(postgres)
+    .WaitFor(agentHost)
     .WaitForCompletion(migrator);
 
 builder.AddProject<Projects.CSweet_App>("app")

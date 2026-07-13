@@ -1,9 +1,12 @@
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
-using CSweet.Application.Llm;
-using CSweet.Contracts.Llm;
+using CSweet.AI.Providers;
 using Google.Protobuf;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -55,27 +58,65 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
             return;
         }
 
-        var response = await GenerateResponseAsync(
+        var conversationId = incoming.ConversationId;
+        var builder = new System.Text.StringBuilder();
+        var sequence = 0;
+
+        await foreach (var delta in StreamAssistantDeltasAsync(
             new AssistantCapabilityInput(
                 incoming.ProviderProfileId,
-                incoming.ConversationId,
+                conversationId,
                 incoming.Message,
                 incoming.Context),
             PersonalAssistantProfile.ConverseCapability,
             context,
-            cancellationToken);
+            cancellationToken))
+        {
+            builder.Append(delta);
 
+            await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
+                conversationId,
+                sequence++,
+                delta,
+                IsFinal: false), cancellationToken);
+        }
+
+        // Terminal chunk so the gateway knows the stream is complete.
+        await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
+            conversationId, sequence, Delta: string.Empty, IsFinal: true), cancellationToken);
+
+        // Keep the existing final "response created" event for anything that consumes the whole reply.
         await context.Broker.PublishEventAsync(
             new PublishEvent
             {
                 EventType = PersonalAssistantProfile.AssistantResponseCreatedEvent,
                 SchemaVersion = "1",
-                Subject = $"conversation/{incoming.ConversationId}",
+                Subject = $"conversation/{conversationId}",
                 ContentType = "application/json",
-                Payload = ByteString.CopyFrom(
-                    JsonSerializer.SerializeToUtf8Bytes(response, SerializerOptions))
+                Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(
+                    new AssistantResponseCreated(conversationId, builder.ToString(), ProposedActions: [], DateTimeOffset.UtcNow),
+                    SerializerOptions))
             },
             message.EventId,
+            cancellationToken);
+    }
+
+    private static Task PublishChunkAsync(
+        AgentRuntimeContext context,
+        string correlationId,
+        AssistantResponseChunk chunk,
+        CancellationToken cancellationToken)
+    {
+        return context.Broker.PublishEventAsync(
+            new PublishEvent
+            {
+                EventType = PersonalAssistantProfile.AssistantResponseChunkEvent,
+                SchemaVersion = "1",
+                Subject = $"conversation/{chunk.ConversationId}",
+                ContentType = "application/json",
+                Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(chunk, SerializerOptions))
+            },
+            correlationId,
             cancellationToken);
     }
 
@@ -125,14 +166,22 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
         }
     }
 
-    private async Task<AssistantResponseCreated> GenerateResponseAsync(
+    private async IAsyncEnumerable<string> StreamAssistantDeltasAsync(
         AssistantCapabilityInput input,
         string capability,
         AgentRuntimeContext runtimeContext,
-        CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
-        var runner = scope.ServiceProvider.GetRequiredService<IAgentRunner>();
+
+        // Thin seam: reuse the platform's provider factory to get an IChatClient.
+        var providerFactory = scope.ServiceProvider.GetRequiredService<ILlmProviderFactory>();
+        var chatClient = await providerFactory.CreateChatClientAsync(input.ProviderProfileId, cancellationToken);
+
+        // Build the MAF agent inside the plugin. The system prompt and behavior are ours.
+        AIAgent agent = new ChatClientAgent(
+            chatClient,
+            instructions: PersonalAssistantProfile.SystemPrompt);
 
         var prompt = capability switch
         {
@@ -143,44 +192,36 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
             _ => input.Prompt
         };
 
-        var assembledContext = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["businessId"] = runtimeContext.BusinessId,
-            ["conversationId"] = input.ConversationId,
-            ["requestedCapability"] = capability
-        };
+        // Use AgentSession for conversation state management (official MAF pattern).
+        // For single-turn streaming this session is ephemeral.
+        // Future: serialize/deserialize sessions for cross-request conversation continuity.
+        AgentSession session = await agent.CreateSessionAsync(cancellationToken);
 
-        if (input.Context is not null)
+        await foreach (var update in agent.RunStreamingAsync(prompt, session, options: null, cancellationToken))
         {
-            foreach (var item in input.Context)
+            if (!string.IsNullOrEmpty(update.Text))
             {
-                assembledContext[item.Key] = item.Value;
+                yield return update.Text;
             }
         }
+    }
 
-        var result = await runner.RunAsync(
-            new AgentRunRequest(
-                input.ProviderProfileId,
-                PersonalAssistantProfile.AgentKey,
-                PersonalAssistantProfile.SystemPrompt,
-                prompt,
-                assembledContext,
-                new AgentRunOptions(
-                    Temperature: 0.2,
-                    MaxOutputTokens: 2048,
-                    RequireStructuredOutput: false,
-                    OutputSchemaJson: null)),
-            cancellationToken);
+    private async Task<AssistantResponseCreated> GenerateResponseAsync(
+        AssistantCapabilityInput input,
+        string capability,
+        AgentRuntimeContext runtimeContext,
+        CancellationToken cancellationToken)
+    {
+        var builder = new System.Text.StringBuilder();
 
-        if (!result.Succeeded)
+        await foreach (var delta in StreamAssistantDeltasAsync(input, capability, runtimeContext, cancellationToken))
         {
-            throw new InvalidOperationException(
-                result.FailureMessage ?? "The configured model provider failed.");
+            builder.Append(delta);
         }
 
         return new AssistantResponseCreated(
             input.ConversationId,
-            result.Content ?? string.Empty,
+            builder.ToString(),
             ProposedActions: [],
             DateTimeOffset.UtcNow);
     }

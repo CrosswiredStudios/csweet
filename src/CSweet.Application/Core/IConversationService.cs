@@ -11,6 +11,8 @@ public interface IConversationService
         Guid conversationId,
         CancellationToken cancellationToken = default);
 
+    Task<Guid?> GetDefaultProviderProfileIdAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Creates a conversation with the given agent employee, or returns a failure.</summary>
     Task<ConversationActionResponse> StartAsync(
         Guid organizationId,

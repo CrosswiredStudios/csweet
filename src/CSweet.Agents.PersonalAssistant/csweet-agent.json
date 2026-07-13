@@ -35,6 +35,7 @@
   ],
   "requestedPublications": [
     "com.csweet.assistant.response.created.v1",
+    "com.csweet.assistant.response.chunk.v1",
     "com.csweet.assistant.progress.updated.v1",
     "com.csweet.action.proposed.v1"
   ],

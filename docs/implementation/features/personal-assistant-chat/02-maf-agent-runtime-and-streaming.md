@@ -24,8 +24,8 @@ Two things the product needs come together here:
 
 ## Plugin boundary — read this before you code
 
-- **Do put in `CSweet.Agents.PersonalAssistant`:** the MAF `ChatClientAgent`, the streaming
-  loop, prompt assembly, and publishing chunk/final events.
+- **Do put in `CSweet.Agents.PersonalAssistant`:** the MAF `ChatClientAgent` with `AgentSession`
+  management, the streaming loop, prompt assembly, and publishing chunk/final events.
 - **Do reuse (thin seam only):** `ILlmProviderFactory.CreateChatClientAsync(providerProfileId)`
   to obtain an `IChatClient` for the configured LLM provider. The plugin already references
   `CSweet.Infrastructure` and calls `builder.AddCSweetInfrastructure()` in
@@ -37,7 +37,10 @@ Two things the product needs come together here:
 
 ## Deliverables
 
-- `Microsoft.Agents.AI` package added centrally and referenced by the plugin.
+- `Microsoft.Agents.AI` core package added centrally and referenced by the plugin.
+  This package provides `ChatClientAgent`, `AIAgent`, `AgentSession`, and all agent runtime
+  primitives. No provider-specific sub-package (like `Microsoft.Agents.AI.Foundry`) is needed
+  because we obtain `IChatClient` from our own `ILlmProviderFactory`.
 - A new streaming chunk event type + a message contract for it.
 - The Personal Assistant builds a `ChatClientAgent` and streams via `RunStreamingAsync`.
 - Manifest and broker config updated to allow publishing the new chunk event.
@@ -63,8 +66,7 @@ agent and stream", and add chunk publishing to `HandleEventAsync`.
 ### 1. Add the MAF package
 
 In [Directory.Packages.props](../../../../Directory.Packages.props), add the Microsoft Agent
-Framework package (pin the latest stable version — confirm the current version on nuget.org,
-the Agent Framework ships as `Microsoft.Agents.AI`):
+Framework core package (pin the latest version — confirm on nuget.org):
 
 ```xml
 <PackageVersion Include="Microsoft.Agents.AI" Version="<latest-stable>" />
@@ -80,9 +82,11 @@ Reference it from the plugin
 </ItemGroup>
 ```
 
-> `Microsoft.Agents.AI` provides `ChatClientAgent`, which wraps any
-> `Microsoft.Extensions.AI.IChatClient` as a first-class MAF agent. Because our provider
-> factory already returns an `IChatClient`, this is a clean fit and needs no provider changes.
+> `Microsoft.Agents.AI` is the **core** MAF package. It provides `ChatClientAgent`, `AIAgent`,
+> `AgentSession`, and all agent runtime primitives. We do NOT need provider-specific packages
+> like `Microsoft.Agents.AI.Foundry` because we obtain `IChatClient` from our own
+> `ILlmProviderFactory`. The core package is sufficient for wrapping any `IChatClient` as a
+> first-class MAF agent.
 
 ### 2. Add the streaming chunk event + contract
 
@@ -123,7 +127,8 @@ using CSweet.Application.Llm; // ILlmProviderFactory
 ```
 
 Add a helper that streams deltas from the MAF agent. It resolves the `IChatClient` through the
-thin seam, wraps it as a `ChatClientAgent`, and yields incremental text:
+thin seam, wraps it as a `ChatClientAgent`, creates an `AgentSession` for conversation state,
+and yields incremental text:
 
 ```csharp
 private async IAsyncEnumerable<string> StreamAssistantDeltasAsync(
@@ -152,10 +157,12 @@ private async IAsyncEnumerable<string> StreamAssistantDeltasAsync(
         _ => input.Prompt
     };
 
-    // One thread per turn is fine for now (no persistence of MAF thread state yet).
-    AgentThread thread = agent.GetNewThread();
+    // Use AgentSession for conversation state management (official MAF pattern).
+    // For single-turn streaming this session is ephemeral.
+    // Future: serialize/deserialize sessions for cross-request conversation continuity.
+    AgentSession session = await agent.CreateSessionAsync(cancellationToken);
 
-    await foreach (var update in agent.RunStreamingAsync(prompt, thread, cancellationToken: cancellationToken))
+    await foreach (var update in agent.RunStreamingAsync(prompt, session, cancellationToken))
     {
         if (!string.IsNullOrEmpty(update.Text))
         {
@@ -165,12 +172,18 @@ private async IAsyncEnumerable<string> StreamAssistantDeltasAsync(
 }
 ```
 
-> **API-surface note for the implementer:** MAF's exact type/method names have evolved across
-> preview builds. The shape you want is: create a `ChatClientAgent(IChatClient, instructions)`,
-> get a thread via `GetNewThread()`, and enumerate `RunStreamingAsync(...)` where each update
-> exposes incremental text (commonly `update.Text`). If your pinned version differs, adjust the
-> property/method names but keep the plugin-only structure. Verify against the MAF docs for the
-> version you pinned in step 1.
+> **Official MAF pattern reference:** This follows the documented guidance at
+> https://learn.microsoft.com/en-us/agent-framework/agents/?pivots=programming-language-csharp
+>
+> Key patterns used:
+> - `ChatClientAgent(IChatClient, instructions)` — wraps any IChatClient as a first-class agent
+> - `CreateSessionAsync()` — creates an AgentSession for conversation state (not GetNewThread)
+> - `RunStreamingAsync(prompt, session, cancellationToken)` — streams AgentResponseUpdate objects
+> - `update.Text` — extracts incremental text from each update
+>
+> If your pinned package version has different method signatures, verify against the official
+> docs. The core contract is: agent creation via ChatClientAgent, state via AgentSession,
+> streaming via RunStreamingAsync.
 
 Now rewrite `HandleEventAsync` to publish chunk events while streaming, then a final event.
 Replace the section that currently calls `GenerateResponseAsync` and publishes a single event:
@@ -297,8 +310,9 @@ chat client / provider):
 
 ## Acceptance criteria
 
-- [ ] `Microsoft.Agents.AI` is referenced centrally and by the plugin only.
-- [ ] The assistant produces its reply via a MAF `ChatClientAgent` + `RunStreamingAsync`.
+- [ ] `Microsoft.Agents.AI` core package is referenced centrally and by the plugin only.
+- [ ] The assistant produces its reply via a MAF `ChatClientAgent` + `AgentSession` + `RunStreamingAsync`.
+- [ ] Session management uses `CreateSessionAsync()` (official MAF pattern), not `GetNewThread()`.
 - [ ] No MAF orchestration was added to `CSweet.AI` / `IAgentRunner`.
 - [ ] Streaming produces ordered `assistant.response.chunk.v1` events ending with `IsFinal`.
 - [ ] A final `assistant.response.created.v1` event still carries the full text.
