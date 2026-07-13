@@ -33,6 +33,12 @@ Cross-cutting features are documented as a phased series in their own folder:
 - [Personal Assistant Chat](./features/personal-assistant-chat/README.md) - click an agent
   employee to open a streaming chat with the Personal Assistant (MAF agent plugin, governed
   API gateway, conversation persistence, SSE streaming).
+- [GitHub Agent Import](./features/github-agent-import/README.md) - import public GitHub-hosted
+  agent packages by URL, review the root manifest, approve bounded grants, and run community
+  agents inside broker-governed sandboxes.
+- [Agent Runtime Manager](./features/agent-runtime-manager/README.md) - run always-on and
+  scheduled ephemeral agents, manage global container limits, build imported .NET agents, and
+  spin containers up/down around broker-reported completion.
 
 ## Recommended implementation order
 
