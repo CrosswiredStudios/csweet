@@ -8,6 +8,15 @@ public interface ILlmProviderProfileService
         CreateLlmProviderProfileRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<LlmProviderProfileActionResponse> UpdateAsync(
+        Guid providerProfileId,
+        UpdateLlmProviderProfileRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<LlmProviderProfileActionResponse> DeleteAsync(
+        Guid providerProfileId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<LlmProviderProfileResponse>> ListAsync(
         CancellationToken cancellationToken = default);
 

@@ -615,6 +615,135 @@ code {
     align-items: stretch;
 }
 
+.agents-grid {
+    display: grid;
+    grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
+    gap: 1rem;
+}
+
+.agents-list-panel,
+.agents-editor-panel {
+    align-self: start;
+}
+
+.agents-list {
+    display: grid;
+    gap: 0.65rem;
+}
+
+.agent-list-item {
+    width: 100%;
+    min-height: 4.75rem;
+    padding: 0.75rem;
+    border: 1px solid #d9e2ea;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #27313c;
+    text-align: left;
+    text-transform: none;
+}
+
+.agent-list-item:hover,
+.agent-list-item.selected {
+    border-color: #245b66;
+    box-shadow: 0 0 0 2px rgba(36, 91, 102, 0.14);
+}
+
+.agent-list-item .mud-button-label {
+    width: 100%;
+}
+
+.agent-list-item-content {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: 100%;
+    min-width: 0;
+}
+
+.agent-list-item-content > div {
+    min-width: 0;
+}
+
+.agent-config-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.agent-config-field {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.agent-config-field-wide {
+    grid-column: 1 / -1;
+}
+
+.agent-config-field:has(textarea),
+.agent-config-field:has(.mud-input-control textarea) {
+    grid-column: 1 / -1;
+}
+
+.llm-provider-header-actions {
+    margin-top: 0;
+}
+
+.usage-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 0 0 1rem;
+}
+
+.usage-summary-card {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+    padding: 1rem;
+    border: 1px solid #d9e2ea;
+    border-radius: 8px;
+}
+
+.usage-token-breakdown {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.35rem;
+}
+
+.usage-token-breakdown div {
+    min-width: 0;
+}
+
+.usage-token-breakdown span {
+    display: block;
+    color: #52606d;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.usage-token-breakdown strong {
+    display: block;
+    color: #27313c;
+    font-size: 1.35rem;
+    line-height: 1.2;
+}
+
+.agents-empty-editor,
+.agents-loading-panel {
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 0.5rem;
+    min-height: 14rem;
+    text-align: center;
+}
+
 .organization-card {
     height: 100%;
 }
@@ -711,8 +840,11 @@ code {
     .assistant-option-grid,
     .command-grid,
     .command-summary,
+    .usage-summary-grid,
     .configuration-grid,
     .configuration-details,
+    .agents-grid,
+    .agent-config-form,
     .employee-directory-grid,
     .employee-card-details,
     .chat-input {

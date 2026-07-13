@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using CSweet.Contracts.Llm;
 
@@ -48,6 +49,46 @@ public sealed class LlmProviderApiClient : ILlmProviderApiClient
         throw new ApiClientException(response.StatusCode, error?.Message ?? $"Provider profile request failed with {(int)response.StatusCode}.");
     }
 
+    public async Task<LlmProviderProfileActionResponse> UpdateAsync(
+        Guid providerProfileId,
+        UpdateLlmProviderProfileRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PutAsJsonAsync(
+            $"api/llm-provider-profiles/{providerProfileId}",
+            request,
+            cancellationToken);
+
+        var result = await response.Content.ReadFromJsonAsync<LlmProviderProfileActionResponse>(cancellationToken)
+            ?? throw new ApiClientException(response.StatusCode, "Provider profile update response was empty.");
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new ApiClientException(response.StatusCode, result.Message ?? $"Provider profile update failed with {(int)response.StatusCode}.");
+        }
+
+        return result;
+    }
+
+    public async Task<LlmProviderProfileActionResponse> DeleteAsync(
+        Guid providerProfileId,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.DeleteAsync(
+            $"api/llm-provider-profiles/{providerProfileId}",
+            cancellationToken);
+
+        var result = await response.Content.ReadFromJsonAsync<LlmProviderProfileActionResponse>(cancellationToken)
+            ?? throw new ApiClientException(response.StatusCode, "Provider profile delete response was empty.");
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new ApiClientException(response.StatusCode, result.Message ?? $"Provider profile delete failed with {(int)response.StatusCode}.");
+        }
+
+        return result;
+    }
+
     public async Task<ModelCapabilityTestResult> TestAsync(
         Guid providerProfileId,
         CancellationToken cancellationToken = default)
@@ -68,5 +109,13 @@ public sealed class LlmProviderApiClient : ILlmProviderApiClient
 
         return await response.Content.ReadFromJsonAsync<LlmProviderProfileActionResponse>(cancellationToken)
             ?? throw new ApiClientException(response.StatusCode, "Default provider response was empty.");
+    }
+
+    public async Task<LlmTokenUsageSummaryResponse> GetUsageSummaryAsync(CancellationToken cancellationToken = default)
+    {
+        return await _httpClient.GetFromJsonAsync<LlmTokenUsageSummaryResponse>(
+                "api/llm-provider-profiles/usage/summary",
+                cancellationToken)
+            ?? throw new ApiClientException(HttpStatusCode.OK, "Usage summary response was empty.");
     }
 }

@@ -42,8 +42,10 @@ public sealed class ApiGatewayBrokerWorker : BackgroundService
                 _connection.Attach(broker);
 
                 _logger.LogInformation(
-                    "API gateway registered with broker as {AgentId}.",
-                    _options.AgentId);
+                    "API gateway registered with broker as {AgentId} installation {InstallationId} for business {BusinessId}.",
+                    _options.AgentId,
+                    _options.InstallationId,
+                    _options.BusinessId);
 
                 await ProcessMessagesAsync(broker, stoppingToken);
             }
@@ -124,8 +126,21 @@ public sealed class ApiGatewayBrokerWorker : BackgroundService
     {
         if (evt.EventType != PersonalAssistantChatEvents.AssistantResponseChunkEvent)
         {
+            _logger.LogInformation(
+                "API gateway received broker event {EventType} from {SourceAgentId} with subject {Subject}; ignoring for chat stream routing.",
+                evt.EventType,
+                evt.SourceAgentId,
+                evt.Subject);
+
             return;
         }
+
+        _logger.LogInformation(
+            "API gateway received assistant chunk event {EventType} from {SourceAgentId} with subject {Subject} and event id {EventId}.",
+            evt.EventType,
+            evt.SourceAgentId,
+            evt.Subject,
+            evt.EventId);
 
         var chunk = JsonSerializer.Deserialize<AssistantResponseChunk>(
             evt.Payload.ToByteArray(),
@@ -141,7 +156,15 @@ public sealed class ApiGatewayBrokerWorker : BackgroundService
 
         _router.Publish(
             conversationId,
-            new ChatStreamChunk(chunk.Sequence, chunk.Delta, chunk.IsFinal));
+            new ChatStreamChunk(chunk.Sequence, chunk.Delta, chunk.IsFinal, chunk.Error));
+
+        _logger.LogInformation(
+            "API gateway routed assistant chunk for conversation {ConversationId}. Sequence {Sequence}. IsFinal {IsFinal}. Error {Error}. DeltaLength {DeltaLength}.",
+            conversationId,
+            chunk.Sequence,
+            chunk.IsFinal,
+            chunk.Error,
+            chunk.Delta.Length);
     }
 
     private async Task StopBrokerAsync(IAgentBrokerClient broker)

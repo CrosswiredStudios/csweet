@@ -1,9 +1,12 @@
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
+using CSweet.Application.Llm;
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
-using CSweet.AI.Providers;
+using CSweet.Contracts.Agents;
+using CSweet.Domain.Setup;
 using Google.Protobuf;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -12,26 +15,76 @@ using Microsoft.Extensions.Logging;
 
 namespace CSweet.Agents.PersonalAssistant;
 
-public sealed class PersonalAssistantAgent : ICSweetAgent
+public sealed class PersonalAssistantAgent : CSweetAgentBase
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IAgentLlmClientFactory _llmClientFactory;
     private readonly ILogger<PersonalAssistantAgent> _logger;
+    private readonly IServiceScopeFactory? _scopeFactory;
 
     public PersonalAssistantAgent(
-        IServiceScopeFactory scopeFactory,
-        ILogger<PersonalAssistantAgent> logger)
+        IAgentLlmClientFactory llmClientFactory,
+        ILogger<PersonalAssistantAgent> logger,
+        IServiceScopeFactory? scopeFactory = null)
     {
-        _scopeFactory = scopeFactory;
+        _llmClientFactory = llmClientFactory;
         _logger = logger;
+        _scopeFactory = scopeFactory;
     }
 
-    public string AgentId => PersonalAssistantProfile.AgentId;
+    public override string AgentId => PersonalAssistantProfile.AgentId;
 
-    public string Version => PersonalAssistantProfile.Version;
+    public override string Version => PersonalAssistantProfile.Version;
 
-    public async Task HandleEventAsync(
+    protected override string ConfigurationSchemaVersion => PersonalAssistantProfile.ConfigurationSchemaVersion;
+
+    protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder)
+    {
+        return builder
+            .LlmProvider(
+                "llmProviderId",
+                "LLM Provider",
+                required: true,
+                description: "Selects the provider profile the Personal Assistant should use when it is allowed to call a user-configured model.")
+            .LlmModel(
+                "llmModel",
+                "Model",
+                dependsOnFieldKey: "llmProviderId",
+                required: true,
+                description: "Selects the chat model to use from the chosen provider profile.")
+            .Select(
+                "responseTone",
+                "Response Tone",
+                [
+                    new AgentConfigurationOption("concise", "Concise"),
+                    new AgentConfigurationOption("balanced", "Balanced"),
+                    new AgentConfigurationOption("detailed", "Detailed")
+                ],
+                required: true,
+                description: "Controls how much detail the assistant uses in executive responses.",
+                defaultValue: "balanced")
+            .Boolean(
+                "proactivePlanning",
+                "Proactive Planning",
+                required: true,
+                description: "Allows the assistant to suggest plans and follow-up work without being explicitly asked.",
+                defaultValue: true)
+            .Number(
+                "maxPlanItems",
+                "Maximum Plan Items",
+                required: true,
+                description: "Caps the number of tasks the assistant proposes in a single plan.",
+                minimum: 3,
+                maximum: 20,
+                step: 1,
+                defaultValue: 8)
+            .TextArea(
+                "customInstructions",
+                "Custom Instructions",
+                description: "Optional operating guidance that is appended to the assistant's built-in instructions.",
+                placeholder: "Example: Prefer short plans with clear owners and approval points.");
+    }
+
+    public override async Task HandleEventAsync(
         DeliveredEvent message,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
@@ -44,9 +97,7 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
             return;
         }
 
-        var incoming = JsonSerializer.Deserialize<UserMessageReceived>(
-            message.Payload.ToByteArray(),
-            SerializerOptions);
+        var incoming = DeserializePayload<UserMessageReceived>(message.Payload);
 
         if (incoming is null ||
             incoming.ProviderProfileId == Guid.Empty ||
@@ -60,32 +111,121 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
 
         var conversationId = incoming.ConversationId;
         var builder = new System.Text.StringBuilder();
+        var usage = new UsageDetails();
+        var startedAt = DateTimeOffset.UtcNow;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var sequence = 0;
 
-        await foreach (var delta in StreamAssistantDeltasAsync(
-            new AssistantCapabilityInput(
-                incoming.ProviderProfileId,
-                conversationId,
-                incoming.Message,
-                incoming.Context),
-            PersonalAssistantProfile.ConverseCapability,
-            context,
-            cancellationToken))
-        {
-            builder.Append(delta);
+        _logger.LogInformation(
+            "Personal Assistant received user message event {EventId} for conversation {ConversationId}. Provider {ProviderProfileId}. MessageLength {MessageLength}.",
+            message.EventId,
+            conversationId,
+            incoming.ProviderProfileId,
+            incoming.Message.Length);
 
-            await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
+        try
+        {
+            await foreach (var update in StreamAssistantDeltasAsync(
+                new AssistantCapabilityInput(
+                    incoming.ProviderProfileId,
+                    conversationId,
+                    incoming.Message,
+                    incoming.Context),
+                PersonalAssistantProfile.ConverseCapability,
+                context,
+                cancellationToken))
+            {
+                if (update.Usage is not null)
+                {
+                    usage.Add(update.Usage);
+                }
+
+                if (string.IsNullOrEmpty(update.Delta))
+                {
+                    continue;
+                }
+
+                builder.Append(update.Delta);
+
+                _logger.LogInformation(
+                    "Personal Assistant publishing chunk for conversation {ConversationId}. Sequence {Sequence}. DeltaLength {DeltaLength}.",
+                    conversationId,
+                    sequence,
+                    update.Delta.Length);
+
+                await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
+                    conversationId,
+                    sequence++,
+                    update.Delta,
+                    IsFinal: false), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Personal Assistant failed to generate a response for conversation {ConversationId}.",
+                conversationId);
+
+            await PublishAgentErrorAsync(
+                context,
+                message.EventId,
                 conversationId,
-                sequence++,
-                delta,
-                IsFinal: false), cancellationToken);
+                sequence,
+                BuildSafeFailureMessage(exception),
+                cancellationToken);
+            await WriteRunLogAsync(
+                incoming.ProviderProfileId,
+                incoming.Message,
+                output: null,
+                status: "Failed",
+                startedAt,
+                stopwatch.ElapsedMilliseconds,
+                usage: null,
+                exception.Message,
+                cancellationToken);
+            return;
         }
 
-        // Terminal chunk so the gateway knows the stream is complete.
+        if (builder.Length == 0)
+        {
+            _logger.LogWarning(
+                "Personal Assistant generated an empty response for conversation {ConversationId}.",
+                conversationId);
+
+            await PublishAgentErrorAsync(
+                context,
+                message.EventId,
+                conversationId,
+                sequence,
+                "The Personal Assistant could not complete the request because the model provider returned an empty response.",
+                cancellationToken);
+            await WriteRunLogAsync(
+                incoming.ProviderProfileId,
+                incoming.Message,
+                output: null,
+                status: "Failed",
+                startedAt,
+                stopwatch.ElapsedMilliseconds,
+                usage,
+                "The model provider returned an empty response.",
+                cancellationToken);
+            return;
+        }
+
         await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
             conversationId, sequence, Delta: string.Empty, IsFinal: true), cancellationToken);
 
-        // Keep the existing final "response created" event for anything that consumes the whole reply.
+        _logger.LogInformation(
+            "Personal Assistant completed streaming for conversation {ConversationId}. Chunks {ChunkCount}. ResponseLength {ResponseLength}.",
+            conversationId,
+            sequence,
+            builder.Length);
+
         await context.Broker.PublishEventAsync(
             new PublishEvent
             {
@@ -93,34 +233,25 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
                 SchemaVersion = "1",
                 Subject = $"conversation/{conversationId}",
                 ContentType = "application/json",
-                Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(
-                    new AssistantResponseCreated(conversationId, builder.ToString(), ProposedActions: [], DateTimeOffset.UtcNow),
-                    SerializerOptions))
+                Payload = ByteString.CopyFrom(SerializePayload(
+                    new AssistantResponseCreated(conversationId, builder.ToString(), ProposedActions: [], DateTimeOffset.UtcNow)))
             },
             message.EventId,
             cancellationToken);
-    }
 
-    private static Task PublishChunkAsync(
-        AgentRuntimeContext context,
-        string correlationId,
-        AssistantResponseChunk chunk,
-        CancellationToken cancellationToken)
-    {
-        return context.Broker.PublishEventAsync(
-            new PublishEvent
-            {
-                EventType = PersonalAssistantProfile.AssistantResponseChunkEvent,
-                SchemaVersion = "1",
-                Subject = $"conversation/{chunk.ConversationId}",
-                ContentType = "application/json",
-                Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(chunk, SerializerOptions))
-            },
-            correlationId,
+        await WriteRunLogAsync(
+            incoming.ProviderProfileId,
+            incoming.Message,
+            builder.ToString(),
+            "Completed",
+            startedAt,
+            stopwatch.ElapsedMilliseconds,
+            usage,
+            failureMessage: null,
             cancellationToken);
     }
 
-    public async Task<AgentCapabilityExecutionResult> ExecuteCapabilityAsync(
+    protected override async Task<AgentCapabilityExecutionResult> ExecuteCapabilityCoreAsync(
         CapabilityRequest request,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
@@ -131,9 +262,7 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
                 $"Capability '{request.Capability}' is not supported by the Personal Assistant.");
         }
 
-        var input = JsonSerializer.Deserialize<AssistantCapabilityInput>(
-            request.Payload.ToByteArray(),
-            SerializerOptions);
+        var input = DeserializePayload<AssistantCapabilityInput>(request.Payload);
 
         if (input is null ||
             input.ProviderProfileId == Guid.Empty ||
@@ -151,8 +280,7 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
                 context,
                 cancellationToken);
 
-            return AgentCapabilityExecutionResult.Success(
-                JsonSerializer.SerializeToUtf8Bytes(response, SerializerOptions));
+            return AgentCapabilityExecutionResult.Success(SerializePayload(response));
         }
         catch (Exception exception)
         {
@@ -166,19 +294,88 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
         }
     }
 
-    private async IAsyncEnumerable<string> StreamAssistantDeltasAsync(
+    private static Task PublishChunkAsync(
+        AgentRuntimeContext context,
+        string correlationId,
+        AssistantResponseChunk chunk,
+        CancellationToken cancellationToken)
+    {
+        return context.Broker.PublishEventAsync(
+            new PublishEvent
+            {
+                EventType = PersonalAssistantProfile.AssistantResponseChunkEvent,
+                SchemaVersion = "1",
+                Subject = $"conversation/{chunk.ConversationId}",
+                ContentType = "application/json",
+                Payload = ByteString.CopyFrom(SerializePayload(chunk))
+            },
+            correlationId,
+            cancellationToken);
+    }
+
+    private static Task PublishAgentErrorAsync(
+        AgentRuntimeContext context,
+        string correlationId,
+        string conversationId,
+        int sequence,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        return PublishChunkAsync(context, correlationId, new AssistantResponseChunk(
+            conversationId,
+            sequence,
+            message,
+            IsFinal: true,
+            Error: "agent_error"), cancellationToken);
+    }
+
+    private static string BuildSafeFailureMessage(Exception exception)
+    {
+        var candidates = exception is AggregateException aggregate
+            ? aggregate.Flatten().InnerExceptions
+            : [exception];
+
+        var httpException = candidates
+            .SelectMany(EnumerateExceptionChain)
+            .OfType<HttpRequestException>()
+            .FirstOrDefault();
+
+        if (httpException is not null)
+        {
+            return $"The model provider could not be reached: {httpException.Message}";
+        }
+
+        return "The Personal Assistant could not complete the request. Check the Personal Assistant logs for details.";
+    }
+
+    private static IEnumerable<Exception> EnumerateExceptionChain(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            yield return current;
+        }
+    }
+
+    private async IAsyncEnumerable<AssistantStreamUpdate> StreamAssistantDeltasAsync(
         AssistantCapabilityInput input,
         string capability,
         AgentRuntimeContext runtimeContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using var scope = _scopeFactory.CreateScope();
+        _logger.LogInformation(
+            "Personal Assistant resolving chat client for provider {ProviderProfileId} and conversation {ConversationId}.",
+            input.ProviderProfileId,
+            input.ConversationId);
 
-        // Thin seam: reuse the platform's provider factory to get an IChatClient.
-        var providerFactory = scope.ServiceProvider.GetRequiredService<ILlmProviderFactory>();
-        var chatClient = await providerFactory.CreateChatClientAsync(input.ProviderProfileId, cancellationToken);
+        var chatClient = await _llmClientFactory.CreateChatClientAsync(
+            new AgentLlmSelection(input.ProviderProfileId, Settings.GetString("llmModel")),
+            cancellationToken);
 
-        // Build the MAF agent inside the plugin. The system prompt and behavior are ours.
+        _logger.LogInformation(
+            "Personal Assistant created chat client for provider {ProviderProfileId} and conversation {ConversationId}.",
+            input.ProviderProfileId,
+            input.ConversationId);
+
         AIAgent agent = new ChatClientAgent(
             chatClient,
             instructions: PersonalAssistantProfile.SystemPrompt);
@@ -192,16 +389,24 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
             _ => input.Prompt
         };
 
-        // Use AgentSession for conversation state management (official MAF pattern).
-        // For single-turn streaming this session is ephemeral.
-        // Future: serialize/deserialize sessions for cross-request conversation continuity.
         AgentSession session = await agent.CreateSessionAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Personal Assistant starting MAF streaming for conversation {ConversationId}. Capability {Capability}. PromptLength {PromptLength}.",
+            input.ConversationId,
+            capability,
+            prompt.Length);
 
         await foreach (var update in agent.RunStreamingAsync(prompt, session, options: null, cancellationToken))
         {
+            var usage = ExtractUsage(update.Contents);
             if (!string.IsNullOrEmpty(update.Text))
             {
-                yield return update.Text;
+                yield return new AssistantStreamUpdate(update.Text, usage);
+            }
+            else if (usage is not null)
+            {
+                yield return new AssistantStreamUpdate(string.Empty, usage);
             }
         }
     }
@@ -214,9 +419,9 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
     {
         var builder = new System.Text.StringBuilder();
 
-        await foreach (var delta in StreamAssistantDeltasAsync(input, capability, runtimeContext, cancellationToken))
+        await foreach (var update in StreamAssistantDeltasAsync(input, capability, runtimeContext, cancellationToken))
         {
-            builder.Append(delta);
+            builder.Append(update.Delta);
         }
 
         return new AssistantResponseCreated(
@@ -230,4 +435,81 @@ public sealed class PersonalAssistantAgent : ICSweetAgent
         capability is PersonalAssistantProfile.ConverseCapability or
             PersonalAssistantProfile.SummarizeActivityCapability or
             PersonalAssistantProfile.PlanWorkCapability;
+
+    private async Task WriteRunLogAsync(
+        Guid providerProfileId,
+        string prompt,
+        string? output,
+        string status,
+        DateTimeOffset startedAt,
+        long durationMs,
+        UsageDetails? usage,
+        string? failureMessage,
+        CancellationToken cancellationToken)
+    {
+        if (_scopeFactory is null)
+        {
+            return;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var logWriter = scope.ServiceProvider.GetRequiredService<IAgentRunLogWriter>();
+
+        await logWriter.WriteAsync(new AgentRunLog
+        {
+            Id = Guid.NewGuid(),
+            AgentKey = PersonalAssistantProfile.AgentId,
+            ProviderProfileId = providerProfileId,
+            StartedAt = startedAt,
+            CompletedAt = DateTimeOffset.UtcNow,
+            Status = status,
+            PromptHash = ComputePromptHash(PersonalAssistantProfile.SystemPrompt + prompt),
+            OutputPreview = output is null ? null : Truncate(output, 500),
+            FailureMessage = failureMessage is null ? null : Truncate(failureMessage, 2048),
+            TokenInputCount = ToNullableInt(usage?.InputTokenCount),
+            TokenOutputCount = ToNullableInt(usage?.OutputTokenCount),
+            DurationMs = durationMs
+        }, cancellationToken);
+    }
+
+    private static UsageDetails? ExtractUsage(IEnumerable<AIContent> contents)
+    {
+        UsageDetails? usage = null;
+
+        foreach (var usageContent in contents.OfType<UsageContent>())
+        {
+            usage ??= new UsageDetails();
+            usage.Add(usageContent.Details);
+        }
+
+        return usage;
+    }
+
+    private static string ComputePromptHash(string prompt)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(prompt));
+        return Convert.ToBase64String(hash);
+    }
+
+    private static int? ToNullableInt(long? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        return value > int.MaxValue ? int.MaxValue : (int)value.Value;
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return value.Length <= maxLength ? value : value[..maxLength];
+    }
+
+    private sealed record AssistantStreamUpdate(string Delta, UsageDetails? Usage);
 }

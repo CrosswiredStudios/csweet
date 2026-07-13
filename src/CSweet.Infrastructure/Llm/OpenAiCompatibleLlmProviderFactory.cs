@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 using OpenAI;
 using OpenAI.Chat;
 using System.ClientModel;
+using Microsoft.Extensions.Logging;
 
 namespace CSweet.Infrastructure.Llm;
 
@@ -15,13 +16,16 @@ public sealed class OpenAiCompatibleLlmProviderFactory : ILlmProviderFactory
 
     private readonly CSweetDbContext _dbContext;
     private readonly ILlmProviderSecretStore _secretStore;
+    private readonly ILogger<OpenAiCompatibleLlmProviderFactory> _logger;
 
     public OpenAiCompatibleLlmProviderFactory(
         CSweetDbContext dbContext,
-        ILlmProviderSecretStore secretStore)
+        ILlmProviderSecretStore secretStore,
+        ILogger<OpenAiCompatibleLlmProviderFactory> logger)
     {
         _dbContext = dbContext;
         _secretStore = secretStore;
+        _logger = logger;
     }
 
     public async Task<IChatClient> CreateChatClientAsync(
@@ -33,19 +37,48 @@ public sealed class OpenAiCompatibleLlmProviderFactory : ILlmProviderFactory
 
         if (profile is null)
         {
+            _logger.LogWarning(
+                "Could not create chat client because provider profile {ProviderProfileId} was not found.",
+                providerProfileId);
+
             throw new InvalidOperationException("Provider profile was not found.");
         }
 
         if (!IsOpenAiCompatible(profile.ProviderType))
         {
+            _logger.LogWarning(
+                "Could not create chat client for provider profile {ProviderProfileId}: unsupported provider type {ProviderType}.",
+                providerProfileId,
+                profile.ProviderType);
+
             throw new NotSupportedException($"Provider type '{profile.ProviderType}' is not supported by the OpenAI-compatible factory.");
         }
 
-        if (!Uri.TryCreate(profile.BaseUrl, UriKind.Absolute, out var endpoint) ||
-            endpoint.Scheme is not ("http" or "https"))
+        if (!Uri.TryCreate(profile.BaseUrl, UriKind.Absolute, out var configuredEndpoint) ||
+            configuredEndpoint.Scheme is not ("http" or "https"))
         {
+            _logger.LogWarning(
+                "Could not create chat client for provider profile {ProviderProfileId}: invalid base URL {BaseUrl}.",
+                providerProfileId,
+                profile.BaseUrl);
+
             throw new InvalidOperationException("Provider base URL is invalid.");
         }
+
+        var endpoint = NormalizeBaseEndpoint(configuredEndpoint, profile.ProviderType);
+        var expectedModelsEndpoint = new Uri(endpoint, "models");
+        var expectedChatCompletionsEndpoint = new Uri(endpoint, "chat/completions");
+
+        _logger.LogInformation(
+            "Creating OpenAI-compatible chat client for provider profile {ProviderProfileId}. Type {ProviderType}. StoredBaseUrl {StoredBaseUrl}. NormalizedEndpoint {NormalizedEndpoint}. ExpectedModelsEndpoint {ExpectedModelsEndpoint}. ExpectedChatCompletionsEndpoint {ExpectedChatCompletionsEndpoint}. Model {Model}. SupportsStreaming {SupportsStreaming}.",
+            providerProfileId,
+            profile.ProviderType,
+            profile.BaseUrl,
+            endpoint,
+            expectedModelsEndpoint,
+            expectedChatCompletionsEndpoint,
+            profile.DefaultChatModel,
+            profile.SupportsStreaming);
 
         var apiKey = await ResolveApiKeyAsync(profile, cancellationToken);
         var options = new OpenAIClientOptions { Endpoint = endpoint };
@@ -73,5 +106,21 @@ public sealed class OpenAiCompatibleLlmProviderFactory : ILlmProviderFactory
     private static bool IsOpenAiCompatible(LlmProviderType providerType)
     {
         return providerType is LlmProviderType.LmStudio or LlmProviderType.OpenAiCompatible or LlmProviderType.OpenAi;
+    }
+
+    private static Uri NormalizeBaseEndpoint(Uri configuredEndpoint, LlmProviderType providerType)
+    {
+        var builder = new UriBuilder(configuredEndpoint)
+        {
+            Path = configuredEndpoint.AbsolutePath.TrimEnd('/') + "/"
+        };
+
+        if (providerType == LlmProviderType.LmStudio &&
+            string.Equals(builder.Path, "/", StringComparison.Ordinal))
+        {
+            builder.Path = "/v1/";
+        }
+
+        return builder.Uri;
     }
 }

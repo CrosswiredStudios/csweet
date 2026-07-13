@@ -31,10 +31,18 @@ public static class ChatMessageEndpoints
         IConversationService conversations,
         IAgentBrokerClient broker,
         IChatStreamRouter router,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("CSweet.Api.Chat.ChatMessageEndpoints");
+
         if (string.IsNullOrWhiteSpace(request.Message))
         {
+            logger.LogWarning(
+                "Rejected empty chat message for conversation {ConversationId} in organization {OrganizationId}.",
+                conversationId,
+                organizationId);
+
             http.Response.StatusCode = StatusCodes.Status400BadRequest;
             await http.Response.WriteAsJsonAsync(new { error = "Message is required." }, cancellationToken);
             return;
@@ -43,6 +51,11 @@ public static class ChatMessageEndpoints
         var conversation = await conversations.GetAsync(conversationId, cancellationToken);
         if (conversation is null || conversation.OrganizationId != organizationId)
         {
+            logger.LogWarning(
+                "Rejected chat message for missing or mismatched conversation {ConversationId} in organization {OrganizationId}.",
+                conversationId,
+                organizationId);
+
             http.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
@@ -50,6 +63,10 @@ public static class ChatMessageEndpoints
         var providerId = await conversations.GetDefaultProviderProfileIdAsync(cancellationToken);
         if (providerId is null)
         {
+            logger.LogWarning(
+                "Rejected chat message for conversation {ConversationId}: no enabled LLM provider is configured.",
+                conversationId);
+
             http.Response.StatusCode = StatusCodes.Status409Conflict;
             await http.Response.WriteAsJsonAsync(
                 new { error = "No enabled LLM provider is configured. Finish setup first." },
@@ -57,11 +74,22 @@ public static class ChatMessageEndpoints
             return;
         }
 
+        logger.LogInformation(
+            "Chat stream starting for conversation {ConversationId}, organization {OrganizationId}, agent user {AgentOrganizationUserId}, provider {ProviderProfileId}.",
+            conversationId,
+            organizationId,
+            conversation.AgentOrganizationUserId,
+            providerId.Value);
+
         await conversations.AppendMessageAsync(
             conversationId,
             ConversationRole.User,
             request.Message,
             cancellationToken);
+
+        logger.LogInformation(
+            "Persisted user chat message and subscribed to assistant chunks for conversation {ConversationId}.",
+            conversationId);
 
         var reader = router.Subscribe(conversationId);
 
@@ -74,6 +102,12 @@ public static class ChatMessageEndpoints
 
         // TODO(targeting): user.message.received is broadcast to same-business subscribers.
         // Store or route by the concrete target agent id before adding a second chat-capable agent.
+        logger.LogInformation(
+            "Publishing user message event {EventType} for conversation {ConversationId} with correlation {CorrelationId}.",
+            PersonalAssistantChatEvents.UserMessageReceivedEvent,
+            conversationId,
+            conversationId);
+
         await broker.PublishEventAsync(
             new PublishEvent
             {
@@ -100,7 +134,26 @@ public static class ChatMessageEndpoints
         {
             await foreach (var chunk in reader.ReadAllAsync(timeoutCts.Token))
             {
-                if (!chunk.IsFinal && chunk.Delta.Length > 0)
+                if (chunk.Error is not null)
+                {
+                    logger.LogWarning(
+                        "Received assistant error chunk for conversation {ConversationId}. Sequence {Sequence}. Error {Error}. Message {Message}",
+                        conversationId,
+                        chunk.Sequence,
+                        chunk.Error,
+                        chunk.Delta);
+                }
+                else
+                {
+                    logger.LogInformation(
+                        "Received assistant chunk for conversation {ConversationId}. Sequence {Sequence}. IsFinal {IsFinal}. DeltaLength {DeltaLength}.",
+                        conversationId,
+                        chunk.Sequence,
+                        chunk.IsFinal,
+                        chunk.Delta.Length);
+                }
+
+                if (chunk.Error is null && !chunk.IsFinal && chunk.Delta.Length > 0)
                 {
                     assembled.Append(chunk.Delta);
                 }
@@ -109,22 +162,33 @@ public static class ChatMessageEndpoints
 
                 if (chunk.IsFinal)
                 {
-                    completed = true;
+                    completed = chunk.Error is null;
                     break;
                 }
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            logger.LogWarning(
+                "Timed out waiting for assistant response for conversation {ConversationId} after {TimeoutSeconds} seconds.",
+                conversationId,
+                AgentResponseTimeout.TotalSeconds);
+
             await WriteSseChunkAsync(
                 http,
-                new ChatStreamChunk(-1, "The assistant did not respond in time.", IsFinal: true),
-                CancellationToken.None,
-                "timeout");
+                new ChatStreamChunk(
+                    -1,
+                    "The assistant did not respond in time.",
+                    IsFinal: true,
+                    Error: "timeout"),
+                CancellationToken.None);
         }
         finally
         {
             router.Complete(conversationId);
+            logger.LogInformation(
+                "Completed chat stream router subscription for conversation {ConversationId}.",
+                conversationId);
         }
 
         if (completed && assembled.Length > 0)
@@ -134,14 +198,25 @@ public static class ChatMessageEndpoints
                 ConversationRole.Assistant,
                 assembled.ToString(),
                 CancellationToken.None);
+
+            logger.LogInformation(
+                "Persisted assistant response for conversation {ConversationId}. ResponseLength {ResponseLength}.",
+                conversationId,
+                assembled.Length);
+        }
+        else if (!completed)
+        {
+            logger.LogWarning(
+                "Chat stream ended without a successful assistant response for conversation {ConversationId}. ResponseLength {ResponseLength}.",
+                conversationId,
+                assembled.Length);
         }
     }
 
     private static async Task WriteSseChunkAsync(
         HttpContext http,
         ChatStreamChunk chunk,
-        CancellationToken cancellationToken,
-        string? error = null)
+        CancellationToken cancellationToken)
     {
         var json = JsonSerializer.Serialize(
             new
@@ -149,7 +224,7 @@ public static class ChatMessageEndpoints
                 sequence = chunk.Sequence,
                 delta = chunk.Delta,
                 isFinal = chunk.IsFinal,
-                error
+                error = chunk.Error
             },
             SerializerOptions);
 

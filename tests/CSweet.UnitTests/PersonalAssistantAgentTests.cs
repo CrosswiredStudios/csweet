@@ -1,9 +1,10 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using CSweet.Application.Llm;
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
 using CSweet.Agents.PersonalAssistant;
-using CSweet.AI.Providers;
+using CSweet.Domain.Setup;
 using Google.Protobuf;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -49,8 +50,9 @@ public sealed class PersonalAssistantAgentTests
         Assert.All(chunkEvents, e => Assert.Equal("conversation/conversation-1", e.Subject));
 
         // Final response carries the concatenation of all deltas.
-        var final = Assert.Single(broker.PublishedEvents
-            .Where(e => e.EventType == PersonalAssistantProfile.AssistantResponseCreatedEvent));
+        var final = Assert.Single(
+            broker.PublishedEvents,
+            e => e.EventType == PersonalAssistantProfile.AssistantResponseCreatedEvent);
         var response = JsonSerializer.Deserialize<AssistantResponseCreated>(
             final.Payload.ToByteArray(), SerializerOptions);
         Assert.NotNull(response);
@@ -62,13 +64,8 @@ public sealed class PersonalAssistantAgentTests
     [Fact]
     public async Task HandleEventAsync_MalformedMessage_PublishesNothing()
     {
-        var services = new ServiceCollection();
-        services.AddSingleton<ILlmProviderFactory>(
-            new FakeLlmProviderFactory(new StreamingChatClient(["ignored"])));
-        await using var provider = services.BuildServiceProvider();
-
         var agent = new PersonalAssistantAgent(
-            provider.GetRequiredService<IServiceScopeFactory>(),
+            new FakeAgentLlmClientFactory(new StreamingChatClient(["ignored"])),
             NullLogger<PersonalAssistantAgent>.Instance);
         var broker = new RecordingBrokerClient();
         var context = new AgentRuntimeContext("business-1", "assistant-installation", broker);
@@ -97,14 +94,59 @@ public sealed class PersonalAssistantAgentTests
         Assert.Empty(broker.PublishedEvents);
     }
 
+    [Fact]
+    public async Task HandleEventAsync_EmptyModelStream_PublishesErrorChunk()
+    {
+        var broker = await RunAgentAsync(new StreamingChatClient([]));
+
+        var chunkEvent = Assert.Single(
+            broker.PublishedEvents,
+            e => e.EventType == PersonalAssistantProfile.AssistantResponseChunkEvent);
+
+        var chunk = JsonSerializer.Deserialize<AssistantResponseChunk>(
+            chunkEvent.Payload.ToByteArray(), SerializerOptions);
+
+        Assert.NotNull(chunk);
+        Assert.True(chunk.IsFinal);
+        Assert.Equal("agent_error", chunk.Error);
+        Assert.Contains("could not complete", chunk.Delta);
+        Assert.DoesNotContain(
+            broker.PublishedEvents,
+            e => e.EventType == PersonalAssistantProfile.AssistantResponseCreatedEvent);
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_StreamingUsage_WritesAgentRunLog()
+    {
+        var logs = new List<AgentRunLog>();
+        var serviceProvider = new ServiceCollection()
+            .AddSingleton<IAgentRunLogWriter>(new RecordingAgentRunLogWriter(logs))
+            .BuildServiceProvider();
+        var providerProfileId = Guid.NewGuid();
+        var agent = new PersonalAssistantAgent(
+            new FakeAgentLlmClientFactory(new UsageStreamingChatClient()),
+            NullLogger<PersonalAssistantAgent>.Instance,
+            serviceProvider.GetRequiredService<IServiceScopeFactory>());
+        var broker = new RecordingBrokerClient();
+        var context = new AgentRuntimeContext("business-1", "assistant-installation", broker);
+
+        await agent.HandleEventAsync(
+            BuildUserMessage(providerProfileId),
+            context,
+            CancellationToken.None);
+
+        var log = Assert.Single(logs);
+        Assert.Equal(PersonalAssistantProfile.AgentId, log.AgentKey);
+        Assert.Equal(providerProfileId, log.ProviderProfileId);
+        Assert.Equal("Completed", log.Status);
+        Assert.Equal(42, log.TokenInputCount);
+        Assert.Equal(17, log.TokenOutputCount);
+    }
+
     private static async Task<RecordingBrokerClient> RunAgentAsync(IChatClient chatClient)
     {
-        var services = new ServiceCollection();
-        services.AddSingleton<ILlmProviderFactory>(new FakeLlmProviderFactory(chatClient));
-        await using var provider = services.BuildServiceProvider();
-
         var agent = new PersonalAssistantAgent(
-            provider.GetRequiredService<IServiceScopeFactory>(),
+            new FakeAgentLlmClientFactory(chatClient),
             NullLogger<PersonalAssistantAgent>.Instance);
         var broker = new RecordingBrokerClient();
         var context = new AgentRuntimeContext("business-1", "assistant-installation", broker);
@@ -117,20 +159,40 @@ public sealed class PersonalAssistantAgentTests
             new Dictionary<string, string>());
 
         await agent.HandleEventAsync(
-            new DeliveredEvent
-            {
-                EventId = "event-1",
-                EventType = PersonalAssistantProfile.UserMessageReceivedEvent,
-                SchemaVersion = "1",
-                Subject = "conversation/conversation-1",
-                ContentType = "application/json",
-                Payload = ByteString.CopyFrom(
-                    JsonSerializer.SerializeToUtf8Bytes(incoming, SerializerOptions))
-            },
+            BuildUserMessage(incoming.ProviderProfileId),
             context,
             CancellationToken.None);
 
         return broker;
+    }
+
+    private static DeliveredEvent BuildUserMessage(Guid providerProfileId)
+    {
+        var incoming = new UserMessageReceived(
+            providerProfileId,
+            "conversation-1",
+            "user-1",
+            "What happened today?",
+            new Dictionary<string, string>());
+
+        return new DeliveredEvent
+        {
+            EventId = "event-1",
+            EventType = PersonalAssistantProfile.UserMessageReceivedEvent,
+            SchemaVersion = "1",
+            Subject = "conversation/conversation-1",
+            ContentType = "application/json",
+            Payload = ByteString.CopyFrom(
+                JsonSerializer.SerializeToUtf8Bytes(incoming, SerializerOptions))
+        };
+    }
+
+    private sealed class FakeAgentLlmClientFactory(IChatClient chatClient) : IAgentLlmClientFactory
+    {
+        public Task<IChatClient> CreateChatClientAsync(
+            AgentLlmSelection selection,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(chatClient);
     }
 
     private sealed class StreamingChatClient(IReadOnlyList<string> deltas) : IChatClient
@@ -159,6 +221,48 @@ public sealed class PersonalAssistantAgentTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class UsageStreamingChatClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ChatResponse(
+                new ChatMessage(ChatRole.Assistant, "usage response")));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield return new ChatResponseUpdate(ChatRole.Assistant, "usage response");
+            yield return new ChatResponseUpdate(ChatRole.Assistant, [
+                new UsageContent(new UsageDetails
+                {
+                    InputTokenCount = 42,
+                    OutputTokenCount = 17
+                })
+            ]);
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) =>
+            serviceType.IsInstanceOfType(this) ? this : null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class RecordingAgentRunLogWriter(List<AgentRunLog> logs) : IAgentRunLogWriter
+    {
+        public Task WriteAsync(AgentRunLog log, CancellationToken cancellationToken = default)
+        {
+            logs.Add(log);
+            return Task.CompletedTask;
         }
     }
 

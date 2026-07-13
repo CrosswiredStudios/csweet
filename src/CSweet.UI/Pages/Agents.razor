@@ -1,0 +1,542 @@
+@page "/agents"
+@using System.Text.Json
+@using CSweet.Contracts.Agents
+@using CSweet.Contracts.Llm
+@inject IAgentApiClient AgentApi
+@inject ILlmProviderApiClient LlmProviderApi
+
+<PageTitle>Agents - C-Sweet</PageTitle>
+
+<div class="setup-shell agents-page">
+    <MudPaper Elevation="0" Class="page-header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Agent management</MudText>
+            <MudText Typo="Typo.h3">Agents</MudText>
+            <MudText Color="Color.Secondary">Review installed agents and edit only the settings exposed by each running agent.</MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Disabled="@_isBusy" OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
+            Refresh
+        </MudButton>
+    </MudPaper>
+
+    @if (_usageSummary is not null)
+    {
+        <section class="usage-summary-grid" aria-label="Agent token usage">
+            @UsageCard("Last 24 Hours", _usageSummary.Last24Hours)
+            @UsageCard("Last 7 Days", _usageSummary.Last7Days)
+            @UsageCard("Last 30 Days", _usageSummary.Last30Days)
+        </section>
+    }
+
+    @if (_isLoading)
+    {
+        <MudPaper Elevation="1" Class="surface-panel surface-panel-narrow agents-loading-panel">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <MudText Color="Color.Secondary">Loading agents...</MudText>
+        </MudPaper>
+    }
+    else if (!string.IsNullOrWhiteSpace(_pageError))
+    {
+        <MudPaper Elevation="1" Class="surface-panel surface-panel-narrow">
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled">@_pageError</MudAlert>
+            <MudStack Row="true" Class="setup-actions">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">Retry</MudButton>
+            </MudStack>
+        </MudPaper>
+    }
+    else
+    {
+        <section class="agents-grid">
+            <MudPaper Elevation="1" Class="surface-panel agents-list-panel">
+                <div class="configuration-section-header">
+                    <div>
+                        <MudText Typo="Typo.h6">Available Agents</MudText>
+                        <MudText Color="Color.Secondary">Discovered from installed agent manifests.</MudText>
+                    </div>
+                    <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@_agents.Count</MudChip>
+                </div>
+
+                @if (_agents.Count == 0)
+                {
+                    <MudText Color="Color.Secondary">No installed agent manifests were found.</MudText>
+                }
+                else
+                {
+                    <div class="agents-list">
+                        @foreach (var agent in _agents)
+                        {
+                            <MudButton Class="@AgentButtonClass(agent)"
+                                       Variant="Variant.Text"
+                                       Disabled="@_isBusy"
+                                       OnClick="@(() => SelectAgentAsync(agent))">
+                                <div class="agent-list-item-content">
+                                    <div>
+                                        <MudText Typo="Typo.subtitle1">@agent.Name</MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@agent.PublisherName</MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatUsageCaption(AgentUsage(agent.Id)?.Usage)</MudText>
+                                    </div>
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">v@agent.Version</MudChip>
+                                </div>
+                            </MudButton>
+                        }
+                    </div>
+                }
+            </MudPaper>
+
+            <MudPaper Elevation="1" Class="surface-panel agents-editor-panel">
+                @if (_selectedAgent is null)
+                {
+                    <div class="agents-empty-editor">
+                        <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Large" Color="Color.Primary" />
+                        <MudText Typo="Typo.h6">Select an agent</MudText>
+                        <MudText Color="Color.Secondary">Configuration fields are requested from the running agent binary when you open it.</MudText>
+                    </div>
+                }
+                else
+                {
+                    <div class="configuration-section-header">
+                        <div>
+                            <MudText Typo="Typo.h6">@_selectedAgent.Name</MudText>
+                            <MudText Color="Color.Secondary">@_selectedAgent.Id</MudText>
+                        </div>
+                        <MudChip T="string" Color="@SchemaChipColor" Variant="Variant.Filled">@SchemaChipLabel</MudChip>
+                    </div>
+
+                    <dl class="configuration-details agents-details">
+                        <div>
+                            <dt>Publisher</dt>
+                            <dd>@_selectedAgent.PublisherName</dd>
+                        </div>
+                        <div>
+                            <dt>Runtime</dt>
+                            <dd>@_selectedAgent.RuntimeType</dd>
+                        </div>
+                        <div>
+                            <dt>Capabilities</dt>
+                            <dd>@_selectedAgent.Capabilities.Count</dd>
+                        </div>
+                        <div>
+                            <dt>Permissions</dt>
+                            <dd>@_selectedAgent.RequestedPermissions.Count</dd>
+                        </div>
+                        <div>
+                            <dt>30d input</dt>
+                            <dd>@FormatTokens(SelectedAgentUsage?.Usage.InputTokens ?? 0)</dd>
+                        </div>
+                        <div>
+                            <dt>30d output</dt>
+                            <dd>@FormatTokens(SelectedAgentUsage?.Usage.OutputTokens ?? 0)</dd>
+                        </div>
+                        <div>
+                            <dt>30d requests</dt>
+                            <dd>@((SelectedAgentUsage?.Usage.RequestCount ?? 0).ToString("N0"))</dd>
+                        </div>
+                    </dl>
+
+                    @if (_isLoadingConfiguration)
+                    {
+                        <div class="agents-loading-panel mt-4">
+                            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                            <MudText Color="Color.Secondary">Asking agent for supported settings...</MudText>
+                        </div>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(_configurationError))
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mt-4">@_configurationError</MudAlert>
+                        <MudStack Row="true" Class="setup-actions">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@_isBusy" OnClick="@(() => LoadConfigurationAsync(_selectedAgent))">
+                                Try again
+                            </MudButton>
+                        </MudStack>
+                    }
+                    else if (_schema is not null)
+                    {
+                        <MudText Color="Color.Secondary" Class="mt-4">Schema @_schema.SchemaVersion exposed by @_schema.AgentVersion.</MudText>
+
+                        <div class="agent-config-form">
+                            @foreach (var field in _schema.Fields)
+                            {
+                                <div class="agent-config-field">
+                                    @switch (field.Type)
+                                    {
+                                        case AgentConfigurationFieldTypes.Boolean:
+                                            <MudCheckBox T="bool"
+                                                         Label="@field.Label"
+                                                         Value="@GetBooleanValue(field.Key)"
+                                                         ValueChanged="@((bool value) => SetFormValue(field.Key, value))" />
+                                            break;
+
+                                        case AgentConfigurationFieldTypes.Number:
+                                            <MudNumericField T="decimal?"
+                                                             Label="@field.Label"
+                                                             Value="@GetNumberValue(field.Key)"
+                                                             ValueChanged="@((decimal? value) => SetFormValue(field.Key, value))"
+                                                             Min="@field.Minimum"
+                                                             Max="@field.Maximum"
+                                                             Step="@(field.Step ?? 1)"
+                                                             Variant="Variant.Outlined" />
+                                            break;
+
+                                        case AgentConfigurationFieldTypes.Select:
+                                            <MudSelect T="string"
+                                                       Label="@field.Label"
+                                                       Value="@GetStringValue(field.Key)"
+                                                       ValueChanged="@((string value) => SetFormValue(field.Key, value))"
+                                                       Variant="Variant.Outlined">
+                                                @foreach (var option in field.Options ?? [])
+                                                {
+                                                    <MudSelectItem T="string" Value="@option.Value">@option.Label</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                            break;
+
+                                        case AgentConfigurationFieldTypes.LlmProvider:
+                                            <MudSelect T="string"
+                                                       Label="@field.Label"
+                                                       Value="@GetStringValue(field.Key)"
+                                                       ValueChanged="@((string value) => SetProviderValue(field.Key, value))"
+                                                       Variant="Variant.Outlined">
+                                                <MudSelectItem T="string" Value="@string.Empty">Select a provider</MudSelectItem>
+                                                @foreach (var profile in _providerProfiles.Where(profile => profile.IsEnabled))
+                                                {
+                                                    <MudSelectItem T="string" Value="@profile.Id.ToString()">@profile.Name</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                            break;
+
+                                        case AgentConfigurationFieldTypes.LlmModel:
+                                            <MudSelect T="string"
+                                                       Label="@field.Label"
+                                                       Value="@GetStringValue(field.Key)"
+                                                       ValueChanged="@((string value) => SetFormValue(field.Key, value))"
+                                                       Disabled="@IsModelPickerDisabled(field)"
+                                                       Variant="Variant.Outlined">
+                                                <MudSelectItem T="string" Value="@string.Empty">@ModelPlaceholder(field)</MudSelectItem>
+                                                @if (SelectedModelMissing(field))
+                                                {
+                                                    <MudSelectItem T="string" Value="@GetStringValue(field.Key)">@GetStringValue(field.Key)</MudSelectItem>
+                                                }
+                                                @foreach (var model in ModelOptions(field))
+                                                {
+                                                    <MudSelectItem T="string" Value="@model">@model</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                            break;
+
+                                        case AgentConfigurationFieldTypes.Secret:
+                                            <MudTextField Label="@field.Label"
+                                                          Value="@GetStringValue(field.Key)"
+                                                          ValueChanged="@((string value) => SetFormValue(field.Key, value))"
+                                                          InputType="InputType.Password"
+                                                          autocomplete="off"
+                                                          Placeholder="@field.Placeholder"
+                                                          Variant="Variant.Outlined" />
+                                            break;
+
+                                        case AgentConfigurationFieldTypes.TextArea:
+                                            <MudTextField Label="@field.Label"
+                                                          Value="@GetStringValue(field.Key)"
+                                                          ValueChanged="@((string value) => SetFormValue(field.Key, value))"
+                                                          Lines="4"
+                                                          Placeholder="@field.Placeholder"
+                                                          Variant="Variant.Outlined" />
+                                            break;
+
+                                        default:
+                                            <MudTextField Label="@field.Label"
+                                                          Value="@GetStringValue(field.Key)"
+                                                          ValueChanged="@((string value) => SetFormValue(field.Key, value))"
+                                                          Placeholder="@field.Placeholder"
+                                                          Variant="Variant.Outlined" />
+                                            break;
+                                    }
+
+                                    @if (!string.IsNullOrWhiteSpace(field.Description))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@field.Description</MudText>
+                                    }
+                                </div>
+                            }
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(_actionMessage))
+                        {
+                            <MudAlert Severity="@ActionMessageSeverity" Variant="Variant.Outlined" Class="mt-4">@_actionMessage</MudAlert>
+                        }
+
+                        <MudStack Row="true" Class="setup-actions">
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       Disabled="@_isBusy"
+                                       OnClick="SaveConfigurationAsync">
+                                @(_isBusy ? "Saving..." : "Save Settings")
+                            </MudButton>
+                        </MudStack>
+                    }
+                }
+            </MudPaper>
+        </section>
+    }
+</div>
+
+@code {
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+
+    private IReadOnlyList<AgentCatalogItemResponse> _agents = [];
+    private IReadOnlyList<LlmProviderProfileResponse> _providerProfiles = [];
+    private LlmTokenUsageSummaryResponse? _usageSummary;
+    private AgentCatalogItemResponse? _selectedAgent;
+    private AgentConfigurationSchemaResponse? _schema;
+    private readonly Dictionary<string, object?> _formValues = new(StringComparer.Ordinal);
+    private bool _isLoading = true;
+    private bool _isLoadingConfiguration;
+    private bool _isBusy;
+    private string? _pageError;
+    private string? _configurationError;
+    private string? _actionMessage;
+    private bool? _actionSucceeded;
+
+    private string SchemaChipLabel => _schema is null ? "Offline" : "Configurable";
+    private Color SchemaChipColor => _schema is null ? Color.Warning : Color.Success;
+    private Severity ActionMessageSeverity => _actionSucceeded == false ? Severity.Error : Severity.Success;
+    private AgentTokenUsageResponse? SelectedAgentUsage =>
+        _selectedAgent is null ? null : AgentUsage(_selectedAgent.Id);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        _pageError = null;
+
+        try
+        {
+            var agentsTask = AgentApi.ListAsync();
+            var providersTask = LlmProviderApi.ListAsync();
+            var usageTask = LlmProviderApi.GetUsageSummaryAsync();
+
+            await Task.WhenAll(agentsTask, providersTask, usageTask);
+
+            _agents = await agentsTask;
+            _providerProfiles = await providersTask;
+            _usageSummary = await usageTask;
+            if (_selectedAgent is not null)
+            {
+                _selectedAgent = _agents.FirstOrDefault(agent => agent.Id == _selectedAgent.Id);
+            }
+        }
+        catch
+        {
+            _pageError = "Unable to load agents from the API.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SelectAgentAsync(AgentCatalogItemResponse agent)
+    {
+        _selectedAgent = agent;
+        await LoadConfigurationAsync(agent);
+    }
+
+    private async Task LoadConfigurationAsync(AgentCatalogItemResponse agent)
+    {
+        _isLoadingConfiguration = true;
+        _configurationError = null;
+        _actionMessage = null;
+        _schema = null;
+        _formValues.Clear();
+
+        try
+        {
+            _schema = await AgentApi.GetConfigurationAsync(agent.Id);
+            HydrateFormValues(_schema);
+        }
+        catch (Exception ex)
+        {
+            _configurationError = ex.Message;
+        }
+        finally
+        {
+            _isLoadingConfiguration = false;
+        }
+    }
+
+    private async Task SaveConfigurationAsync()
+    {
+        if (_selectedAgent is null || _schema is null)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _actionMessage = null;
+        _actionSucceeded = null;
+
+        try
+        {
+            var settings = _schema.Fields.ToDictionary(
+                field => field.Key,
+                field => JsonSerializer.SerializeToElement(_formValues.GetValueOrDefault(field.Key), SerializerOptions),
+                StringComparer.Ordinal);
+
+            var result = await AgentApi.UpdateConfigurationAsync(
+                _selectedAgent.Id,
+                new UpdateAgentConfigurationRequest(settings));
+
+            _actionSucceeded = result.Succeeded;
+            _actionMessage = result.Message ?? "Agent settings saved.";
+            _schema = new AgentConfigurationSchemaResponse(
+                _schema.AgentId,
+                _schema.AgentVersion,
+                _schema.SchemaVersion,
+                _schema.Fields,
+                result.Settings);
+            HydrateFormValues(_schema);
+        }
+        catch (Exception ex)
+        {
+            _actionSucceeded = false;
+            _actionMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private void HydrateFormValues(AgentConfigurationSchemaResponse schema)
+    {
+        _formValues.Clear();
+
+        foreach (var field in schema.Fields)
+        {
+            if (!schema.Settings.TryGetValue(field.Key, out var value))
+            {
+                _formValues[field.Key] = field.Type == AgentConfigurationFieldTypes.Boolean ? false : null;
+                continue;
+            }
+
+            _formValues[field.Key] = field.Type switch
+            {
+                AgentConfigurationFieldTypes.Boolean => value.ValueKind is JsonValueKind.True,
+                AgentConfigurationFieldTypes.Number => value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number)
+                    ? number
+                    : null,
+                _ => value.ValueKind == JsonValueKind.String ? value.GetString() : null
+            };
+        }
+    }
+
+    private string AgentButtonClass(AgentCatalogItemResponse agent) =>
+        _selectedAgent?.Id == agent.Id
+            ? "agent-list-item selected"
+            : "agent-list-item";
+
+    private AgentTokenUsageResponse? AgentUsage(string agentKey) =>
+        _usageSummary?.Agents.FirstOrDefault(agent => string.Equals(agent.AgentKey, agentKey, StringComparison.Ordinal));
+
+    private static RenderFragment UsageCard(string label, LlmTokenUsageWindowResponse usage) => @<MudPaper Elevation="1" Class="usage-summary-card">
+        <MudText Typo="Typo.overline" Color="Color.Secondary">@label</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">@usage.RequestCount.ToString("N0") requests</MudText>
+        <div class="usage-token-breakdown">
+            <div>
+                <span>Input</span>
+                <strong>@FormatTokens(usage.InputTokens)</strong>
+            </div>
+            <div>
+                <span>Output</span>
+                <strong>@FormatTokens(usage.OutputTokens)</strong>
+            </div>
+        </div>
+    </MudPaper>;
+
+    private string GetStringValue(string key) =>
+        _formValues.TryGetValue(key, out var value) ? value?.ToString() ?? string.Empty : string.Empty;
+
+    private decimal? GetNumberValue(string key) =>
+        _formValues.TryGetValue(key, out var value) && value is decimal number ? number : null;
+
+    private bool GetBooleanValue(string key) =>
+        _formValues.TryGetValue(key, out var value) && value is true;
+
+    private void SetFormValue(string key, object? value)
+    {
+        _formValues[key] = value;
+    }
+
+    private void SetProviderValue(string key, string value)
+    {
+        _formValues[key] = value;
+
+        if (_schema is null)
+        {
+            return;
+        }
+
+        foreach (var modelField in _schema.Fields.Where(field =>
+            field.Type == AgentConfigurationFieldTypes.LlmModel &&
+            string.Equals(ProviderFieldKey(field), key, StringComparison.Ordinal)))
+        {
+            var provider = FindProvider(value);
+            _formValues[modelField.Key] = provider?.DefaultChatModel ?? string.Empty;
+        }
+    }
+
+    private bool IsModelPickerDisabled(AgentConfigurationField field) =>
+        FindProvider(GetStringValue(ProviderFieldKey(field))) is null;
+
+    private string ModelPlaceholder(AgentConfigurationField field) =>
+        FindProvider(GetStringValue(ProviderFieldKey(field))) is null
+            ? "Select a provider first"
+            : "Select a model";
+
+    private IReadOnlyList<string> ModelOptions(AgentConfigurationField field)
+    {
+        var provider = FindProvider(GetStringValue(ProviderFieldKey(field)));
+        return string.IsNullOrWhiteSpace(provider?.DefaultChatModel)
+            ? []
+            : [provider.DefaultChatModel];
+    }
+
+    private bool SelectedModelMissing(AgentConfigurationField field)
+    {
+        var selected = GetStringValue(field.Key);
+        return !string.IsNullOrWhiteSpace(selected) &&
+            !ModelOptions(field).Contains(selected, StringComparer.Ordinal);
+    }
+
+    private string ProviderFieldKey(AgentConfigurationField modelField)
+    {
+        if (!string.IsNullOrWhiteSpace(modelField.DependsOnFieldKey))
+        {
+            return modelField.DependsOnFieldKey;
+        }
+
+        return _schema?.Fields.FirstOrDefault(field => field.Type == AgentConfigurationFieldTypes.LlmProvider)?.Key
+            ?? string.Empty;
+    }
+
+    private LlmProviderProfileResponse? FindProvider(string providerId)
+    {
+        return Guid.TryParse(providerId, out var id)
+            ? _providerProfiles.FirstOrDefault(provider => provider.Id == id)
+            : null;
+    }
+
+    private static string FormatTokens(long tokens) => tokens >= 1_000_000
+        ? $"{tokens / 1_000_000d:0.##}M"
+        : tokens >= 1_000
+            ? $"{tokens / 1_000d:0.#}K"
+            : tokens.ToString("N0");
+
+    private static string FormatUsageCaption(LlmTokenUsageWindowResponse? usage) =>
+        usage is null
+            ? "In 0 / Out 0 / 30d"
+            : $"In {FormatTokens(usage.InputTokens)} / Out {FormatTokens(usage.OutputTokens)} / 30d";
+}

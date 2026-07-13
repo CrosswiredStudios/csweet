@@ -1,3 +1,4 @@
+using CSweet.Api.Agents;
 using CSweet.Api.BusinessOnboarding;
 using CSweet.Api.Chat;
 using CSweet.Api.Core;
@@ -13,6 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
 builder.AddCSweetInfrastructure();
 builder.Services.AddChatGateway(builder.Configuration);
+builder.Services.AddAgentManagement(builder.Configuration);
 
 builder.Services.AddCors(options =>
 {
@@ -66,6 +68,7 @@ app.MapTaskRunEndpoints();
 app.MapArtifactEndpoints();
 app.MapConversationEndpoints();
 app.MapChatMessageEndpoints();
+app.MapAgentManagementEndpoints();
 
 app.MapControllers();
 

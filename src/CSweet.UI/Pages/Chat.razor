@@ -61,6 +61,7 @@
                     <div class="chat-bubble chat-bubble-assistant">
                         @if (string.IsNullOrEmpty(_streamingText))
                         {
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">Personal Assistant is thinking...</MudText>
                             <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
                         }
                         else

@@ -58,6 +58,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<ILlmConnectionTester, LlmConnectionTester>();
         builder.Services.AddScoped<IModelCatalogClient, ModelCatalogClient>();
         builder.Services.AddScoped<ILlmProviderProfileService, LlmProviderProfileService>();
+        builder.Services.AddScoped<ILlmTokenUsageService, LlmTokenUsageService>();
         builder.Services.AddScoped<IAgentRunLogWriter, AgentRunLogWriter>();
         builder.Services.AddScoped<IAgentRunner, AgentFrameworkAgentRunner>();
         builder.Services.AddScoped<IAgentWorkflowRunner, AgentFrameworkWorkflowRunner>();

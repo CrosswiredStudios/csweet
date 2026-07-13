@@ -62,6 +62,8 @@ public sealed class AgentFrameworkAgentRunner : IAgentRunner
             domainLog.CompletedAt = DateTimeOffset.UtcNow;
             domainLog.Status = "Completed";
             domainLog.OutputPreview = Truncate(content, 500);
+            domainLog.TokenInputCount = ToNullableInt(response.Usage?.InputTokenCount);
+            domainLog.TokenOutputCount = ToNullableInt(response.Usage?.OutputTokenCount);
             domainLog.DurationMs = stopwatch.ElapsedMilliseconds;
 
             logs.Add(new AgentRunLogEntry("Info", $"Agent run completed successfully in {stopwatch.ElapsedMilliseconds}ms", DateTimeOffset.UtcNow));
@@ -185,5 +187,15 @@ public sealed class AgentFrameworkAgentRunner : IAgentRunner
     {
         if (string.IsNullOrEmpty(value)) return value;
         return value.Length <= maxLength ? value : value[..maxLength] + "...";
+    }
+
+    private static int? ToNullableInt(long? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        return value > int.MaxValue ? int.MaxValue : (int)value.Value;
     }
 }

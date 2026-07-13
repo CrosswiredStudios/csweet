@@ -29,4 +29,5 @@ public sealed record AssistantResponseChunk(
     string ConversationId,
     int Sequence,
     string Delta,
-    bool IsFinal);
+    bool IsFinal,
+    string? Error = null);

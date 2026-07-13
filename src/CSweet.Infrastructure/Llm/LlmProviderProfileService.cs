@@ -26,19 +26,10 @@ public sealed class LlmProviderProfileService : ILlmProviderProfileService
         CreateLlmProviderProfileRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.Name))
+        var validationFailure = Validate(request.Name, request.BaseUrl, request.DefaultChatModel);
+        if (validationFailure is not null)
         {
-            return Failure("validation_error", "Provider name is required.");
-        }
-
-        if (!IsValidBaseUrl(request.BaseUrl))
-        {
-            return Failure("invalid_base_url", "Provider base URL must be an absolute HTTP or HTTPS URL.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.DefaultChatModel))
-        {
-            return Failure("validation_error", "Default chat model is required.");
+            return validationFailure;
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -87,6 +78,121 @@ public sealed class LlmProviderProfileService : ILlmProviderProfileService
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new LlmProviderProfileActionResponse(true, null, null, profile.ToResponse());
+    }
+
+    public async Task<LlmProviderProfileActionResponse> UpdateAsync(
+        Guid providerProfileId,
+        UpdateLlmProviderProfileRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var validationFailure = Validate(request.Name, request.BaseUrl, request.DefaultChatModel);
+        if (validationFailure is not null)
+        {
+            return validationFailure;
+        }
+
+        var profile = await _dbContext.LlmProviderProfiles
+            .SingleOrDefaultAsync(x => x.Id == providerProfileId, cancellationToken);
+
+        if (profile is null)
+        {
+            return Failure("provider_profile_not_found", "Provider profile was not found.");
+        }
+
+        var connectionChanged =
+            profile.ProviderType != request.ProviderType ||
+            !string.Equals(profile.BaseUrl, request.BaseUrl.Trim(), StringComparison.Ordinal) ||
+            !string.Equals(profile.DefaultChatModel, request.DefaultChatModel.Trim(), StringComparison.Ordinal) ||
+            !string.Equals(profile.DefaultEmbeddingModel, NormalizeOptional(request.DefaultEmbeddingModel), StringComparison.Ordinal) ||
+            request.ReplaceApiKey;
+
+        if (request.ReplaceApiKey)
+        {
+            if (string.IsNullOrWhiteSpace(request.ApiKey))
+            {
+                profile.ApiKeySecretName = null;
+            }
+            else
+            {
+                profile.ApiKeySecretName ??= $"llm-provider-profiles/{profile.Id}/api-key";
+                await _secretStore.StoreAsync(profile.ApiKeySecretName, request.ApiKey, cancellationToken);
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        profile.Name = request.Name.Trim();
+        profile.ProviderType = request.ProviderType;
+        profile.BaseUrl = request.BaseUrl.Trim();
+        profile.DefaultChatModel = request.DefaultChatModel.Trim();
+        profile.DefaultEmbeddingModel = NormalizeOptional(request.DefaultEmbeddingModel);
+        profile.ContextWindowTokens = request.ContextWindowTokens;
+        profile.MaxOutputTokens = request.MaxOutputTokens;
+        profile.SupportsStreaming = request.SupportsStreaming;
+        profile.SupportsToolCalling = request.SupportsToolCalling;
+        profile.SupportsStructuredOutput = request.SupportsStructuredOutput;
+        profile.SupportsVision = request.SupportsVision;
+        profile.IsEnabled = request.IsEnabled;
+        profile.UpdatedAt = now;
+
+        if (connectionChanged)
+        {
+            profile.LastSuccessfulConnectionAt = null;
+        }
+
+        if (!profile.IsEnabled)
+        {
+            await ClearDefaultReferencesAsync(profile.Id, cancellationToken);
+        }
+
+        _dbContext.AuditEvents.Add(new AuditEvent
+        {
+            Id = Guid.NewGuid(),
+            EventType = "llm_provider_profile.updated",
+            EntityType = nameof(LlmProviderProfile),
+            EntityId = profile.Id,
+            Summary = $"LLM provider profile updated: {profile.Name}",
+            CreatedAt = now
+        });
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new LlmProviderProfileActionResponse(true, null, null, profile.ToResponse());
+    }
+
+    public async Task<LlmProviderProfileActionResponse> DeleteAsync(
+        Guid providerProfileId,
+        CancellationToken cancellationToken = default)
+    {
+        var profile = await _dbContext.LlmProviderProfiles
+            .SingleOrDefaultAsync(x => x.Id == providerProfileId, cancellationToken);
+
+        if (profile is null)
+        {
+            return Failure("provider_profile_not_found", "Provider profile was not found.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        await ClearDefaultReferencesAsync(profile.Id, cancellationToken);
+
+        var tests = await _dbContext.ModelCapabilityTests
+            .Where(x => x.ProviderProfileId == profile.Id)
+            .ToListAsync(cancellationToken);
+
+        _dbContext.ModelCapabilityTests.RemoveRange(tests);
+        _dbContext.LlmProviderProfiles.Remove(profile);
+        _dbContext.AuditEvents.Add(new AuditEvent
+        {
+            Id = Guid.NewGuid(),
+            EventType = "llm_provider_profile.deleted",
+            EntityType = nameof(LlmProviderProfile),
+            EntityId = profile.Id,
+            Summary = $"LLM provider profile deleted: {profile.Name}",
+            CreatedAt = now
+        });
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new LlmProviderProfileActionResponse(true, null, "Provider profile deleted.");
     }
 
     public async Task<IReadOnlyList<LlmProviderProfileResponse>> ListAsync(CancellationToken cancellationToken = default)
@@ -179,6 +285,61 @@ public sealed class LlmProviderProfileService : ILlmProviderProfileService
     private static LlmProviderProfileActionResponse Failure(string errorCode, string message)
     {
         return new LlmProviderProfileActionResponse(false, errorCode, message);
+    }
+
+    private async Task ClearDefaultReferencesAsync(
+        Guid providerProfileId,
+        CancellationToken cancellationToken)
+    {
+        var configurations = await _dbContext.SystemConfigurations
+            .Where(x => x.DefaultChatProviderId == providerProfileId || x.DefaultEmbeddingProviderId == providerProfileId)
+            .ToListAsync(cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var configuration in configurations)
+        {
+            if (configuration.DefaultChatProviderId == providerProfileId)
+            {
+                configuration.DefaultChatProviderId = null;
+            }
+
+            if (configuration.DefaultEmbeddingProviderId == providerProfileId)
+            {
+                configuration.DefaultEmbeddingProviderId = null;
+            }
+
+            configuration.UpdatedAt = now;
+        }
+    }
+
+    private static LlmProviderProfileActionResponse? Validate(
+        string name,
+        string baseUrl,
+        string defaultChatModel)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return Failure("validation_error", "Provider name is required.");
+        }
+
+        if (!IsValidBaseUrl(baseUrl))
+        {
+            return Failure("invalid_base_url", "Provider base URL must be an absolute HTTP or HTTPS URL.");
+        }
+
+        if (string.IsNullOrWhiteSpace(defaultChatModel))
+        {
+            return Failure("validation_error", "Default chat model is required.");
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 
     private static bool IsValidBaseUrl(string baseUrl)

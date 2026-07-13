@@ -49,6 +49,20 @@ public class AgentRunnerIntegrationTests
     }
 
     [Fact]
+    public async Task RunAsync_PersistsTokenUsageWhenProviderReturnsUsage()
+    {
+        var runner = new AgentFrameworkAgentRunner(
+            new FakeLlmProviderFactory(new UsageChatClient()),
+            new InMemoryAgentRunLogWriter(_logsWritten));
+
+        await runner.RunAsync(CreateRequest());
+
+        var log = Assert.Single(_logsWritten);
+        Assert.Equal(12, log.TokenInputCount);
+        Assert.Equal(34, log.TokenOutputCount);
+    }
+
+    [Fact]
     public async Task RunAsync_Failure_CapturesErrorInLog()
     {
         var brokenFactory = new ThrowingLlmProviderFactory();
@@ -176,6 +190,41 @@ public class AgentRunnerIntegrationTests
             CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("Simulated provider failure.");
+        }
+    }
+
+    private sealed class UsageChatClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, "usage response"))
+            {
+                Usage = new UsageDetails
+                {
+                    InputTokenCount = 12,
+                    OutputTokenCount = 34
+                }
+            };
+
+            return Task.FromResult(response);
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            return AsyncEnumerable.Empty<ChatResponseUpdate>();
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) =>
+            serviceType.IsInstanceOfType(this) ? this : null;
+
+        public void Dispose()
+        {
         }
     }
 }

@@ -25,7 +25,9 @@
   "capabilities": [
     "assistant.converse.v1",
     "assistant.summarize-activity.v1",
-    "assistant.plan-work.v1"
+    "assistant.plan-work.v1",
+    "agent.configuration.describe.v1",
+    "agent.configuration.update.v1"
   ],
   "requestedSubscriptions": [
     "com.csweet.user.message.received.v1",

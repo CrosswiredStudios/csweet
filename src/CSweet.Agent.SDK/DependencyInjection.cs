@@ -37,7 +37,8 @@ public static class DependencyInjection
         });
 
         builder.Services.AddSingleton<TAgent>();
-        builder.Services.AddSingleton<IAgentBrokerClient, GrpcAgentBrokerClient>();
+        builder.Services.AddTransient<GrpcAgentBrokerClient>();
+        builder.Services.AddTransient<IAgentBrokerClient, GrpcAgentBrokerClient>();
         builder.Services.AddHostedService<AgentRuntimeWorker<TAgent>>();
 
         return builder;

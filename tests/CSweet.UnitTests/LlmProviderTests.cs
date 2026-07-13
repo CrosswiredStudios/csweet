@@ -52,6 +52,113 @@ public class LlmProviderTests
     }
 
     [Fact]
+    public async Task UpdateProviderProfile_ReplacesApiKeyAndClearsLastSuccessfulConnection()
+    {
+        await using var dbContext = CreateDbContext();
+        var profile = await AddProfileAsync(dbContext);
+        profile.ApiKeySecretName = $"llm-provider-profiles/{profile.Id}/api-key";
+        profile.LastSuccessfulConnectionAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync();
+
+        var secretStore = new InMemoryLlmProviderSecretStore();
+        await secretStore.StoreAsync(profile.ApiKeySecretName, "old-key");
+        var tester = CreateTester(dbContext, CreateReadyHandler());
+        var service = new LlmProviderProfileService(dbContext, secretStore, tester);
+
+        var result = await service.UpdateAsync(profile.Id, new UpdateLlmProviderProfileRequest(
+            "Updated Provider",
+            LlmProviderType.OpenAiCompatible,
+            "http://fake-provider/v2",
+            "new-key",
+            ReplaceApiKey: true,
+            "new-model",
+            null,
+            null,
+            null,
+            SupportsStreaming: true,
+            SupportsToolCalling: true,
+            SupportsStructuredOutput: true,
+            SupportsVision: false,
+            IsEnabled: true));
+
+        var updated = await dbContext.LlmProviderProfiles.SingleAsync(x => x.Id == profile.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Updated Provider", updated.Name);
+        Assert.Equal("new-model", updated.DefaultChatModel);
+        Assert.Null(updated.LastSuccessfulConnectionAt);
+        Assert.Equal("new-key", await secretStore.GetAsync(profile.ApiKeySecretName));
+    }
+
+    [Fact]
+    public async Task DeleteProviderProfile_ClearsDefaultReferencesAndRemovesCapabilityTests()
+    {
+        await using var dbContext = CreateDbContext();
+        var profile = await AddProfileAsync(dbContext);
+        var now = DateTimeOffset.UtcNow;
+        dbContext.SystemConfigurations.Add(new SystemConfiguration
+        {
+            Id = Guid.NewGuid(),
+            DefaultChatProviderId = profile.Id,
+            DefaultEmbeddingProviderId = profile.Id,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        dbContext.ModelCapabilityTests.Add(new ModelCapabilityTest
+        {
+            Id = Guid.NewGuid(),
+            ProviderProfileId = profile.Id,
+            ConnectionSucceeded = true,
+            ChatSucceeded = true,
+            TestedAt = now
+        });
+        await dbContext.SaveChangesAsync();
+
+        var tester = CreateTester(dbContext, CreateReadyHandler());
+        var service = new LlmProviderProfileService(dbContext, new InMemoryLlmProviderSecretStore(), tester);
+
+        var result = await service.DeleteAsync(profile.Id);
+        var configuration = await dbContext.SystemConfigurations.SingleAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(dbContext.LlmProviderProfiles);
+        Assert.Empty(dbContext.ModelCapabilityTests);
+        Assert.Null(configuration.DefaultChatProviderId);
+        Assert.Null(configuration.DefaultEmbeddingProviderId);
+    }
+
+    [Fact]
+    public async Task UsageSummary_AggregatesTokenWindowsAndBreakdowns()
+    {
+        await using var dbContext = CreateDbContext();
+        var firstProvider = await AddProfileAsync(dbContext);
+        var secondProvider = await AddProfileAsync(dbContext);
+        var now = DateTimeOffset.UtcNow;
+
+        dbContext.AgentRunLogs.AddRange(
+            CreateAgentRunLog(firstProvider.Id, "agent-a", now.AddHours(-12), 100, 50),
+            CreateAgentRunLog(firstProvider.Id, "agent-a", now.AddDays(-3), 30, 20),
+            CreateAgentRunLog(secondProvider.Id, "agent-b", now.AddDays(-10), 10, 5),
+            CreateAgentRunLog(firstProvider.Id, "agent-c", now.AddDays(-31), 999, 999));
+        await dbContext.SaveChangesAsync();
+
+        var service = new LlmTokenUsageService(dbContext);
+        var summary = await service.GetSummaryAsync();
+
+        Assert.Equal(1, summary.Last24Hours.RequestCount);
+        Assert.Equal(150, summary.Last24Hours.TotalTokens);
+        Assert.Equal(2, summary.Last7Days.RequestCount);
+        Assert.Equal(200, summary.Last7Days.TotalTokens);
+        Assert.Equal(3, summary.Last30Days.RequestCount);
+        Assert.Equal(215, summary.Last30Days.TotalTokens);
+
+        Assert.Equal(200, summary.Providers.Single(provider => provider.ProviderProfileId == firstProvider.Id).Usage.TotalTokens);
+        Assert.Equal(15, summary.Providers.Single(provider => provider.ProviderProfileId == secondProvider.Id).Usage.TotalTokens);
+        Assert.Equal(200, summary.Agents.Single(agent => agent.AgentKey == "agent-a").Usage.TotalTokens);
+        Assert.Equal(15, summary.Agents.Single(agent => agent.AgentKey == "agent-b").Usage.TotalTokens);
+    }
+
+    [Fact]
     public async Task ChatTest_MarksSuccess_WhenResponseIsReady()
     {
         await using var dbContext = CreateDbContext();
@@ -285,6 +392,28 @@ public class LlmProviderTests
             .Options;
 
         return new CSweetDbContext(options);
+    }
+
+    private static AgentRunLog CreateAgentRunLog(
+        Guid providerProfileId,
+        string agentKey,
+        DateTimeOffset startedAt,
+        int inputTokens,
+        int outputTokens)
+    {
+        return new AgentRunLog
+        {
+            Id = Guid.NewGuid(),
+            AgentKey = agentKey,
+            ProviderProfileId = providerProfileId,
+            StartedAt = startedAt,
+            CompletedAt = startedAt.AddSeconds(1),
+            Status = "Completed",
+            PromptHash = Guid.NewGuid().ToString("N"),
+            TokenInputCount = inputTokens,
+            TokenOutputCount = outputTokens,
+            DurationMs = 1000
+        };
     }
 
     private sealed class StubHttpMessageHandler : HttpMessageHandler

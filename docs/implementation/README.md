@@ -1,6 +1,6 @@
 # C-Sweet Implementation Plans
 
-Last updated: 2026-07-11
+Last updated: 2026-07-13
 
 ## Purpose
 
@@ -15,20 +15,16 @@ The first production goal is not the marketplace. The first production goal is a
 Read these files in order:
 
 1. [00 Architecture Baseline](./00-architecture-baseline.md)
-2. [01 Phase 1 - Repository and Solution Bootstrap](./phases/01-repository-and-solution-bootstrap.md)
-3. [01A Phase 1A - Docker Containerization and Distribution](./phases/01a-docker-containerization-and-distribution.md)
-4. [02 Phase 2 - Configuration Persistence and First-Run Guard](./phases/02-configuration-persistence-and-first-run-guard.md)
-5. [03 Phase 3 - LLM Provider Abstraction and LM Studio](./phases/03-llm-provider-abstraction-and-lm-studio.md)
-6. [04 Phase 4 - System Setup Wizard](./phases/04-system-setup-wizard.md)
-7. [05 Phase 5 - Microsoft Agent Framework Integration](./phases/05-microsoft-agent-framework-integration.md)
-8. [06 Phase 6 - Core Business Domain](./phases/06-core-business-domain.md)
-9. [07 Phase 7 - Business Onboarding](./phases/07-business-onboarding.md)
-10. [08 Phase 8 - First Agent Workflow](./phases/08-first-agent-workflow.md)
-11. [09 Phase 9 - Worker Runtime and Worker Contract](./phases/09-worker-runtime-and-worker-contract.md)
-12. [09A Phase 9A - Agent Broker and Personal Assistant](./phases/09a-agent-broker-and-personal-assistant.md)
-13. [10 Phase 10 - Observability, Security, and Operations](./phases/10-observability-security-operations.md)
-14. [11 Marketplace Readiness](./11-marketplace-readiness.md)
-15. [12 Junior Developer Task Checklist](./12-junior-developer-task-checklist.md)
+2. [01A Phase 1A - Docker Containerization and Distribution](./phases/01a-docker-containerization-and-distribution.md)
+3. [05 Phase 5 - Microsoft Agent Framework Integration](./phases/05-microsoft-agent-framework-integration.md)
+4. [06 Phase 6 - Core Business Domain](./phases/06-core-business-domain.md)
+5. [07 Phase 7 - Business Onboarding](./phases/07-business-onboarding.md)
+6. [08 Phase 8 - First Agent Workflow](./phases/08-first-agent-workflow.md)
+7. [09 Phase 9 - Worker Runtime and Worker Contract](./phases/09-worker-runtime-and-worker-contract.md)
+8. [09A Phase 9A - Agent Broker and Personal Assistant](./phases/09a-agent-broker-and-personal-assistant.md)
+9. [10 Phase 10 - Observability, Security, and Operations](./phases/10-observability-security-operations.md)
+10. [11 Marketplace Readiness](./11-marketplace-readiness.md)
+11. [12 Junior Developer Task Checklist](./12-junior-developer-task-checklist.md)
 
 ## Feature plans
 

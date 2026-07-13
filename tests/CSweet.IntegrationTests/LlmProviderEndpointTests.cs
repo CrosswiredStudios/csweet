@@ -35,6 +35,44 @@ public class LlmProviderEndpointTests
     }
 
     [Fact]
+    public async Task ProviderProfile_CanBeUpdatedAndDeleted()
+    {
+        await using var factory = CreateFactory();
+        var client = factory.CreateClient();
+        var created = await CreateProfileAsync(client);
+
+        var updateResponse = await client.PutAsJsonAsync(
+            $"/api/llm-provider-profiles/{created.Id}",
+            new UpdateLlmProviderProfileRequest(
+                "Updated LM Studio",
+                LlmProviderType.OpenAiCompatible,
+                "http://fake-provider/v2",
+                "updated-key",
+                ReplaceApiKey: true,
+                "updated-model",
+                null,
+                8192,
+                1024,
+                SupportsStreaming: true,
+                SupportsToolCalling: true,
+                SupportsStructuredOutput: true,
+                SupportsVision: false,
+                IsEnabled: true));
+        var updateResult = await updateResponse.Content.ReadFromJsonAsync<LlmProviderProfileActionResponse>();
+
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+        Assert.NotNull(updateResult?.Profile);
+        Assert.Equal("Updated LM Studio", updateResult.Profile.Name);
+        Assert.Equal("updated-model", updateResult.Profile.DefaultChatModel);
+
+        var deleteResponse = await client.DeleteAsync($"/api/llm-provider-profiles/{created.Id}");
+        var fetchedAfterDelete = await client.GetAsync($"/api/llm-provider-profiles/{created.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, fetchedAfterDelete.StatusCode);
+    }
+
+    [Fact]
     public async Task PreviewModelCatalog_ReturnsAvailableModels()
     {
         await using var factory = CreateFactory();

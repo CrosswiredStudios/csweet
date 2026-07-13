@@ -81,6 +81,7 @@ message RequestCapability {
   string capability = 2;
   string content_type = 3;
   bytes payload = 4;
+  string target_agent_id = 5;
 }
 
 message CapabilityRequest {

@@ -106,6 +106,7 @@ public sealed class AgentSessionRegistry
         };
 
         var deliveredCount = 0;
+        var deliveredTargets = new List<string>();
         foreach (var target in _sessions.Values)
         {
             if (!string.Equals(
@@ -125,6 +126,7 @@ public sealed class AgentSessionRegistry
             }))
             {
                 deliveredCount++;
+                deliveredTargets.Add(target.AgentId);
             }
             else
             {
@@ -135,11 +137,26 @@ public sealed class AgentSessionRegistry
             }
         }
 
-        _logger.LogDebug(
-            "Broker delivered event {EventType} from {AgentId} to {DeliveredCount} sessions.",
+        if (deliveredCount == 0)
+        {
+            _logger.LogWarning(
+                "Broker delivered event {EventType} from {AgentId} on subject {Subject} to 0 sessions in business {BusinessId}. Correlation {CorrelationId}. Check subscriber registration and grants.",
+                publishedEvent.EventType,
+                source.AgentId,
+                publishedEvent.Subject,
+                source.BusinessId,
+                correlationId);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Broker delivered event {EventType} from {AgentId} on subject {Subject} to {DeliveredCount} sessions ({Targets}). Correlation {CorrelationId}.",
             publishedEvent.EventType,
             source.AgentId,
-            deliveredCount);
+            publishedEvent.Subject,
+            deliveredCount,
+            string.Join(", ", deliveredTargets),
+            correlationId);
     }
 
     public void RequestCapability(
@@ -164,6 +181,11 @@ public sealed class AgentSessionRegistry
                     session.BusinessId,
                     requester.BusinessId,
                     StringComparison.Ordinal) &&
+                (string.IsNullOrWhiteSpace(request.TargetAgentId) ||
+                    string.Equals(
+                        session.AgentId,
+                        request.TargetAgentId,
+                        StringComparison.Ordinal)) &&
                 session.Grant.Capabilities.Contains(request.Capability))
             .OrderBy(session => session.SessionId, StringComparer.Ordinal)
             .FirstOrDefault();
@@ -174,7 +196,9 @@ public sealed class AgentSessionRegistry
                 requester,
                 request.RequestId,
                 correlationId,
-                $"No authorized agent currently provides '{request.Capability}'.");
+                string.IsNullOrWhiteSpace(request.TargetAgentId)
+                    ? $"No authorized agent currently provides '{request.Capability}'."
+                    : $"No authorized agent '{request.TargetAgentId}' currently provides '{request.Capability}'.");
             return;
         }
 

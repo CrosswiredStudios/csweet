@@ -14,6 +14,8 @@ public static class PersonalAssistantProfile
 
     public const string PlanWorkCapability = "assistant.plan-work.v1";
 
+    public const string ConfigurationSchemaVersion = "1.0";
+
     public const string UserMessageReceivedEvent = "com.csweet.user.message.received.v1";
 
     public const string AssistantResponseCreatedEvent = "com.csweet.assistant.response.created.v1";

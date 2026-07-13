@@ -2,11 +2,13 @@
 
   <ItemGroup>
     <PackageReference Include="Grpc.Net.ClientFactory" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\CSweet.Agent.Contracts\CSweet.Agent.Contracts.csproj" />
+    <ProjectReference Include="..\CSweet.Contracts\CSweet.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

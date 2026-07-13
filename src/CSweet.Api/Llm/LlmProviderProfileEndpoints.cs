@@ -1,4 +1,5 @@
 using CSweet.AI.Providers;
+using CSweet.Application.Llm;
 using CSweet.Contracts.Llm;
 using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Llm;
@@ -11,6 +12,13 @@ public static class LlmProviderProfileEndpoints
     {
         var group = endpoints.MapGroup("/api/llm-provider-profiles");
 
+        group.MapGet("/usage/summary", async (
+            ILlmTokenUsageService usageService,
+            CancellationToken cancellationToken) =>
+        {
+            return Results.Ok(await usageService.GetSummaryAsync(cancellationToken));
+        });
+
         group.MapPost("", async (
             CreateLlmProviderProfileRequest request,
             ILlmProviderProfileService providerService,
@@ -20,6 +28,29 @@ public static class LlmProviderProfileEndpoints
             return result.Succeeded
                 ? Results.Created($"/api/llm-provider-profiles/{result.Profile!.Id}", result.Profile)
                 : Results.BadRequest(result);
+        });
+
+        group.MapPut("/{id:guid}", async (
+            Guid id,
+            UpdateLlmProviderProfileRequest request,
+            ILlmProviderProfileService providerService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await providerService.UpdateAsync(id, request, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result)
+                : ToProviderActionError(result);
+        });
+
+        group.MapDelete("/{id:guid}", async (
+            Guid id,
+            ILlmProviderProfileService providerService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await providerService.DeleteAsync(id, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result)
+                : ToProviderActionError(result);
         });
 
         group.MapPost("/model-catalog/preview", async (
@@ -106,6 +137,13 @@ public static class LlmProviderProfileEndpoints
         });
 
         return endpoints;
+    }
+
+    private static IResult ToProviderActionError(LlmProviderProfileActionResponse result)
+    {
+        return result.ErrorCode == "provider_profile_not_found"
+            ? Results.NotFound(result)
+            : Results.BadRequest(result);
     }
 
     private static bool TryCreateProviderPreview(

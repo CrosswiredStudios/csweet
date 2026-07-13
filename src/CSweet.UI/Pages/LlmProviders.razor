@@ -1,0 +1,747 @@
+@page "/llm-providers"
+@using CSweet.Contracts.Llm
+@using CSweet.Contracts.Setup
+@using CSweet.Domain.Setup
+@inject ISetupApiClient SetupApi
+@inject ILlmProviderApiClient LlmProviderApi
+
+<PageTitle>LLM Providers - C-Sweet</PageTitle>
+
+<div class="setup-shell agents-page llm-providers-page">
+    <MudPaper Elevation="0" Class="page-header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Provider management</MudText>
+            <MudText Typo="Typo.h3">LLM Providers</MudText>
+            <MudText Color="Color.Secondary">Connect model providers, validate capability checks, and manage saved provider profiles.</MudText>
+        </div>
+        <MudStack Row="true" Class="setup-actions llm-provider-header-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Disabled="@_isBusy" OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
+                Refresh
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="StartNewProvider" StartIcon="@Icons.Material.Filled.Add">
+                New Provider
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+
+    @if (_usageSummary is not null)
+    {
+        <section class="usage-summary-grid" aria-label="LLM token usage">
+            @UsageCard("Last 24 Hours", _usageSummary.Last24Hours)
+            @UsageCard("Last 7 Days", _usageSummary.Last7Days)
+            @UsageCard("Last 30 Days", _usageSummary.Last30Days)
+        </section>
+    }
+
+    @if (_isLoading)
+    {
+        <MudPaper Elevation="1" Class="surface-panel surface-panel-narrow agents-loading-panel">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <MudText Color="Color.Secondary">Loading provider profiles...</MudText>
+        </MudPaper>
+    }
+    else if (!string.IsNullOrWhiteSpace(_pageError))
+    {
+        <MudPaper Elevation="1" Class="surface-panel surface-panel-narrow">
+            <MudAlert Severity="Severity.Error" Variant="Variant.Filled">@_pageError</MudAlert>
+            <MudStack Row="true" Class="setup-actions">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">Retry</MudButton>
+            </MudStack>
+        </MudPaper>
+    }
+    else
+    {
+        <MudPaper Elevation="1" Class="surface-panel agents-list-panel">
+            <div class="configuration-section-header">
+                <div>
+                    <MudText Typo="Typo.h6">Saved Providers</MudText>
+                    <MudText Color="Color.Secondary">Configured model endpoints.</MudText>
+                </div>
+                <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@_profiles.Count</MudChip>
+            </div>
+
+            @if (_profiles.Count == 0)
+            {
+                <MudText Color="Color.Secondary">No provider profiles have been created yet.</MudText>
+            }
+            else
+            {
+                <div class="agents-list">
+                    @foreach (var profile in _profiles)
+                    {
+                        <MudButton Class="@ProviderButtonClass(profile)"
+                                   Variant="Variant.Text"
+                                   Disabled="@_isBusy"
+                                   OnClick="@(() => OpenDialog(profile))">
+                            <div class="agent-list-item-content">
+                                <div>
+                                    <MudText Typo="Typo.subtitle1">@profile.Name</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@profile.DefaultChatModel</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatUsageCaption(ProviderUsage(profile.Id)?.Usage)</MudText>
+                                </div>
+                                <MudStack AlignItems="AlignItems.End" Spacing="1">
+                                    <MudChip T="string" Size="Size.Small" Color="@ProviderStateColor(profile)" Variant="Variant.Outlined">@ProviderStateLabel(profile)</MudChip>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@ProviderTypeLabel(profile.ProviderType)</MudText>
+                                </MudStack>
+                            </div>
+                        </MudButton>
+                    }
+                </div>
+            }
+        </MudPaper>
+    }
+</div>
+
+<MudDialog @bind-Visible="_dialogOpen" Options="_dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@EditorTitle</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_selectedProfile is not null)
+        {
+            <dl class="configuration-details agents-details">
+                <div>
+                    <dt>Base URL</dt>
+                    <dd>@_selectedProfile.BaseUrl</dd>
+                </div>
+                <div>
+                    <dt>Last connected</dt>
+                    <dd>@Display(_selectedProfile.LastSuccessfulConnectionAt)</dd>
+                </div>
+                <div>
+                    <dt>API key secret</dt>
+                    <dd>@Display(_selectedProfile.ApiKeySecretName)</dd>
+                </div>
+                <div>
+                    <dt>Updated</dt>
+                    <dd>@Display(_selectedProfile.UpdatedAt)</dd>
+                </div>
+                <div>
+                    <dt>30d input</dt>
+                    <dd>@FormatTokens(SelectedProviderUsage?.Usage.InputTokens ?? 0)</dd>
+                </div>
+                <div>
+                    <dt>30d output</dt>
+                    <dd>@FormatTokens(SelectedProviderUsage?.Usage.OutputTokens ?? 0)</dd>
+                </div>
+                <div>
+                    <dt>30d requests</dt>
+                    <dd>@((SelectedProviderUsage?.Usage.RequestCount ?? 0).ToString("N0"))</dd>
+                </div>
+            </dl>
+        }
+
+        <div class="agent-config-form">
+            <div class="agent-config-field">
+                <MudSelect T="LlmProviderType"
+                           Label="Provider Type"
+                           Value="_providerType"
+                           ValueChanged="OnProviderTypeChanged"
+                           Variant="Variant.Outlined"
+                           Disabled="@_isBusy">
+                    @foreach (var providerType in Enum.GetValues<LlmProviderType>())
+                    {
+                        <MudSelectItem T="LlmProviderType" Value="@providerType">@ProviderTypeLabel(providerType)</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+            <div class="agent-config-field">
+                <MudTextField Label="Provider Name" @bind-Value="_providerName" Variant="Variant.Outlined" Disabled="@_isBusy" />
+            </div>
+            <div class="agent-config-field agent-config-field-wide">
+                <MudTextField Label="Base URL"
+                              @bind-Value="_baseUrl"
+                              Immediate="true"
+                              OnBlur="@(_ => PreviewModelCatalogAsync())"
+                              Variant="Variant.Outlined"
+                              Disabled="@_isBusy" />
+                @if (!string.IsNullOrWhiteSpace(_modelCatalogMessage))
+                {
+                    <MudText Typo="Typo.caption" Class="@ModelCatalogFeedbackClass">@_modelCatalogMessage</MudText>
+                }
+            </div>
+            <div class="agent-config-field agent-config-field-wide">
+                <MudTextField Label="@ApiKeyLabel"
+                              @bind-Value="_apiKey"
+                              InputType="InputType.Password"
+                              autocomplete="off"
+                              Variant="Variant.Outlined"
+                              Disabled="@_isBusy" />
+                @if (_selectedProfile is not null)
+                {
+                    <MudCheckBox T="bool" Label="Replace stored API key with this value" @bind-Value="_replaceApiKey" Disabled="@_isBusy" />
+                }
+            </div>
+            <div class="agent-config-field">
+                <MudTextField Label="Default Chat Model" @bind-Value="_defaultChatModel" Variant="Variant.Outlined" Disabled="@_isBusy" />
+            </div>
+            <div class="agent-config-field">
+                <MudTextField Label="Default Embedding Model" @bind-Value="_defaultEmbeddingModel" Variant="Variant.Outlined" Disabled="@_isBusy" />
+            </div>
+            <div class="agent-config-field">
+                <MudNumericField T="int?" Label="Context Window Tokens" @bind-Value="_contextWindowTokens" Variant="Variant.Outlined" Disabled="@_isBusy" />
+            </div>
+            <div class="agent-config-field">
+                <MudNumericField T="int?" Label="Max Output Tokens" @bind-Value="_maxOutputTokens" Variant="Variant.Outlined" Disabled="@_isBusy" />
+            </div>
+        </div>
+
+        <MudStack Row="true" Class="setup-toggle-row">
+            <MudCheckBox T="bool" Label="Enabled" @bind-Value="_isEnabled" Disabled="@_isBusy" />
+            <MudCheckBox T="bool" Label="Streaming" @bind-Value="_supportsStreaming" Disabled="@_isBusy" />
+            <MudCheckBox T="bool" Label="Structured output" @bind-Value="_supportsStructuredOutput" Disabled="@_isBusy" />
+            <MudCheckBox T="bool" Label="Tool calling" @bind-Value="_supportsToolCalling" Disabled="@_isBusy" />
+            <MudCheckBox T="bool" Label="Vision" @bind-Value="_supportsVision" Disabled="@_isBusy" />
+        </MudStack>
+
+        @if (_selectedProfile is not null && _testResults.TryGetValue(_selectedProfile.Id, out var testResult))
+        {
+            <div class="setup-check-list configuration-test-results">
+                @TestRow("Connection", testResult.ConnectionSucceeded)
+                @TestRow("Chat", testResult.ChatSucceeded)
+                @TestRow("Streaming", testResult.StreamingSucceeded)
+                @TestRow("Structured output", testResult.StructuredOutputSucceeded)
+                @TestRow("Tool calling", testResult.ToolCallingSucceeded)
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(testResult.FailureMessage))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="mt-4">@testResult.FailureMessage</MudAlert>
+            }
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_actionMessage))
+        {
+            <MudAlert Severity="@ActionMessageSeverity" Variant="Variant.Outlined" Class="mt-4">@_actionMessage</MudAlert>
+        }
+
+        @if (_selectedProfile is not null && _pendingDeleteId == _selectedProfile.Id)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mt-4">
+                Deleting this provider removes saved capability tests and clears it as the default provider.
+            </MudAlert>
+            <MudStack Row="true" Class="setup-actions">
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Disabled="@_isBusy" OnClick="@(() => _pendingDeleteId = null)">Cancel</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Error" Disabled="@_isBusy" OnClick="DeleteSelectedProviderAsync">
+                    @(_isBusy ? "Deleting..." : "Confirm Delete")
+                </MudButton>
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_selectedProfile is not null && _pendingDeleteId != _selectedProfile.Id)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" Disabled="@(_isBusy || _selectedProfile is null)" OnClick="RequestDeleteSelectedProvider">
+                Delete
+            </MudButton>
+        }
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@_isBusy" OnClick="CloseDialog">
+            @(_selectedProfile is not null && _pendingDeleteId == _selectedProfile.Id ? "Cancel" : "Close")
+        </MudButton>
+        @if (_selectedProfile is not null && _pendingDeleteId != _selectedProfile.Id)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Disabled="@(_isBusy || _selectedProfile is null || _selectedProfile.Id == _status?.DefaultChatProviderId || !_isEnabled)" OnClick="SetSelectedDefaultAsync">
+                Set Default Chat
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@(_isBusy || _selectedProfile is null)" OnClick="TestSelectedProviderAsync">
+                @(_isBusy ? "Testing..." : "Validate Connection")
+            </MudButton>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_isBusy || _isCheckingModelCatalog || string.IsNullOrWhiteSpace(_defaultChatModel))" OnClick="SaveProviderAsync">
+            @(_isBusy ? "Saving..." : SaveButtonLabel)
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private SetupStatusResponse? _status;
+    private IReadOnlyList<LlmProviderProfileResponse> _profiles = [];
+    private LlmTokenUsageSummaryResponse? _usageSummary;
+    private readonly Dictionary<Guid, ModelCapabilityTestResult> _testResults = [];
+    private LlmProviderProfileResponse? _selectedProfile;
+    private Guid? _pendingDeleteId;
+    private bool _isLoading = true;
+    private bool _isBusy;
+    private bool _isCheckingModelCatalog;
+    private string? _pageError;
+    private string? _actionMessage;
+    private bool? _actionSucceeded;
+    private bool? _modelCatalogSucceeded;
+    private string? _modelCatalogMessage;
+
+    private bool _dialogOpen = false;
+    private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+
+    private LlmProviderType _providerType = LlmProviderType.LmStudio;
+    private string _providerName = "Local LM Studio";
+    private string _baseUrl = "http://localhost:1234/v1";
+    private string _apiKey = "lm-studio";
+    private bool _replaceApiKey;
+    private string _defaultChatModel = string.Empty;
+    private string _defaultEmbeddingModel = string.Empty;
+    private int? _contextWindowTokens;
+    private int? _maxOutputTokens;
+    private bool _supportsStreaming = true;
+    private bool _supportsToolCalling;
+    private bool _supportsStructuredOutput;
+    private bool _supportsVision;
+    private bool _isEnabled = true;
+
+    private string EditorTitle => _selectedProfile is null ? "New Provider" : _selectedProfile.Name;
+    private string EditorSubtitle => _selectedProfile is null ? "Create a provider profile." : _selectedProfile.Id.ToString();
+    private string EditorChipLabel => _selectedProfile is null ? "Create" : ProviderStateLabel(_selectedProfile);
+    private Color EditorChipColor => _selectedProfile is null ? Color.Primary : ProviderStateColor(_selectedProfile);
+    private string SaveButtonLabel => _selectedProfile is null ? "Connect Provider" : "Save Changes";
+    private string ApiKeyLabel => _selectedProfile is null ? "API Key / Token" : "New API Key / Token";
+    private Severity ActionMessageSeverity => _actionSucceeded == false ? Severity.Error : Severity.Success;
+    private LlmProviderTokenUsageResponse? SelectedProviderUsage =>
+        _selectedProfile is null ? null : ProviderUsage(_selectedProfile.Id);
+    private string ModelCatalogFeedbackClass => _modelCatalogSucceeded switch
+    {
+        true => "setup-field-feedback setup-field-feedback-success",
+        false => "setup-field-feedback setup-field-feedback-error",
+        _ => "setup-field-feedback"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        _pageError = null;
+
+        try
+        {
+            var statusTask = SetupApi.GetStatusAsync();
+            var profilesTask = LlmProviderApi.ListAsync();
+            var usageTask = LlmProviderApi.GetUsageSummaryAsync();
+
+            await Task.WhenAll(statusTask, profilesTask, usageTask);
+
+            _status = await statusTask;
+            _profiles = await profilesTask;
+            _usageSummary = await usageTask;
+
+            if (_selectedProfile is not null)
+            {
+                _selectedProfile = _profiles.FirstOrDefault(profile => profile.Id == _selectedProfile.Id);
+            }
+
+            _selectedProfile ??= _profiles.FirstOrDefault();
+
+            if (_selectedProfile is null)
+            {
+                StartNewProvider();
+            }
+            else
+            {
+                HydrateForm(_selectedProfile);
+            }
+        }
+        catch
+        {
+            _pageError = "Unable to load LLM provider profiles from the API.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void StartNewProvider()
+    {
+        _selectedProfile = null;
+        _pendingDeleteId = null;
+        _actionMessage = null;
+        _actionSucceeded = null;
+        _modelCatalogMessage = null;
+        _modelCatalogSucceeded = null;
+        _providerType = LlmProviderType.LmStudio;
+        ApplyProviderPreset();
+        _replaceApiKey = false;
+        _defaultEmbeddingModel = string.Empty;
+        _contextWindowTokens = null;
+        _maxOutputTokens = null;
+        _isEnabled = true;
+        _dialogOpen = true;
+    }
+
+    private void OpenDialog(LlmProviderProfileResponse profile)
+    {
+        _selectedProfile = profile;
+        _pendingDeleteId = null;
+        _actionMessage = null;
+        _actionSucceeded = null;
+        _modelCatalogMessage = null;
+        _modelCatalogSucceeded = null;
+        HydrateForm(profile);
+        _dialogOpen = true;
+    }
+
+    private void CloseDialog()
+    {
+        _dialogOpen = false;
+        _pendingDeleteId = null;
+    }
+
+    private void HydrateForm(LlmProviderProfileResponse profile)
+    {
+        _providerType = profile.ProviderType;
+        _providerName = profile.Name;
+        _baseUrl = profile.BaseUrl;
+        _apiKey = string.Empty;
+        _replaceApiKey = false;
+        _defaultChatModel = profile.DefaultChatModel;
+        _defaultEmbeddingModel = profile.DefaultEmbeddingModel ?? string.Empty;
+        _contextWindowTokens = profile.ContextWindowTokens;
+        _maxOutputTokens = profile.MaxOutputTokens;
+        _supportsStreaming = profile.SupportsStreaming;
+        _supportsToolCalling = profile.SupportsToolCalling;
+        _supportsStructuredOutput = profile.SupportsStructuredOutput;
+        _supportsVision = profile.SupportsVision;
+        _isEnabled = profile.IsEnabled;
+    }
+
+    private async Task SaveProviderAsync()
+    {
+        _isBusy = true;
+        SetActionMessage(null);
+
+        try
+        {
+            if (_selectedProfile is null)
+            {
+                var created = await LlmProviderApi.CreateAsync(new CreateLlmProviderProfileRequest(
+                    _providerName,
+                    _providerType,
+                    _baseUrl,
+                    string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey,
+                    _defaultChatModel,
+                    string.IsNullOrWhiteSpace(_defaultEmbeddingModel) ? null : _defaultEmbeddingModel,
+                    _contextWindowTokens,
+                    _maxOutputTokens,
+                    _supportsStreaming,
+                    _supportsToolCalling,
+                    _supportsStructuredOutput,
+                    _supportsVision));
+
+                _profiles = await LlmProviderApi.ListAsync();
+                _selectedProfile = _profiles.FirstOrDefault(profile => profile.Id == created.Id);
+                if (_selectedProfile is not null)
+                {
+                    HydrateForm(_selectedProfile);
+                }
+
+                SetActionMessage("Provider profile connected.", true);
+            }
+            else
+            {
+                var result = await LlmProviderApi.UpdateAsync(
+                    _selectedProfile.Id,
+                    new UpdateLlmProviderProfileRequest(
+                        _providerName,
+                        _providerType,
+                        _baseUrl,
+                        string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey,
+                        _replaceApiKey,
+                        _defaultChatModel,
+                        string.IsNullOrWhiteSpace(_defaultEmbeddingModel) ? null : _defaultEmbeddingModel,
+                        _contextWindowTokens,
+                        _maxOutputTokens,
+                        _supportsStreaming,
+                        _supportsToolCalling,
+                        _supportsStructuredOutput,
+                        _supportsVision,
+                        _isEnabled));
+
+                _profiles = await LlmProviderApi.ListAsync();
+                _status = await SetupApi.GetStatusAsync();
+                _selectedProfile = _profiles.FirstOrDefault(profile => profile.Id == _selectedProfile.Id) ?? result.Profile;
+                if (_selectedProfile is not null)
+                {
+                    HydrateForm(_selectedProfile);
+                }
+
+                SetActionMessage("Provider profile saved.", true);
+            }
+        }
+        catch (Exception ex)
+        {
+            SetActionMessage(ex.Message, false);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task PreviewModelCatalogAsync()
+    {
+        _modelCatalogMessage = null;
+        _modelCatalogSucceeded = null;
+
+        if (!Uri.TryCreate(_baseUrl.Trim(), UriKind.Absolute, out var baseUri) ||
+            (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps))
+        {
+            _modelCatalogSucceeded = false;
+            _modelCatalogMessage = "Enter a valid HTTP or HTTPS base URL.";
+            return;
+        }
+
+        _isCheckingModelCatalog = true;
+
+        try
+        {
+            var result = await LlmProviderApi.PreviewModelCatalogAsync(new PreviewModelCatalogRequest(
+                _providerType,
+                _baseUrl.Trim(),
+                string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey));
+
+            _modelCatalogSucceeded = result.Succeeded;
+            _modelCatalogMessage = result.Message ?? (result.Succeeded
+                ? $"Found {result.Models.Count} model(s)."
+                : "Unable to load models from this provider.");
+
+            if (result.Models.Count > 0 && string.IsNullOrWhiteSpace(_defaultChatModel))
+            {
+                _defaultChatModel = result.Models[0].Id;
+            }
+        }
+        catch
+        {
+            _modelCatalogSucceeded = false;
+            _modelCatalogMessage = "Unable to check this provider. Confirm the API is running and the base URL is reachable.";
+        }
+        finally
+        {
+            _isCheckingModelCatalog = false;
+        }
+    }
+
+    private async Task TestSelectedProviderAsync()
+    {
+        if (_selectedProfile is null)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        SetActionMessage(null);
+
+        try
+        {
+            var result = await LlmProviderApi.TestAsync(_selectedProfile.Id);
+            _testResults[_selectedProfile.Id] = result;
+            _profiles = await LlmProviderApi.ListAsync();
+            _selectedProfile = _profiles.FirstOrDefault(profile => profile.Id == _selectedProfile.Id) ?? _selectedProfile;
+            SetActionMessage(result.ChatSucceeded ? "Provider validation passed." : "Provider validation completed with issues.", result.ChatSucceeded);
+        }
+        catch (Exception ex)
+        {
+            SetActionMessage(ex.Message, false);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task SetSelectedDefaultAsync()
+    {
+        if (_selectedProfile is null)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        SetActionMessage(null);
+
+        try
+        {
+            var result = await LlmProviderApi.SetDefaultChatProviderAsync(_selectedProfile.Id);
+            if (result.Succeeded)
+            {
+                _status = await SetupApi.GetStatusAsync();
+                SetActionMessage("Default chat provider updated.", true);
+            }
+            else
+            {
+                SetActionMessage(result.Message ?? "Default chat provider could not be updated.", false);
+            }
+        }
+        catch (Exception ex)
+        {
+            SetActionMessage(ex.Message, false);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private void RequestDeleteSelectedProvider()
+    {
+        _pendingDeleteId = _selectedProfile?.Id;
+        _actionMessage = null;
+        _actionSucceeded = null;
+    }
+
+    private async Task DeleteSelectedProviderAsync()
+    {
+        if (_selectedProfile is null)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        SetActionMessage(null);
+
+        try
+        {
+            await LlmProviderApi.DeleteAsync(_selectedProfile.Id);
+            _profiles = await LlmProviderApi.ListAsync();
+            _status = await SetupApi.GetStatusAsync();
+            _selectedProfile = _profiles.FirstOrDefault();
+            _pendingDeleteId = null;
+
+            if (_selectedProfile is null)
+            {
+                StartNewProvider();
+            }
+            else
+            {
+                HydrateForm(_selectedProfile);
+            }
+
+            SetActionMessage("Provider profile deleted.", true);
+        }
+        catch (Exception ex)
+        {
+            SetActionMessage(ex.Message, false);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private void OnProviderTypeChanged(LlmProviderType providerType)
+    {
+        _providerType = providerType;
+
+        if (_selectedProfile is null)
+        {
+            ApplyProviderPreset();
+        }
+
+        _modelCatalogMessage = null;
+        _modelCatalogSucceeded = null;
+    }
+
+    private void ApplyProviderPreset()
+    {
+        _defaultChatModel = string.Empty;
+        _modelCatalogMessage = null;
+        _modelCatalogSucceeded = null;
+
+        if (_providerType != LlmProviderType.LmStudio)
+        {
+            return;
+        }
+
+        var defaults = SetupWizardState.LmStudioDefaults();
+        _providerName = defaults.ProviderName;
+        _baseUrl = defaults.BaseUrl;
+        _apiKey = defaults.ApiKey;
+        _supportsStreaming = defaults.SupportsStreaming;
+        _supportsToolCalling = defaults.SupportsToolCalling;
+        _supportsStructuredOutput = defaults.SupportsStructuredOutput;
+        _supportsVision = defaults.SupportsVision;
+    }
+
+    private void SetActionMessage(string? message, bool? succeeded = null)
+    {
+        _actionMessage = message;
+        _actionSucceeded = succeeded;
+    }
+
+    private string ProviderButtonClass(LlmProviderProfileResponse profile) =>
+        _selectedProfile?.Id == profile.Id
+            ? "agent-list-item selected"
+            : "agent-list-item";
+
+    private Color ProviderStateColor(LlmProviderProfileResponse profile)
+    {
+        if (profile.Id == _status?.DefaultChatProviderId)
+        {
+            return Color.Primary;
+        }
+
+        return profile.IsEnabled ? Color.Success : Color.Default;
+    }
+
+    private string ProviderStateLabel(LlmProviderProfileResponse profile)
+    {
+        if (profile.Id == _status?.DefaultChatProviderId)
+        {
+            return "Default";
+        }
+
+        return profile.IsEnabled ? "Enabled" : "Disabled";
+    }
+
+    private LlmProviderTokenUsageResponse? ProviderUsage(Guid providerProfileId) =>
+        _usageSummary?.Providers.FirstOrDefault(provider => provider.ProviderProfileId == providerProfileId);
+
+    private static RenderFragment UsageCard(string label, LlmTokenUsageWindowResponse usage) => @<MudPaper Elevation="1" Class="usage-summary-card">
+        <MudText Typo="Typo.overline" Color="Color.Secondary">@label</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">@usage.RequestCount.ToString("N0") requests</MudText>
+        <div class="usage-token-breakdown">
+            <div>
+                <span>Input</span>
+                <strong>@FormatTokens(usage.InputTokens)</strong>
+            </div>
+            <div>
+                <span>Output</span>
+                <strong>@FormatTokens(usage.OutputTokens)</strong>
+            </div>
+        </div>
+    </MudPaper>;
+
+    private static RenderFragment TestRow(string label, bool value) => @<div class="setup-check-row">
+        <span class="@CheckClass(value)">@CheckGlyph(value)</span>
+        <span>@label</span>
+        <small>@(value ? "Passed" : "Failed")</small>
+    </div>;
+
+    private static string ProviderTypeLabel(LlmProviderType providerType)
+    {
+        return providerType switch
+        {
+            LlmProviderType.LmStudio => "LM Studio",
+            LlmProviderType.OpenAiCompatible => "OpenAI-compatible",
+            LlmProviderType.OpenAi => "OpenAI",
+            LlmProviderType.AzureOpenAi => "Azure OpenAI",
+            LlmProviderType.MicrosoftFoundry => "Microsoft Foundry",
+            _ => providerType.ToString()
+        };
+    }
+
+    private static string Display(string? value) => string.IsNullOrWhiteSpace(value) ? "Not set" : value;
+    private static string Display(DateTimeOffset? value) => value?.ToLocalTime().ToString("g") ?? "Never";
+    private static string Display(DateTimeOffset value) => value.ToLocalTime().ToString("g");
+    private static string FormatUsageCaption(LlmTokenUsageWindowResponse? usage) =>
+        usage is null
+            ? "In 0 / Out 0 / 30d"
+            : $"In {FormatTokens(usage.InputTokens)} / Out {FormatTokens(usage.OutputTokens)} / 30d";
+    private static string FormatTokens(long tokens) => tokens >= 1_000_000
+        ? $"{tokens / 1_000_000d:0.##}M"
+        : tokens >= 1_000
+            ? $"{tokens / 1_000d:0.#}K"
+            : tokens.ToString("N0");
+    private static string CheckGlyph(bool value) => value ? "OK" : "!";
+    private static string CheckClass(bool value) => value ? "setup-check setup-check-success" : "setup-check setup-check-error";
+}
