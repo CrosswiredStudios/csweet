@@ -78,6 +78,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IArtifactService, ArtifactService>();
         builder.Services.AddScoped<IArtifactApprovalService, ArtifactApprovalService>();
         builder.Services.AddScoped<IOrganizationUserService, OrganizationUserService>();
+        builder.Services.AddScoped<IConversationService, ConversationService>();
 
         return builder;
     }

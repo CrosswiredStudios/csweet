@@ -17,6 +17,8 @@ internal static class CoreConfigurations
         modelBuilder.Entity<TaskRun>(ConfigureTaskRun);
         modelBuilder.Entity<Artifact>(ConfigureArtifact);
         modelBuilder.Entity<Approval>(ConfigureApproval);
+        modelBuilder.Entity<Conversation>(ConfigureConversation);
+        modelBuilder.Entity<ConversationMessage>(ConfigureConversationMessage);
     }
 
     static void ConfigureOrganizationUser(EntityTypeBuilder<OrganizationUser> entity)
@@ -189,5 +191,37 @@ internal static class CoreConfigurations
             .WithMany()
             .HasForeignKey(x => x.ArtifactId)
             .OnDelete(DeleteBehavior.Cascade);
+    }
+
+    static void ConfigureConversation(EntityTypeBuilder<Conversation> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Title).HasMaxLength(256);
+
+        entity.HasOne(x => x.Organization)
+            .WithMany()
+            .HasForeignKey(x => x.OrganizationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        entity.HasOne(x => x.AgentOrganizationUser)
+            .WithMany()
+            .HasForeignKey(x => x.AgentOrganizationUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        entity.HasIndex(x => new { x.OrganizationId, x.AgentOrganizationUserId });
+    }
+
+    static void ConfigureConversationMessage(EntityTypeBuilder<ConversationMessage> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Role).HasConversion<string>().HasMaxLength(16).IsRequired();
+        entity.Property(x => x.Content).HasMaxLength(32768).IsRequired();
+
+        entity.HasOne(x => x.Conversation)
+            .WithMany(x => x.Messages)
+            .HasForeignKey(x => x.ConversationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        entity.HasIndex(x => new { x.ConversationId, x.CreatedAt });
     }
 }

@@ -36,6 +36,10 @@ public sealed class CSweetDbContext : DbContext
     public DbSet<Artifact> CoreArtifacts => Set<Artifact>();
     public DbSet<Approval> CoreApprovals => Set<Approval>();
 
+    // Conversation entities
+    public DbSet<Conversation> CoreConversations => Set<Conversation>();
+    public DbSet<ConversationMessage> CoreConversationMessages => Set<ConversationMessage>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Apply planning entity configurations

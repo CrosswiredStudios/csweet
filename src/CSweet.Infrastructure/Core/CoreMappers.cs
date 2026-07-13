@@ -76,6 +76,32 @@ internal static class CoreMappers
 
     #endregion
 
+    #region Conversation
+
+    public static ConversationResponse ToResponse(this Conversation conversation)
+    {
+        return new ConversationResponse(
+            conversation.Id,
+            conversation.OrganizationId,
+            conversation.AgentOrganizationUserId,
+            conversation.InitiatedByOrganizationUserId,
+            conversation.Title,
+            conversation.CreatedAt,
+            conversation.UpdatedAt);
+    }
+
+    public static ConversationMessageResponse ToResponse(this ConversationMessage message)
+    {
+        return new ConversationMessageResponse(
+            message.Id,
+            message.ConversationId,
+            (int)message.Role,
+            message.Content,
+            message.CreatedAt);
+    }
+
+    #endregion
+
     #region Worker
 
     public static WorkerResponse ToResponse(this Worker worker)

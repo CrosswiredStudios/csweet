@@ -62,6 +62,7 @@ app.MapWorkerEndpoints();
 app.MapWorkTaskEndpoints();
 app.MapTaskRunEndpoints();
 app.MapArtifactEndpoints();
+app.MapConversationEndpoints();
 
 app.MapControllers();
 
