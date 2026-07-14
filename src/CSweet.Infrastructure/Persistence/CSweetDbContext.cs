@@ -190,6 +190,7 @@ public sealed class CSweetDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.Property(x => x.ActivationMode).HasConversion<string>().HasMaxLength(20).IsRequired();
             entity.Property(x => x.OverlapPolicy).HasConversion<string>().HasMaxLength(20).IsRequired();
+            entity.Property(x => x.NextTickAt).IsConcurrencyToken();
             entity.HasIndex(x => x.AgentInstallationId).IsUnique();
             entity.HasOne(x => x.AgentInstallation)
                 .WithOne(x => x.Schedule)

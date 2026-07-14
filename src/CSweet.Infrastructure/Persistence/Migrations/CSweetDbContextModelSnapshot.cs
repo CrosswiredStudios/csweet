@@ -1319,6 +1319,7 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer");
 
                     b.Property<DateTimeOffset?>("NextTickAt")
+                        .IsConcurrencyToken()
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("OverlapPolicy")

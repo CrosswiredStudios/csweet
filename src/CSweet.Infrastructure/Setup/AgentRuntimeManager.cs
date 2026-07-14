@@ -100,6 +100,7 @@ public sealed class AgentRuntimeManager(
         };
 
         var active = await dbContext.AgentRuntimeInstances.Where(x => x.AgentInstallationId == schedule.AgentInstallationId && (x.Status == AgentRuntimeStatus.Queued || ContainerActiveStatuses.Contains(x.Status))).OrderBy(x => x.QueuedAt).ToListAsync(cancellationToken);
+        var cancelPrevious = new List<AgentRuntimeInstance>();
         if (active.Count > 0 && schedule.OverlapPolicy == OverlapPolicy.Skip)
         {
             AddTerminalInstance(schedule.AgentInstallationId, AgentRuntimeStatus.Skipped, now, "Skipped because a prior runtime is active.");
@@ -107,13 +108,24 @@ public sealed class AgentRuntimeManager(
         else
         {
             if (active.Count > 0 && schedule.OverlapPolicy == OverlapPolicy.CancelPrevious)
-                foreach (var prior in active) await StopAndFinishAsync(prior, AgentRuntimeStatus.Cancelled, "Cancelled by overlap policy.", now, cancellationToken);
+                cancelPrevious.AddRange(active);
             var instance = new AgentRuntimeInstance { Id = Guid.NewGuid(), TickId = Guid.NewGuid(), AgentInstallationId = schedule.AgentInstallationId, QueuedAt = now };
             instance.Events.Add(new AgentRuntimeEvent { Id = Guid.NewGuid(), AgentRuntimeInstanceId = instance.Id, Status = AgentRuntimeStatus.Queued, Reason = $"Claimed schedule tick {claimedTickAt:O}.", OccurredAt = now });
             dbContext.AgentRuntimeInstances.Add(instance);
         }
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            foreach (var prior in cancelPrevious)
+                await StopAndFinishAsync(prior, AgentRuntimeStatus.Cancelled, "Cancelled by overlap policy.", now, cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            logger.LogDebug("Schedule {ScheduleId} was claimed by another worker.", scheduleId);
+            dbContext.ChangeTracker.Clear();
+            return false;
+        }
     }
 
     private async Task<bool> TryStartAsync(AgentRuntimeInstance instance, DateTimeOffset now, CancellationToken cancellationToken)
@@ -138,26 +150,41 @@ public sealed class AgentRuntimeManager(
         instance.ContainerName = $"csweet-agent-{instance.Id:N}";
         Transition(instance, AgentRuntimeStatus.Starting, now, "Starting runtime container.");
         await dbContext.SaveChangesAsync(cancellationToken);
+        Transition(instance, AgentRuntimeStatus.WaitingForBrokerRegistration, DateTimeOffset.UtcNow, "Container launch authorized; awaiting broker registration.");
+        await dbContext.SaveChangesAsync(cancellationToken);
         try
         {
+            using var startTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            startTimeout.CancelAfter(TimeSpan.FromSeconds(settings.ContainerStartTimeoutSeconds));
             var entryAssembly = Path.GetFileNameWithoutExtension(package.ProjectPath) + ".dll";
             var status = await containers.StartAsync(new AgentContainerStartRequest(
                 instance.Id, instance.TickId, installation.Id, package.AgentId, installation.BusinessId,
                 instance.ContainerName, settings.DotNetRuntimeBaseImage, package.PackagePath, entryAssembly,
                 options.Value.BrokerEndpoint, token, "/app/csweet-agent.json", options.Value.DockerNetworkName,
                 installation.Grant.MemoryMb, installation.Grant.CpuPercent, settings.DefaultContainerPidsLimit,
-                installation.Schedule.MaxRuntimeSeconds), cancellationToken);
+                installation.Schedule.MaxRuntimeSeconds), startTimeout.Token);
             instance.ContainerId = status.ContainerId;
             instance.RuntimeDeadlineAt = now.AddSeconds(installation.Schedule.MaxRuntimeSeconds);
-            Transition(instance, AgentRuntimeStatus.WaitingForBrokerRegistration, DateTimeOffset.UtcNow, "Container started; awaiting broker registration.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            await TryRemoveFailedStartAsync(instance.ContainerName, cancellationToken);
+            Transition(instance, AgentRuntimeStatus.StartFailed, DateTimeOffset.UtcNow, "Container start timed out.");
         }
         catch (Exception exception) when (exception is AgentContainerException or InvalidOperationException)
         {
             logger.LogError(exception, "Failed to start runtime {RuntimeInstanceId}", instance.Id);
+            await TryRemoveFailedStartAsync(instance.ContainerName, cancellationToken);
             Transition(instance, AgentRuntimeStatus.StartFailed, DateTimeOffset.UtcNow, exception.Message);
         }
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    private async Task TryRemoveFailedStartAsync(string containerName, CancellationToken cancellationToken)
+    {
+        try { await containers.RemoveAsync(containerName, force: true, cancellationToken: cancellationToken); }
+        catch (AgentContainerException exception) { logger.LogDebug(exception, "No failed-start container remained for {ContainerName}.", containerName); }
     }
 
     private async Task StopAndFinishAsync(AgentRuntimeInstance instance, AgentRuntimeStatus terminal, string reason, DateTimeOffset now, CancellationToken cancellationToken)
@@ -188,8 +215,11 @@ public sealed class AgentRuntimeManager(
         dbContext.AgentRuntimeInstances.Add(instance);
     }
 
-    private static void Transition(AgentRuntimeInstance instance, AgentRuntimeStatus status, DateTimeOffset at, string reason)
-        => AgentRuntimeSignalService.Transition(instance, status, at, reason);
+    private void Transition(AgentRuntimeInstance instance, AgentRuntimeStatus status, DateTimeOffset at, string reason)
+    {
+        instance.TransitionTo(status, at, reason);
+        dbContext.AgentRuntimeEvents.Add(new AgentRuntimeEvent { Id = Guid.NewGuid(), AgentRuntimeInstanceId = instance.Id, Status = status, Reason = reason, OccurredAt = at });
+    }
 
     private async Task<AgentRuntimeGlobalSettings> SettingsAsync(CancellationToken cancellationToken)
         => await dbContext.AgentRuntimeGlobalSettings.SingleAsync(cancellationToken);

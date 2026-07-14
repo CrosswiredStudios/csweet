@@ -30,7 +30,7 @@ public sealed class DockerAgentContainerRunner(
             "--cpus", cpus,
             "--pids-limit", request.PidsLimit.ToString(CultureInfo.InvariantCulture),
             "--tmpfs", $"/tmp:rw,nosuid,nodev,noexec,size=64m,uid={RuntimeUserId},gid={RuntimeUserId}",
-            "--mount", $"type=bind,source={request.PackagePath},target=/app,readonly",
+            "--mount", CreatePackageMount(request.PackagePath),
             "--env", $"CSweet__Agent__RuntimeInstanceId={request.RuntimeInstanceId:D}",
             "--env", $"CSweet__Agent__TickId={request.TickId:D}",
             "--env", $"CSweet__Agent__InstallationId={request.InstallationId:D}",
@@ -155,4 +155,20 @@ public sealed class DockerAgentContainerRunner(
 
     private static string SanitizeError(string error)
         => string.IsNullOrWhiteSpace(error) ? "unknown Docker error" : error.Trim().Replace("\r", " ").Replace("\n", " ");
+
+    private static string CreatePackageMount(string packagePath)
+    {
+        var volumeName = Environment.GetEnvironmentVariable("CSWEET_AGENT_PACKAGE_VOLUME");
+        var packageRoot = Environment.GetEnvironmentVariable("CSWEET_AGENT_PACKAGE_CACHE");
+        if (string.IsNullOrWhiteSpace(volumeName) || string.IsNullOrWhiteSpace(packageRoot))
+            return $"type=bind,source={packagePath},target=/app,readonly";
+        if (volumeName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.')))
+            throw new AgentContainerException("The agent package volume name is invalid.");
+        var root = Path.GetFullPath(packageRoot);
+        var path = Path.GetFullPath(packagePath);
+        var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+        if (relative == ".." || relative.StartsWith("../", StringComparison.Ordinal))
+            throw new AgentContainerException("The runtime package is outside the approved package cache.");
+        return $"type=volume,source={volumeName},target=/app,volume-subpath={relative},readonly";
+    }
 }

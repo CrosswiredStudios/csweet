@@ -88,7 +88,21 @@ Last updated: 2026-07-13
 
 ## Phase 6 - Scheduler & Runtime Manager
 
-- [ ] Not started
+- [x] Domain entities and migration: `AgentRuntimeInstance`, `AgentRuntimeEvent`, and complete runtime status lifecycle
+- [x] Durable transition history with timestamps, reasons, completion payloads, and terminal outcomes
+- [x] `IAgentRuntimeManager` and `AgentScheduleWorker` hosted by `CSweet.WorkerHost`
+- [x] Due periodic/manual schedule polling and optimistic row claiming through `NextTickAt`
+- [x] Global, business, and installation container concurrency enforcement
+- [x] `Skip`, `Queue`, and `CancelPrevious` overlap behavior
+- [x] Built-package container launch through `IAgentContainerRunner`
+- [x] Broker registration and max-runtime timeout reconciliation
+- [x] Container exit, stop, removal, completion, and next-tick persistence
+- [x] Runtime instance ID, tick ID, and bounded workload token in SDK/broker registration context
+- [x] Workload-token hashing and fixed-time validation before broker registration
+- [x] `com.csweet.runtime.completed.v1` identity validation and persisted completion signaling
+- [x] Compose AgentHost service, fixed runtime network, and read-only package volume subpath mounting
+- [x] Unit tests for due starts, overlap skip, concurrency blocking, completion, and timeout
+- [x] Full unit and integration test suites
 
 ## Phase 7 - Agents Page Management
 

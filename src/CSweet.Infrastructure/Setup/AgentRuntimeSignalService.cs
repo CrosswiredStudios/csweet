@@ -20,7 +20,7 @@ public sealed class AgentRuntimeSignalService(CSweetDbContext dbContext) : IAgen
             throw new InvalidOperationException("The runtime workload token is invalid.");
         if (instance.Status != AgentRuntimeStatus.WaitingForBrokerRegistration)
             throw new InvalidOperationException("The runtime instance is not awaiting broker registration.");
-        Transition(instance, AgentRuntimeStatus.Running, DateTimeOffset.UtcNow, "Broker registration accepted.");
+        AddTransition(instance, AgentRuntimeStatus.Running, DateTimeOffset.UtcNow, "Broker registration accepted.");
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -31,7 +31,7 @@ public sealed class AgentRuntimeSignalService(CSweetDbContext dbContext) : IAgen
         ValidateIdentity(instance, tickId, installationId);
         if (instance.Status != AgentRuntimeStatus.Running)
             throw new InvalidOperationException("Only a running runtime instance may report completion.");
-        Transition(instance, AgentRuntimeStatus.CompletionReported, DateTimeOffset.UtcNow, "Agent reported completion.", payloadJson);
+        AddTransition(instance, AgentRuntimeStatus.CompletionReported, DateTimeOffset.UtcNow, "Agent reported completion.", payloadJson);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -41,9 +41,9 @@ public sealed class AgentRuntimeSignalService(CSweetDbContext dbContext) : IAgen
             throw new InvalidOperationException("The runtime identity does not match the installation and tick.");
     }
 
-    internal static void Transition(AgentRuntimeInstance instance, AgentRuntimeStatus status, DateTimeOffset at, string? reason = null, string? payload = null)
+    private void AddTransition(AgentRuntimeInstance instance, AgentRuntimeStatus status, DateTimeOffset at, string? reason = null, string? payload = null)
     {
         instance.TransitionTo(status, at, reason);
-        instance.Events.Add(new AgentRuntimeEvent { Id = Guid.NewGuid(), AgentRuntimeInstanceId = instance.Id, Status = status, Reason = reason, PayloadJson = payload, OccurredAt = at });
+        dbContext.AgentRuntimeEvents.Add(new AgentRuntimeEvent { Id = Guid.NewGuid(), AgentRuntimeInstanceId = instance.Id, Status = status, Reason = reason, PayloadJson = payload, OccurredAt = at });
     }
 }

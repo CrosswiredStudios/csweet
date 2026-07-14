@@ -196,9 +196,9 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         {
             using var document = JsonDocument.Parse(payload);
             var root = document.RootElement;
-            if (root.GetProperty("runtimeInstanceId").GetString() != session.RuntimeInstanceId ||
-                root.GetProperty("tickId").GetString() != session.TickId ||
-                root.GetProperty("installationId").GetString() != session.InstallationId)
+            if (!TryReadGuid(root, "runtimeInstanceId", out var payloadRuntimeId) || payloadRuntimeId != runtimeId ||
+                !TryReadGuid(root, "tickId", out var payloadTickId) || payloadTickId != tickId ||
+                !TryReadGuid(root, "installationId", out var payloadInstallationId) || payloadInstallationId != installationId)
                 throw new RpcException(new Status(StatusCode.PermissionDenied, "Completion payload identity does not match its publisher."));
         }
         catch (JsonException exception)
@@ -206,6 +206,12 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Completion payload must be valid JSON."), exception.Message);
         }
         await _runtimeSignals.RecordCompletionAsync(runtimeId, tickId, installationId, payload, cancellationToken);
+    }
+
+    private static bool TryReadGuid(JsonElement root, string propertyName, out Guid value)
+    {
+        value = default;
+        return root.TryGetProperty(propertyName, out var property) && Guid.TryParse(property.GetString(), out value);
     }
 
     private static BrokerToAgentMessage CreateRejectedRegistration(string reason) =>

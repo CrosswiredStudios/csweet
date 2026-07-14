@@ -38,6 +38,13 @@ public sealed class PersistedAgentAuthorizationPolicy : IAgentAuthorizationPolic
             return Reject("The installation ID is not a valid persisted installation identifier.");
         }
 
+        if (!Guid.TryParse(registration.RuntimeInstanceId, out _) ||
+            !Guid.TryParse(registration.TickId, out _) ||
+            string.IsNullOrWhiteSpace(registration.WorkloadToken))
+        {
+            return Reject("Persisted agent installations require a valid runtime instance, tick, and workload token.");
+        }
+
         var installation = await _dbContext.AgentInstallations
             .AsNoTracking()
             .Include(x => x.PackageVersion)

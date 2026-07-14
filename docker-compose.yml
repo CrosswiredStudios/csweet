@@ -76,6 +76,8 @@ services:
         condition: service_completed_successfully
       csweet-api:
         condition: service_healthy
+      csweet-agenthost:
+        condition: service_started
     environment:
       DOTNET_ENVIRONMENT: ${DOTNET_ENVIRONMENT:-Production}
       ConnectionStrings__Postgres: ${CSWEET_CONNECTIONSTRINGS__POSTGRES:-Host=postgres;Port=5432;Database=csweet;Username=csweet;Password=change-me-in-production}
@@ -83,12 +85,30 @@ services:
       CSWEET_AGENT_PACKAGE_CACHE: /var/lib/csweet/agents/packages
       CSWEET_AGENT_SOURCE_VOLUME: csweet-agent-sources
       CSWEET_AGENT_PACKAGE_VOLUME: csweet-agent-packages
+      CSweet__AgentRuntime__BrokerEndpoint: http://csweet-agenthost:8080
+      CSweet__AgentRuntime__DockerNetworkName: csweet-runtime
     group_add:
       - "${DOCKER_GID:-0}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - csweet-agent-sources:/var/lib/csweet/agents/sources
       - csweet-agent-packages:/var/lib/csweet/agents/packages
+
+  csweet-agenthost:
+    build:
+      context: .
+      dockerfile: docker/agenthost.Dockerfile
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      csweet-migrator:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      DOTNET_ENVIRONMENT: ${DOTNET_ENVIRONMENT:-Production}
+      ConnectionStrings__Postgres: ${CSWEET_CONNECTIONSTRINGS__POSTGRES:-Host=postgres;Port=5432;Database=csweet;Username=csweet;Password=change-me-in-production}
 
   # ---------------------------------------------------------
   # Database (PostgreSQL)
@@ -118,3 +138,7 @@ volumes:
   csweet-agent-packages:
     name: csweet-agent-packages
     driver: local
+
+networks:
+  default:
+    name: csweet-runtime

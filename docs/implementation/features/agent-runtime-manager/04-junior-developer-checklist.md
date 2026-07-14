@@ -87,21 +87,21 @@ coherent subset of one phase.
 
 ## Phase 6 - Scheduler and runtime manager
 
-- [ ] Add `AgentRuntimeInstance`.
-- [ ] Add `AgentRuntimeEvent`.
-- [ ] Add runtime status enum.
-- [ ] Add runtime manager interface.
-- [ ] Add runtime manager implementation.
-- [ ] Add schedule worker hosted service.
-- [ ] Claim due schedules safely.
-- [ ] Enforce concurrency limits.
-- [ ] Enforce overlap policy.
-- [ ] Start container for due tick.
-- [ ] Wait for broker registration.
-- [ ] Handle completion event.
-- [ ] Handle runtime timeout.
-- [ ] Compute next tick.
-- [ ] Add scheduler/runtime tests.
+- [x] Add `AgentRuntimeInstance`.
+- [x] Add `AgentRuntimeEvent`.
+- [x] Add runtime status enum.
+- [x] Add runtime manager interface.
+- [x] Add runtime manager implementation.
+- [x] Add schedule worker hosted service.
+- [x] Claim due schedules safely.
+- [x] Enforce concurrency limits.
+- [x] Enforce overlap policy.
+- [x] Start container for due tick.
+- [x] Wait for broker registration.
+- [x] Handle completion event.
+- [x] Handle runtime timeout.
+- [x] Compute next tick.
+- [x] Add scheduler/runtime tests.
 
 ## Phase 7 - Agents page management
 

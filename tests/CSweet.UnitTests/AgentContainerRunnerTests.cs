@@ -28,7 +28,7 @@ public sealed class AgentContainerRunnerTests
         Assert.DoesNotContain("--privileged", args);
         Assert.DoesNotContain(args, value => value.Contains("docker.sock", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(args, value => value.Contains("ConnectionStrings", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(10, args.Count(value => value == "--env"));
+        Assert.Equal(9, args.Count(value => value == "--env"));
     }
 
     [Fact]

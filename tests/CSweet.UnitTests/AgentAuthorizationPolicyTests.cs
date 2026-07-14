@@ -111,7 +111,10 @@ public sealed class AgentAuthorizationPolicyTests
             AgentId = "com.example.agent",
             AgentVersion = "1.0.0",
             InstallationId = installation.Id.ToString(),
-            BusinessId = "business-1"
+            BusinessId = "business-1",
+            RuntimeInstanceId = Guid.NewGuid().ToString(),
+            TickId = Guid.NewGuid().ToString(),
+            WorkloadToken = "bounded-token"
         };
         registration.DeclaredCapabilities.AddRange(["allowed.capability.v1", "unapproved.v1"]);
         registration.RequestedSubscriptions.Add("allowed.event.v1");
