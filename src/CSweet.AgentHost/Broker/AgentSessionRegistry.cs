@@ -25,6 +25,8 @@ public sealed class AgentSessionRegistry
             registration.AgentId,
             registration.InstallationId,
             registration.BusinessId,
+            registration.RuntimeInstanceId,
+            registration.TickId,
             grant);
 
         if (!_sessions.TryAdd(session.SessionId, session))

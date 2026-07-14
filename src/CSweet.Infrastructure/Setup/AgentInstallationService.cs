@@ -42,7 +42,9 @@ public sealed class AgentInstallationService : IAgentInstallationService
         }
 
             if (packageVersion.Status is not (
-                AgentPackageVersionStatus.Previewed or AgentPackageVersionStatus.Approved))
+                AgentPackageVersionStatus.Previewed or
+                AgentPackageVersionStatus.Approved or
+                AgentPackageVersionStatus.Built))
             {
                 throw new AgentInstallationException("The imported agent version is not available for installation.");
             }
@@ -102,7 +104,24 @@ public sealed class AgentInstallationService : IAgentInstallationService
             IsEnabled = true
         };
 
-        packageVersion.Status = AgentPackageVersionStatus.Approved;
+        var shouldQueueBuild = packageVersion.Status != AgentPackageVersionStatus.Built &&
+            !await _dbContext.AgentBuildJobs.AnyAsync(
+                x => x.PackageVersionId == packageVersion.Id,
+                cancellationToken);
+        if (packageVersion.Status != AgentPackageVersionStatus.Built)
+        {
+            packageVersion.Status = AgentPackageVersionStatus.Approved;
+        }
+        if (shouldQueueBuild)
+        {
+            _dbContext.AgentBuildJobs.Add(new AgentBuildJob
+            {
+                Id = Guid.NewGuid(),
+                PackageVersionId = packageVersion.Id,
+                Attempt = 1,
+                QueuedAt = now
+            });
+        }
         installation.PackageVersion = packageVersion;
         installation.Grant = grant;
         installation.Schedule = schedule;

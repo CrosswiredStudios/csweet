@@ -25,6 +25,9 @@ public sealed class CSweetDbContext : DbContext
     public DbSet<AgentInstallation> AgentInstallations => Set<AgentInstallation>();
     public DbSet<AgentInstallationGrant> AgentInstallationGrants => Set<AgentInstallationGrant>();
     public DbSet<AgentSchedule> AgentSchedules => Set<AgentSchedule>();
+    public DbSet<AgentBuildJob> AgentBuildJobs => Set<AgentBuildJob>();
+    public DbSet<AgentRuntimeInstance> AgentRuntimeInstances => Set<AgentRuntimeInstance>();
+    public DbSet<AgentRuntimeEvent> AgentRuntimeEvents => Set<AgentRuntimeEvent>();
 
     // Planning entities
     public DbSet<PlanningTask> PlanningTasks => Set<PlanningTask>();
@@ -147,6 +150,8 @@ public sealed class CSweetDbContext : DbContext
             entity.Property(x => x.DefaultActivationMode).HasMaxLength(32);
             entity.Property(x => x.WarningsJson).HasColumnType("text").IsRequired();
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.PackageDigest).HasMaxLength(64);
+            entity.Property(x => x.PackagePath).HasMaxLength(2048);
             entity.HasIndex(x => new { x.PackageSourceId, x.CommitSha, x.ManifestDigest }).IsUnique();
             entity.HasOne(x => x.PackageSource)
                 .WithMany()
@@ -189,6 +194,52 @@ public sealed class CSweetDbContext : DbContext
             entity.HasOne(x => x.AgentInstallation)
                 .WithOne(x => x.Schedule)
                 .HasForeignKey<AgentSchedule>(x => x.AgentInstallationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AgentBuildJob>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.SourceWorkspacePath).HasMaxLength(2048);
+            entity.Property(x => x.PackagePath).HasMaxLength(2048);
+            entity.Property(x => x.PackageDigest).HasMaxLength(64);
+            entity.Property(x => x.LogPath).HasMaxLength(2048);
+            entity.Property(x => x.FailureMessage).HasMaxLength(2048);
+            entity.HasIndex(x => new { x.PackageVersionId, x.Attempt }).IsUnique();
+            entity.HasIndex(x => new { x.Status, x.QueuedAt });
+            entity.HasOne(x => x.PackageVersion)
+                .WithMany(x => x.BuildJobs)
+                .HasForeignKey(x => x.PackageVersionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AgentRuntimeInstance>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(48).IsRequired();
+            entity.Property(x => x.WorkloadTokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.ContainerId).HasMaxLength(128);
+            entity.Property(x => x.ContainerName).HasMaxLength(128);
+            entity.Property(x => x.Reason).HasMaxLength(2048);
+            entity.HasIndex(x => x.TickId).IsUnique();
+            entity.HasIndex(x => new { x.AgentInstallationId, x.Status });
+            entity.HasOne(x => x.AgentInstallation)
+                .WithMany(x => x.RuntimeInstances)
+                .HasForeignKey(x => x.AgentInstallationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AgentRuntimeEvent>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(48).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(2048);
+            entity.Property(x => x.PayloadJson).HasColumnType("text");
+            entity.HasIndex(x => new { x.AgentRuntimeInstanceId, x.OccurredAt });
+            entity.HasOne(x => x.AgentRuntimeInstance)
+                .WithMany(x => x.Events)
+                .HasForeignKey(x => x.AgentRuntimeInstanceId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

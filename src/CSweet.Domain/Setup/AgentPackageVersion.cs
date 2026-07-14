@@ -18,7 +18,11 @@ public sealed class AgentPackageVersion
     public string? DefaultActivationMode { get; set; }
     public string WarningsJson { get; set; } = "[]";
     public AgentPackageVersionStatus Status { get; set; } = AgentPackageVersionStatus.Previewed;
+    public string? PackageDigest { get; set; }
+    public string? PackagePath { get; set; }
+    public DateTimeOffset? BuiltAt { get; set; }
     public DateTimeOffset ImportedAt { get; set; }
 
     public AgentPackageSource? PackageSource { get; set; }
+    public ICollection<AgentBuildJob> BuildJobs { get; set; } = [];
 }

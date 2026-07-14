@@ -12,4 +12,5 @@ public sealed class AgentInstallation
     public AgentPackageVersion? PackageVersion { get; set; }
     public AgentInstallationGrant? Grant { get; set; }
     public AgentSchedule? Schedule { get; set; }
+    public ICollection<AgentRuntimeInstance> RuntimeInstances { get; set; } = [];
 }

@@ -57,11 +57,34 @@ Last updated: 2026-07-13
 
 ## Phase 4 - Build Pipeline
 
-- [ ] Skipped (requires Docker builder infrastructure)
+- [x] Domain entity and lifecycle validation: `AgentBuildJob`, `AgentBuildStatus`
+- [x] EF configuration and `AddAgentBuildPipeline` migration
+- [x] Installation approval queues one package build across business installations
+- [x] Idempotent active-job queueing and numbered retry attempts
+- [x] `IAgentBuildService` orchestration and persisted build-state transitions
+- [x] `AgentBuildWorker` hosted by `CSweet.WorkerHost`
+- [x] Exact approved commit materialization without repository code execution
+- [x] Docker builder with read-only source, disposable workspace, and writable output only
+- [x] Builder CPU, memory, PID, timeout, repository, and log limits
+- [x] Builder capability drop, no-new-privileges, non-root user, and no network by default
+- [x] Content-addressed immutable package directory and SHA-256 digest
+- [x] Package version `Built`/`Failed` state and build audit events
+- [x] Failed/cancelled builder-container cleanup and configurable workspace retention
+- [x] Compose worker Docker CLI, socket access, and durable source/package volumes
+- [x] Unit tests for lifecycle, success, failure, retry, and package-build reuse
+- [x] Full test suite, Compose validation, worker image build, and isolated sample publish smoke test
 
 ## Phase 5 - Container Runner
 
-- [ ] Not started
+- [x] `IAgentContainerRunner` abstraction with start, stop, inspect, remove, and bounded logs
+- [x] Container start request and normalized status/state models
+- [x] Docker CLI runner for local and Compose environments
+- [x] Read-only package mount with enforced CPU, memory, and PID limits; approved max runtime carried for Phase 6 timeout enforcement
+- [x] Non-root execution, dropped capabilities, no-new-privileges, read-only root filesystem, and isolated network
+- [x] Fixed approved runtime environment; no arbitrary environment variables, database credentials, or host secrets
+- [x] No privileged mode or host Docker socket mounts
+- [x] Structured start, stop, remove, and failure logging
+- [x] Fake runner and Docker argument/security unit tests
 
 ## Phase 6 - Scheduler & Runtime Manager
 
@@ -78,5 +101,8 @@ Last updated: 2026-07-13
 ## Notes
 
 - Phase 1 is the foundation. All subsequent phases depend on the global settings.
-- Phase 4 (build pipeline) requires Docker-in-Docker or a remote builder, which may need infrastructure setup first.
+- Phase 4 uses the host Docker daemon from the trusted WorkerHost orchestrator. The untrusted builder
+  container never receives the Docker socket and has no outbound network; projects that require
+  external NuGet packages need those packages pre-seeded in a custom builder image until an
+  approved-feed egress proxy is added.
 - Run Now marks a persisted schedule as immediately due; Phase 6 adds the worker that claims and executes due schedules.

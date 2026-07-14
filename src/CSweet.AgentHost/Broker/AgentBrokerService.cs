@@ -1,6 +1,8 @@
 using CSweet.Agent.Contracts.Grpc;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using CSweet.Application.Setup;
+using System.Text.Json;
 
 namespace CSweet.AgentHost.Broker;
 
@@ -9,14 +11,17 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
     private readonly IAgentAuthorizationPolicy _authorizationPolicy;
     private readonly AgentSessionRegistry _sessions;
     private readonly ILogger<AgentBrokerService> _logger;
+    private readonly IAgentRuntimeSignalService _runtimeSignals;
 
     public AgentBrokerService(
         IAgentAuthorizationPolicy authorizationPolicy,
         AgentSessionRegistry sessions,
+        IAgentRuntimeSignalService runtimeSignals,
         ILogger<AgentBrokerService> logger)
     {
         _authorizationPolicy = authorizationPolicy;
         _sessions = sessions;
+        _runtimeSignals = runtimeSignals;
         _logger = logger;
     }
 
@@ -48,6 +53,25 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         }
 
         var grant = authorization.Grant;
+
+        if (!string.IsNullOrWhiteSpace(firstMessage.Register.RuntimeInstanceId))
+        {
+            try
+            {
+                await _runtimeSignals.RecordBrokerRegistrationAsync(
+                    Guid.Parse(firstMessage.Register.RuntimeInstanceId),
+                    Guid.Parse(firstMessage.Register.TickId),
+                    Guid.Parse(firstMessage.Register.InstallationId),
+                    firstMessage.Register.WorkloadToken,
+                    context.CancellationToken);
+            }
+            catch (Exception exception) when (exception is FormatException or InvalidOperationException)
+            {
+                _logger.LogWarning(exception, "Rejected invalid runtime registration for installation {InstallationId}.", firstMessage.Register.InstallationId);
+                await responseStream.WriteAsync(CreateRejectedRegistration("The runtime registration context is invalid."));
+                return;
+            }
+        }
 
         var session = _sessions.Register(firstMessage.Register, grant);
         var registration = new RegistrationResult
@@ -109,6 +133,11 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
             switch (message.PayloadCase)
             {
                 case AgentToBrokerMessage.PayloadOneofCase.PublishEvent:
+                    if (message.PublishEvent.EventType == "com.csweet.runtime.completed.v1" &&
+                        session.Grant.Publications.Contains(message.PublishEvent.EventType))
+                    {
+                        await RecordCompletionAsync(session, message.PublishEvent, cancellationToken);
+                    }
                     _sessions.PublishEvent(
                         session,
                         message.PublishEvent,
@@ -154,6 +183,29 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                     break;
             }
         }
+    }
+
+    private async Task RecordCompletionAsync(AgentSession session, PublishEvent publishedEvent, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(session.RuntimeInstanceId, out var runtimeId) ||
+            !Guid.TryParse(session.TickId, out var tickId) ||
+            !Guid.TryParse(session.InstallationId, out var installationId))
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Completion publisher has no valid runtime context."));
+        var payload = publishedEvent.Payload.ToStringUtf8();
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            if (root.GetProperty("runtimeInstanceId").GetString() != session.RuntimeInstanceId ||
+                root.GetProperty("tickId").GetString() != session.TickId ||
+                root.GetProperty("installationId").GetString() != session.InstallationId)
+                throw new RpcException(new Status(StatusCode.PermissionDenied, "Completion payload identity does not match its publisher."));
+        }
+        catch (JsonException exception)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Completion payload must be valid JSON."), exception.Message);
+        }
+        await _runtimeSignals.RecordCompletionAsync(runtimeId, tickId, installationId, payload, cancellationToken);
     }
 
     private static BrokerToAgentMessage CreateRejectedRegistration(string reason) =>

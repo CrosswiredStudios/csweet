@@ -128,6 +128,7 @@ public class AgentImportPreviewEndpointTests
         Assert.Single(await dbContext.AgentInstallations.ToListAsync());
         Assert.Single(await dbContext.AgentInstallationGrants.ToListAsync());
         Assert.Single(await dbContext.AgentSchedules.ToListAsync());
+        Assert.Single(await dbContext.AgentBuildJobs.ToListAsync());
     }
 
     private static async Task MarkSetupCompleteAsync(WebApplicationFactory<Program> factory)

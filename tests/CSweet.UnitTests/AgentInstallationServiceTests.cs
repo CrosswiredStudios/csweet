@@ -74,9 +74,27 @@ public sealed class AgentInstallationServiceTests
         Assert.Single(await dbContext.AgentInstallations.ToListAsync());
         Assert.Single(await dbContext.AgentInstallationGrants.ToListAsync());
         Assert.Single(await dbContext.AgentSchedules.ToListAsync());
+        var buildJob = Assert.Single(await dbContext.AgentBuildJobs.ToListAsync());
+        Assert.Equal(AgentBuildStatus.Queued, buildJob.Status);
         Assert.Equal(
             AgentPackageVersionStatus.Approved,
             (await dbContext.AgentPackageVersions.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task InstallAsync_ReusesPackageBuildAcrossBusinessInstallations()
+    {
+        await using var dbContext = CreateDbContext();
+        var package = await SeedAsync(dbContext);
+        var service = new AgentInstallationService(dbContext, new TestAuditEventWriter());
+
+        await service.InstallAsync(package.Id, ValidRequest());
+        await service.InstallAsync(
+            package.Id,
+            ValidRequest() with { BusinessId = "second-business" });
+
+        Assert.Equal(2, await dbContext.AgentInstallations.CountAsync());
+        Assert.Single(await dbContext.AgentBuildJobs.ToListAsync());
     }
 
     private static InstallAgentRequest ValidRequest() => new(

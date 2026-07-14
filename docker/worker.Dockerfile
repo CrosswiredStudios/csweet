@@ -7,6 +7,7 @@ COPY ["Directory.Build.props", "./"]
 COPY ["Directory.Packages.props", "./"]
 COPY ["src/CSweet.WorkerHost/CSweet.WorkerHost.csproj", "src/CSweet.WorkerHost/"]
 COPY ["src/CSweet.Application/CSweet.Application.csproj", "src/CSweet.Application/"]
+COPY ["src/CSweet.Agent.Contracts/CSweet.Agent.Contracts.csproj", "src/CSweet.Agent.Contracts/"]
 COPY ["src/CSweet.Domain/CSweet.Domain.csproj", "src/CSweet.Domain/"]
 COPY ["src/CSweet.Contracts/CSweet.Contracts.csproj", "src/CSweet.Contracts/"]
 COPY ["src/CSweet.Infrastructure/CSweet.Infrastructure.csproj", "src/CSweet.Infrastructure/"]
@@ -21,6 +22,12 @@ RUN dotnet publish "src/CSweet.WorkerHost/CSweet.WorkerHost.csproj" -c Release -
 
 # ---- Runtime ----
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+USER root
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends docker.io git \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/lib/csweet/agents/sources /var/lib/csweet/agents/packages \
+    && chown -R $APP_UID:0 /var/lib/csweet
 WORKDIR /app
 COPY --from=publish /app/publish .
 

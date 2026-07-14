@@ -79,6 +79,16 @@ services:
     environment:
       DOTNET_ENVIRONMENT: ${DOTNET_ENVIRONMENT:-Production}
       ConnectionStrings__Postgres: ${CSWEET_CONNECTIONSTRINGS__POSTGRES:-Host=postgres;Port=5432;Database=csweet;Username=csweet;Password=change-me-in-production}
+      CSWEET_AGENT_SOURCE_ROOT: /var/lib/csweet/agents/sources
+      CSWEET_AGENT_PACKAGE_CACHE: /var/lib/csweet/agents/packages
+      CSWEET_AGENT_SOURCE_VOLUME: csweet-agent-sources
+      CSWEET_AGENT_PACKAGE_VOLUME: csweet-agent-packages
+    group_add:
+      - "${DOCKER_GID:-0}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - csweet-agent-sources:/var/lib/csweet/agents/sources
+      - csweet-agent-packages:/var/lib/csweet/agents/packages
 
   # ---------------------------------------------------------
   # Database (PostgreSQL)
@@ -101,4 +111,10 @@ services:
 
 volumes:
   csweet-postgres:
+    driver: local
+  csweet-agent-sources:
+    name: csweet-agent-sources
+    driver: local
+  csweet-agent-packages:
+    name: csweet-agent-packages
     driver: local

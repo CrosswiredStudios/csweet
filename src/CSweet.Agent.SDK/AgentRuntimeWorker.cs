@@ -59,6 +59,8 @@ public sealed class AgentRuntimeWorker<TAgent> : BackgroundService
                 var context = new AgentRuntimeContext(
                     _options.BusinessId,
                     _options.InstallationId,
+                    _options.RuntimeInstanceId,
+                    _options.TickId,
                     broker);
 
                 _logger.LogInformation(
@@ -104,7 +106,10 @@ public sealed class AgentRuntimeWorker<TAgent> : BackgroundService
             AgentId = manifest.Id,
             AgentVersion = manifest.Version,
             InstallationId = _options.InstallationId,
-            BusinessId = _options.BusinessId
+            BusinessId = _options.BusinessId,
+            RuntimeInstanceId = _options.RuntimeInstanceId,
+            TickId = _options.TickId,
+            WorkloadToken = _options.WorkloadToken
         };
         registration.DeclaredCapabilities.AddRange(manifest.Capabilities);
         registration.RequestedSubscriptions.AddRange(manifest.RequestedSubscriptions);

@@ -1,0 +1,232 @@
+using CSweet.Application.Setup;
+using CSweet.Domain.Setup;
+using CSweet.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace CSweet.Infrastructure.Setup;
+
+public sealed class AgentBuildService : IAgentBuildService
+{
+    private readonly CSweetDbContext _dbContext;
+    private readonly IAgentBuildExecutor _executor;
+    private readonly IAuditEventWriter _auditWriter;
+    private readonly ILogger<AgentBuildService> _logger;
+
+    public AgentBuildService(
+        CSweetDbContext dbContext,
+        IAgentBuildExecutor executor,
+        IAuditEventWriter auditWriter,
+        ILogger<AgentBuildService> logger)
+    {
+        _dbContext = dbContext;
+        _executor = executor;
+        _auditWriter = auditWriter;
+        _logger = logger;
+    }
+
+    public async Task<Guid> QueueAsync(
+        Guid packageVersionId,
+        CancellationToken cancellationToken = default)
+    {
+        var packageVersion = await _dbContext.AgentPackageVersions
+            .SingleOrDefaultAsync(x => x.Id == packageVersionId, cancellationToken)
+            ?? throw new AgentBuildException("The agent package version was not found.");
+
+        if (packageVersion.Status is not (AgentPackageVersionStatus.Approved or AgentPackageVersionStatus.Failed))
+        {
+            throw new AgentBuildException("Only approved or failed agent package versions can be queued for build.");
+        }
+
+        var activeJob = await _dbContext.AgentBuildJobs
+            .Where(x => x.PackageVersionId == packageVersionId)
+            .OrderByDescending(x => x.Attempt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (activeJob?.Status is AgentBuildStatus.Queued or AgentBuildStatus.Cloning or AgentBuildStatus.Building)
+        {
+            return activeJob.Id;
+        }
+
+        var job = new AgentBuildJob
+        {
+            Id = Guid.NewGuid(),
+            PackageVersionId = packageVersionId,
+            Attempt = (activeJob?.Attempt ?? 0) + 1,
+            QueuedAt = DateTimeOffset.UtcNow
+        };
+        packageVersion.Status = AgentPackageVersionStatus.Approved;
+        _dbContext.AgentBuildJobs.Add(job);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await WriteAuditAsync(job, "agent-build.queued", "Queued agent package build.", cancellationToken);
+        return job.Id;
+    }
+
+    public async Task<bool> ProcessNextAsync(CancellationToken cancellationToken = default)
+    {
+        var job = await _dbContext.AgentBuildJobs
+            .Include(x => x.PackageVersion)
+                .ThenInclude(x => x!.PackageSource)
+            .Where(x => x.Status == AgentBuildStatus.Queued)
+            .OrderBy(x => x.QueuedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (job is null)
+        {
+            return false;
+        }
+
+        var settings = await _dbContext.AgentRuntimeGlobalSettings
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new AgentBuildException("Agent runtime settings have not been seeded.");
+        var package = job.PackageVersion
+            ?? throw new AgentBuildException("The build job package version was not loaded.");
+        var source = package.PackageSource
+            ?? throw new AgentBuildException("The build job package source was not loaded.");
+        if (package.Status != AgentPackageVersionStatus.Approved)
+        {
+            job.FailureMessage = $"Build cancelled because the package version is {package.Status}.";
+            job.TransitionTo(AgentBuildStatus.Cancelled, DateTimeOffset.UtcNow);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await WriteAuditAsync(
+                job,
+                "agent-build.cancelled",
+                job.FailureMessage,
+                cancellationToken);
+            return true;
+        }
+        if (string.IsNullOrWhiteSpace(package.ProjectPath))
+        {
+            await FailAsync(job, package, "The approved manifest does not define a .NET project path.");
+            return true;
+        }
+
+        var request = new AgentBuildExecutionRequest(
+            job.Id,
+            package.Id,
+            source.RepositoryUrl,
+            package.CommitSha,
+            package.ProjectPath,
+            package.TargetFramework,
+            settings.DotNetBuilderImage,
+            settings.AgentSourceRootPath,
+            settings.AgentPackageCachePath,
+            settings.BuildTimeoutSeconds,
+            settings.BuildMemoryMb,
+            settings.BuildCpuPercent,
+            settings.DefaultContainerPidsLimit,
+            settings.MaximumRepositorySizeMb,
+            settings.MaximumBuildLogMb);
+
+        AgentBuildWorkspace? workspace = null;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(settings.BuildTimeoutSeconds));
+
+        try
+        {
+            job.TransitionTo(AgentBuildStatus.Cloning, DateTimeOffset.UtcNow);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await WriteAuditAsync(job, "agent-build.started", "Started cloning the approved commit.", cancellationToken);
+
+            workspace = await _executor.CloneAsync(request, timeout.Token);
+            job.SourceWorkspacePath = workspace.SourcePath;
+            job.LogPath = workspace.LogPath;
+            job.TransitionTo(AgentBuildStatus.Building, DateTimeOffset.UtcNow);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            var result = await _executor.BuildAsync(request, workspace, timeout.Token);
+            job.PackagePath = result.PackagePath;
+            job.PackageDigest = result.PackageDigest;
+            job.LogPath = result.LogPath;
+            job.FailureMessage = null;
+            job.TransitionTo(AgentBuildStatus.Succeeded, DateTimeOffset.UtcNow);
+            package.PackagePath = result.PackagePath;
+            package.PackageDigest = result.PackageDigest;
+            package.BuiltAt = job.CompletedAt;
+            package.Status = AgentPackageVersionStatus.Built;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await WriteAuditAsync(
+                job,
+                "agent-build.succeeded",
+                $"Built immutable agent package {result.PackageDigest}.",
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await CancelAsync(job, package, "The build worker was stopped.");
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            await FailAsync(job, package, $"The build exceeded the {settings.BuildTimeoutSeconds}-second timeout.");
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Agent build {BuildJobId} failed.", job.Id);
+            await FailAsync(job, package, exception.Message);
+        }
+        finally
+        {
+            var shouldRemoveWorkspace = workspace is not null &&
+                (job.Status == AgentBuildStatus.Succeeded
+                    ? settings.RemoveWorkspacesAfterCompletion
+                    : !settings.KeepFailedBuildWorkspaces);
+            if (shouldRemoveWorkspace)
+            {
+                try
+                {
+                    await _executor.CleanupWorkspaceAsync(workspace!, CancellationToken.None);
+                    job.SourceWorkspacePath = null;
+                    await _dbContext.SaveChangesAsync(CancellationToken.None);
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogWarning(
+                        exception,
+                        "Could not clean build workspace for job {BuildJobId}.",
+                        job.Id);
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private async Task FailAsync(AgentBuildJob job, AgentPackageVersion package, string failureMessage)
+    {
+        job.FailureMessage = Truncate(failureMessage, 2048);
+        if (job.Status is AgentBuildStatus.Queued or AgentBuildStatus.Cloning or AgentBuildStatus.Building)
+        {
+            job.TransitionTo(AgentBuildStatus.Failed, DateTimeOffset.UtcNow);
+        }
+        package.Status = AgentPackageVersionStatus.Failed;
+        await _dbContext.SaveChangesAsync(CancellationToken.None);
+        await WriteAuditAsync(job, "agent-build.failed", job.FailureMessage, CancellationToken.None);
+    }
+
+    private async Task CancelAsync(AgentBuildJob job, AgentPackageVersion package, string reason)
+    {
+        job.FailureMessage = reason;
+        if (job.Status is AgentBuildStatus.Queued or AgentBuildStatus.Cloning or AgentBuildStatus.Building)
+        {
+            job.TransitionTo(AgentBuildStatus.Cancelled, DateTimeOffset.UtcNow);
+        }
+        package.Status = AgentPackageVersionStatus.Approved;
+        await _dbContext.SaveChangesAsync(CancellationToken.None);
+        await WriteAuditAsync(job, "agent-build.cancelled", reason, CancellationToken.None);
+    }
+
+    private Task WriteAuditAsync(
+        AgentBuildJob job,
+        string eventType,
+        string? summary,
+        CancellationToken cancellationToken) =>
+        _auditWriter.WriteAsync(
+            eventType,
+            nameof(AgentBuildJob),
+            job.Id,
+            summary,
+            null,
+            cancellationToken);
+
+    private static string Truncate(string value, int maximumLength) =>
+        value.Length <= maximumLength ? value : value[..maximumLength];
+}

@@ -1,6 +1,8 @@
 using CSweet.AgentHost.Broker;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using CSweet.Application.Setup;
+using CSweet.Infrastructure.Setup;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +19,7 @@ builder.Services.AddDbContext<CSweetDbContext>(options => options.UseNpgsql(conn
 builder.Services.AddSingleton<ConfiguredAgentAuthorizationPolicy>();
 builder.Services.AddScoped<IAgentAuthorizationPolicy, PersistedAgentAuthorizationPolicy>();
 builder.Services.AddSingleton<AgentSessionRegistry>();
+builder.Services.AddScoped<IAgentRuntimeSignalService, AgentRuntimeSignalService>();
 
 var app = builder.Build();
 

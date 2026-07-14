@@ -3,6 +3,7 @@ using System;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CSweet.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CSweetDbContext))]
-    partial class CSweetDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260714024613_AddAgentBuildPipeline")]
+    partial class AddAgentBuildPipeline
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1045,37 +1048,6 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.ToTable("AgentRunLogs");
                 });
 
-            modelBuilder.Entity("CSweet.Domain.Setup.AgentRuntimeEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AgentRuntimeInstanceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("OccurredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("PayloadJson")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(48)
-                        .HasColumnType("character varying(48)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AgentRuntimeInstanceId", "OccurredAt");
-
-                    b.ToTable("AgentRuntimeEvents");
-                });
-
             modelBuilder.Entity("CSweet.Domain.Setup.AgentRuntimeGlobalSettings", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1225,68 +1197,6 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("AgentRuntimeGlobalSettings");
-                });
-
-            modelBuilder.Entity("CSweet.Domain.Setup.AgentRuntimeInstance", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AgentInstallationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("BrokerRegisteredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("CompletionReportedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ContainerId")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("ContainerName")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTimeOffset>("QueuedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
-
-                    b.Property<DateTimeOffset?>("RuntimeDeadlineAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("StartedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(48)
-                        .HasColumnType("character varying(48)");
-
-                    b.Property<Guid>("TickId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("WorkloadTokenHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TickId")
-                        .IsUnique();
-
-                    b.HasIndex("AgentInstallationId", "Status");
-
-                    b.ToTable("AgentRuntimeInstances");
                 });
 
             modelBuilder.Entity("CSweet.Domain.Setup.AgentSchedule", b =>
@@ -1796,28 +1706,6 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.Navigation("PackageSource");
                 });
 
-            modelBuilder.Entity("CSweet.Domain.Setup.AgentRuntimeEvent", b =>
-                {
-                    b.HasOne("CSweet.Domain.Setup.AgentRuntimeInstance", "AgentRuntimeInstance")
-                        .WithMany("Events")
-                        .HasForeignKey("AgentRuntimeInstanceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AgentRuntimeInstance");
-                });
-
-            modelBuilder.Entity("CSweet.Domain.Setup.AgentRuntimeInstance", b =>
-                {
-                    b.HasOne("CSweet.Domain.Setup.AgentInstallation", "AgentInstallation")
-                        .WithMany("RuntimeInstances")
-                        .HasForeignKey("AgentInstallationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AgentInstallation");
-                });
-
             modelBuilder.Entity("CSweet.Domain.Setup.AgentSchedule", b =>
                 {
                     b.HasOne("CSweet.Domain.Setup.AgentInstallation", "AgentInstallation")
@@ -1849,19 +1737,12 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                 {
                     b.Navigation("Grant");
 
-                    b.Navigation("RuntimeInstances");
-
                     b.Navigation("Schedule");
                 });
 
             modelBuilder.Entity("CSweet.Domain.Setup.AgentPackageVersion", b =>
                 {
                     b.Navigation("BuildJobs");
-                });
-
-            modelBuilder.Entity("CSweet.Domain.Setup.AgentRuntimeInstance", b =>
-                {
-                    b.Navigation("Events");
                 });
 #pragma warning restore 612, 618
         }

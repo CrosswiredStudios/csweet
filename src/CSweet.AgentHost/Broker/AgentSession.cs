@@ -12,12 +12,16 @@ public sealed class AgentSession
         string agentId,
         string installationId,
         string businessId,
+        string runtimeInstanceId,
+        string tickId,
         AuthorizedAgentGrant grant)
     {
         SessionId = sessionId;
         AgentId = agentId;
         InstallationId = installationId;
         BusinessId = businessId;
+        RuntimeInstanceId = runtimeInstanceId;
+        TickId = tickId;
         Grant = grant;
         _outbound = Channel.CreateBounded<BrokerToAgentMessage>(new BoundedChannelOptions(256)
         {
@@ -34,6 +38,8 @@ public sealed class AgentSession
     public string InstallationId { get; }
 
     public string BusinessId { get; }
+    public string RuntimeInstanceId { get; }
+    public string TickId { get; }
 
     public AuthorizedAgentGrant Grant { get; }
 

@@ -46,6 +46,9 @@ message RegisterAgent {
   repeated string declared_capabilities = 5;
   repeated string requested_subscriptions = 6;
   repeated string requested_publications = 7;
+  string runtime_instance_id = 8;
+  string tick_id = 9;
+  string workload_token = 10;
 }
 
 message RegistrationResult {

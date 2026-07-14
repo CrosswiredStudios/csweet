@@ -75,15 +75,15 @@ coherent subset of one phase.
 
 ## Phase 5 - Container runner
 
-- [ ] Add `IAgentContainerRunner`.
-- [ ] Add container start request model.
-- [ ] Add container status model.
-- [ ] Add Docker runner implementation.
-- [ ] Apply CPU/memory/runtime limits.
-- [ ] Pass approved environment variables only.
-- [ ] Deny privileged mode.
-- [ ] Deny host Docker socket mount.
-- [ ] Add fake runner for tests.
+- [x] Add `IAgentContainerRunner`.
+- [x] Add container start request model.
+- [x] Add container status model.
+- [x] Add Docker runner implementation.
+- [x] Apply CPU/memory limits and carry the approved runtime limit for manager enforcement.
+- [x] Pass approved environment variables only.
+- [x] Deny privileged mode.
+- [x] Deny host Docker socket mount.
+- [x] Add fake runner for tests.
 
 ## Phase 6 - Scheduler and runtime manager
 
