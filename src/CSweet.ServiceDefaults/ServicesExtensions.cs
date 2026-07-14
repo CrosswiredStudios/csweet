@@ -51,7 +51,8 @@ public static class ServicesExtensions
             {
                 metrics.AddAspNetCoreInstrumentation()
                     .AddHttpClientInstrumentation()
-                    .AddRuntimeInstrumentation();
+                    .AddRuntimeInstrumentation()
+                    .AddMeter("CSweet.AgentRuntime");
             })
             .WithTracing(tracing =>
             {

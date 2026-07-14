@@ -47,6 +47,7 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IAgentContainerRunner, DockerAgentContainerRunner>();
         builder.Services.AddScoped<IAgentRuntimeManager, AgentRuntimeManager>();
         builder.Services.AddScoped<IAgentRuntimeSignalService, AgentRuntimeSignalService>();
+        builder.Services.AddScoped<IAgentRuntimeCleanupService, AgentRuntimeCleanupService>();
         builder.Services.AddOptions<AgentRuntimeManagerOptions>()
             .Bind(builder.Configuration.GetSection(AgentRuntimeManagerOptions.SectionName));
         builder.Services.AddHttpClient<IGitHubAgentRepositoryClient, GitHubAgentRepositoryClient>(client =>

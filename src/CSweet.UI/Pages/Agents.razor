@@ -53,13 +53,13 @@
     }
     else
     {
-        <section class="agent-installations-section" aria-label="Imported agent installations">
+        <section class="agent-installations-section" aria-label="Unified agent fleet">
             <div class="configuration-section-header">
                 <div>
-                    <MudText Typo="Typo.h6">Imported Installations</MudText>
-                    <MudText Color="Color.Secondary">Approved grants and persisted activation schedules.</MudText>
+                    <MudText Typo="Typo.h6">Agent Fleet</MudText>
+                    <MudText Color="Color.Secondary">First-party agents and imported installations in one operational view.</MudText>
                 </div>
-                <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@_installations.Count</MudChip>
+                <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@(_installations.Count + _agents.Count)</MudChip>
             </div>
 
             @if (!string.IsNullOrWhiteSpace(_installationActionMessage))
@@ -69,13 +69,35 @@
                 </MudAlert>
             }
 
-            @if (_installations.Count == 0)
+            @if (_installations.Count == 0 && _agents.Count == 0)
             {
-                <MudText Color="Color.Secondary">No imported agents have been installed.</MudText>
+                <MudText Color="Color.Secondary">No agents have been installed.</MudText>
             }
             else
             {
                 <div class="agent-installations-grid">
+                    @foreach (var agent in _agents)
+                    {
+                        <MudPaper Elevation="1" Class="agent-installation-card">
+                            <div class="configuration-section-header">
+                                <div>
+                                    <MudText Typo="Typo.subtitle1">@agent.Name</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@agent.Id · @agent.PublisherName</MudText>
+                                </div>
+                                <MudStack Row="true" Spacing="1">
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Installed</MudChip>
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">First-party</MudChip>
+                                </MudStack>
+                            </div>
+                            <dl class="configuration-details agents-details">
+                                <div><dt>Version</dt><dd>@agent.Version</dd></div>
+                                <div><dt>Runtime</dt><dd>@agent.RuntimeType</dd></div>
+                                <div><dt>Capabilities</dt><dd>@agent.Capabilities.Count</dd></div>
+                                <div><dt>Configuration</dt><dd>Broker-managed</dd></div>
+                            </dl>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Settings" OnClick="@(() => SelectAgentAsync(agent))">Configure</MudButton>
+                        </MudPaper>
+                    }
                     @foreach (var installation in _installations)
                     {
                         <MudPaper Elevation="1" Class="agent-installation-card">
@@ -84,14 +106,31 @@
                                     <MudText Typo="Typo.subtitle1">@installation.AgentName</MudText>
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">@installation.AgentId · @installation.BusinessId</MudText>
                                 </div>
-                                <MudChip T="string" Size="Size.Small" Color="@InstallationStatusColor(installation)" Variant="Variant.Filled">
-                                    @(installation.IsEnabled && installation.Schedule.IsEnabled ? "Enabled" : "Disabled")
-                                </MudChip>
+                                <MudStack Row="true" Spacing="1" Class="agent-status-chips">
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Installed</MudChip>
+                                    @if (installation.Build is not null)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="@BuildStatusColor(installation.Build.Status)" Variant="Variant.Filled">@BuildStatusLabel(installation.Build.Status)</MudChip>
+                                    }
+                                    @if (IsRuntimeActive(installation.LatestRuntime?.Status))
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled">Running</MudChip>
+                                    }
+                                    else if (installation.IsEnabled && installation.Schedule.IsEnabled)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">Scheduled</MudChip>
+                                    }
+                                    else
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Filled">Disabled</MudChip>
+                                    }
+                                </MudStack>
                             </div>
                             <dl class="configuration-details agents-details">
                                 <div><dt>Activation</dt><dd>@installation.Schedule.ActivationMode</dd></div>
                                 <div><dt>Frequency</dt><dd>@FormatFrequency(installation.Schedule.TickFrequencySeconds)</dd></div>
                                 <div><dt>Next tick</dt><dd>@FormatNextTick(installation.Schedule.NextTickAt)</dd></div>
+                                <div><dt>Last run</dt><dd>@FormatLastRun(installation.LatestRuntime)</dd></div>
                                 <div><dt>Runtime limit</dt><dd>@installation.Schedule.MaxRuntimeSeconds s</dd></div>
                                 <div><dt>Memory</dt><dd>@installation.MemoryMb MB</dd></div>
                                 <div><dt>CPU</dt><dd>@installation.CpuPercent%</dd></div>
@@ -103,9 +142,16 @@
                                 <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(_isManagingInstallation || !installation.IsEnabled || !installation.Schedule.IsEnabled)" OnClick="@(() => RunNowAsync(installation))">
                                     Run Now
                                 </MudButton>
-                                <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Block" Disabled="@(_isManagingInstallation || !installation.IsEnabled)" OnClick="@(() => DisableInstallationAsync(installation))">
-                                    Disable
-                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.History" Disabled="@(_isManagingInstallation || installation.LatestRuntime is null)" OnClick="@(() => OpenRunsDialogAsync(installation))">View Runs</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Description" Disabled="@(_isManagingInstallation || installation.Build?.HasLog != true)" OnClick="@(() => OpenBuildLogDialogAsync(installation))">View Build Log</MudButton>
+                                @if (installation.IsEnabled)
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Block" Disabled="@_isManagingInstallation" OnClick="@(() => DisableInstallationAsync(installation))">Disable</MudButton>
+                                }
+                                else
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Success" StartIcon="@Icons.Material.Filled.CheckCircle" Disabled="@_isManagingInstallation" OnClick="@(() => EnableInstallationAsync(installation))">Enable</MudButton>
+                                }
                             </MudStack>
                         </MudPaper>
                     }
@@ -117,8 +163,8 @@
             <MudPaper Elevation="1" Class="surface-panel agents-list-panel">
                 <div class="configuration-section-header">
                     <div>
-                        <MudText Typo="Typo.h6">Available Agents</MudText>
-                        <MudText Color="Color.Secondary">Discovered from installed agent manifests.</MudText>
+                        <MudText Typo="Typo.h6">First-party Configuration</MudText>
+                        <MudText Color="Color.Secondary">Select a first-party agent to edit its exposed configuration schema.</MudText>
                     </div>
                     <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@_agents.Count</MudChip>
                 </div>
@@ -490,6 +536,70 @@
     </DialogActions>
 </MudDialog>
 
+<MudDialog @bind-Visible="_runsDialogOpen" Options="_managementDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Runtime History · @_runsInstallation?.AgentName</MudText></TitleContent>
+    <DialogContent>
+        @if (_isLoadingManagementDetail)
+        {
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (!string.IsNullOrWhiteSpace(_managementDetailError))
+        {
+            <MudAlert Severity="Severity.Error">@_managementDetailError</MudAlert>
+        }
+        else if (_runtimeRuns.Count == 0)
+        {
+            <MudText Color="Color.Secondary">No runtime instances have been recorded.</MudText>
+        }
+        else
+        {
+            <MudExpansionPanels>
+                @foreach (var run in _runtimeRuns)
+                {
+                    <MudExpansionPanel Text="@($"{run.Status} · {run.QueuedAt.ToLocalTime():g}")">
+                        <dl class="configuration-details agents-details">
+                            <div><dt>Tick</dt><dd>@run.TickId</dd></div>
+                            <div><dt>Started</dt><dd>@FormatTimestamp(run.StartedAt)</dd></div>
+                            <div><dt>Completed</dt><dd>@FormatTimestamp(run.CompletedAt)</dd></div>
+                            <div><dt>Result</dt><dd>@(run.Reason ?? run.Status)</dd></div>
+                        </dl>
+                        @foreach (var runtimeEvent in run.Events)
+                        {
+                            <MudText Typo="Typo.caption"><strong>@runtimeEvent.Status</strong> · @runtimeEvent.OccurredAt.ToLocalTime().ToString("g") · @(runtimeEvent.Reason ?? "No detail")</MudText>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(run.LogExcerpt))
+                        {
+                            <MudText Typo="Typo.subtitle2" Class="mt-3">Container log excerpt</MudText>
+                            <pre class="agent-build-log">@run.LogExcerpt</pre>
+                        }
+                    </MudExpansionPanel>
+                }
+            </MudExpansionPanels>
+        }
+    </DialogContent>
+    <DialogActions><MudButton Variant="Variant.Text" OnClick="CloseRunsDialog">Close</MudButton></DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_buildLogDialogOpen" Options="_managementDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Build Log · @_buildLogInstallation?.AgentName</MudText></TitleContent>
+    <DialogContent>
+        @if (_isLoadingManagementDetail)
+        {
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (!string.IsNullOrWhiteSpace(_managementDetailError))
+        {
+            <MudAlert Severity="Severity.Error">@_managementDetailError</MudAlert>
+        }
+        else
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Status: @_buildLog?.Status @(_buildLog?.IsTruncated == true ? "· truncated" : string.Empty)</MudText>
+            <pre class="agent-build-log">@(_buildLog?.Content ?? "No build output was retained.")</pre>
+        }
+    </DialogContent>
+    <DialogActions><MudButton Variant="Variant.Text" OnClick="CloseBuildLogDialog">Close</MudButton></DialogActions>
+</MudDialog>
+
 @code {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
@@ -540,6 +650,15 @@
     private int _scheduleMaxRuntimeSeconds = 600;
     private bool _scheduleEnabled = true;
     private string? _scheduleError;
+    private readonly DialogOptions _managementDialogOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
+    private bool _runsDialogOpen;
+    private AgentInstallationResponse? _runsInstallation;
+    private IReadOnlyList<AgentRuntimeRunResponse> _runtimeRuns = [];
+    private bool _buildLogDialogOpen;
+    private AgentInstallationResponse? _buildLogInstallation;
+    private AgentBuildLogResponse? _buildLog;
+    private bool _isLoadingManagementDetail;
+    private string? _managementDetailError;
 
     private string SchemaChipLabel => _schema is null ? "Offline" : "Configurable";
     private Color SchemaChipColor => _schema is null ? Color.Warning : Color.Success;
@@ -785,6 +904,41 @@
             "Agent installation disabled.");
     }
 
+    private async Task EnableInstallationAsync(AgentInstallationResponse installation)
+    {
+        await ExecuteInstallationActionAsync(
+            () => AgentApi.EnableAsync(installation.Id),
+            "Agent installation enabled.");
+    }
+
+    private async Task OpenRunsDialogAsync(AgentInstallationResponse installation)
+    {
+        _runsInstallation = installation;
+        _runtimeRuns = [];
+        _managementDetailError = null;
+        _isLoadingManagementDetail = true;
+        _runsDialogOpen = true;
+        try { _runtimeRuns = await AgentApi.ListRunsAsync(installation.Id); }
+        catch (Exception exception) { _managementDetailError = exception.Message; }
+        finally { _isLoadingManagementDetail = false; }
+    }
+
+    private void CloseRunsDialog() => _runsDialogOpen = false;
+
+    private async Task OpenBuildLogDialogAsync(AgentInstallationResponse installation)
+    {
+        _buildLogInstallation = installation;
+        _buildLog = null;
+        _managementDetailError = null;
+        _isLoadingManagementDetail = true;
+        _buildLogDialogOpen = true;
+        try { _buildLog = await AgentApi.GetBuildLogAsync(installation.Id); }
+        catch (Exception exception) { _managementDetailError = exception.Message; }
+        finally { _isLoadingManagementDetail = false; }
+    }
+
+    private void CloseBuildLogDialog() => _buildLogDialogOpen = false;
+
     private async Task ExecuteInstallationActionAsync(
         Func<Task<AgentInstallationResponse>> action,
         string successMessage)
@@ -1017,8 +1171,32 @@
     private static string DisplayImportValue(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "Not specified" : value;
 
-    private static Color InstallationStatusColor(AgentInstallationResponse installation) =>
-        installation.IsEnabled && installation.Schedule.IsEnabled ? Color.Success : Color.Default;
+    private static Color BuildStatusColor(string status) => status switch
+    {
+        "Succeeded" => Color.Success,
+        "Failed" or "Cancelled" => Color.Error,
+        _ => Color.Warning
+    };
+
+    private static string BuildStatusLabel(string status) => status switch
+    {
+        "Queued" => "Build queued",
+        "Cloning" or "Building" => "Building",
+        "Succeeded" => "Built",
+        "Failed" => "Build failed",
+        "Cancelled" => "Build cancelled",
+        _ => status
+    };
+
+    private static bool IsRuntimeActive(string? status) => status is
+        "Queued" or "Starting" or "WaitingForBrokerRegistration" or "Running" or "CompletionReported" or "Stopping";
+
+    private static string FormatLastRun(AgentRuntimeRunResponse? run) => run is null
+        ? "Never"
+        : $"{run.Status} · {run.QueuedAt.ToLocalTime():g}";
+
+    private static string FormatTimestamp(DateTimeOffset? timestamp) =>
+        timestamp?.ToLocalTime().ToString("g") ?? "—";
 
     private static string FormatFrequency(int seconds) => seconds % 3600 == 0
         ? $"{seconds / 3600}h"

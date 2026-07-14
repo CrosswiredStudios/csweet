@@ -4,6 +4,7 @@ using System.Text;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Agents;
 using CSweet.Contracts.Setup;
+using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -16,6 +17,26 @@ namespace CSweet.IntegrationTests;
 
 public class AgentImportPreviewEndpointTests
 {
+    [Fact]
+    public async Task Preview_IsRateLimitedAfterTenRequestsPerMinute()
+    {
+        using var factory = CreateFactory();
+        await MarkSetupCompleteAsync(factory);
+        var client = factory.CreateClient();
+        HttpResponseMessage? response = null;
+        for (var index = 0; index < 11; index++)
+        {
+            response?.Dispose();
+            response = await client.PostAsJsonAsync(
+                "/api/agents/imports/preview",
+                new PreviewAgentImportRequest("https://github.com/example/research-agent"));
+        }
+        using (response)
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, response!.StatusCode);
+        }
+    }
+
     [Fact]
     public async Task Post_PreviewsAndPersistsRootManifest()
     {
@@ -99,6 +120,7 @@ public class AgentImportPreviewEndpointTests
         var listed = await client.GetFromJsonAsync<IReadOnlyList<AgentInstallationResponse>>(
             "/api/agents/installations");
         Assert.Single(listed!);
+        Assert.Equal("Queued", listed![0].Build?.Status);
 
         var scheduleResponse = await client.PutAsJsonAsync(
             $"/api/agents/installations/{installation.Id}/schedule",
@@ -123,8 +145,49 @@ public class AgentImportPreviewEndpointTests
         Assert.False(disabled!.IsEnabled);
         Assert.False(disabled.Schedule.IsEnabled);
 
+        var enableResponse = await client.PostAsync(
+            $"/api/agents/installations/{installation.Id}/enable",
+            null);
+        var enabled = await enableResponse.Content.ReadFromJsonAsync<AgentInstallationResponse>();
+        Assert.Equal(HttpStatusCode.OK, enableResponse.StatusCode);
+        Assert.True(enabled!.IsEnabled);
+        Assert.True(enabled.Schedule.IsEnabled);
+
+        var buildLogResponse = await client.GetAsync(
+            $"/api/agents/installations/{installation.Id}/build-log");
+        var buildLog = await buildLogResponse.Content.ReadFromJsonAsync<AgentBuildLogResponse>();
+        Assert.Equal(HttpStatusCode.OK, buildLogResponse.StatusCode);
+        Assert.Equal("Queued", buildLog!.Status);
+
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
+        var runtime = new AgentRuntimeInstance
+        {
+            Id = Guid.NewGuid(),
+            TickId = Guid.NewGuid(),
+            AgentInstallationId = installation.Id,
+            QueuedAt = DateTimeOffset.UtcNow
+        };
+        runtime.Events.Add(new AgentRuntimeEvent
+        {
+            Id = Guid.NewGuid(),
+            AgentRuntimeInstanceId = runtime.Id,
+            Status = AgentRuntimeStatus.Queued,
+            Reason = "Run requested.",
+            OccurredAt = runtime.QueuedAt
+        });
+        dbContext.AgentRuntimeInstances.Add(runtime);
+        await dbContext.SaveChangesAsync();
+
+        var runs = await client.GetFromJsonAsync<IReadOnlyList<AgentRuntimeRunResponse>>(
+            $"/api/agents/installations/{installation.Id}/runs");
+        Assert.Single(runs!);
+        Assert.Equal("Queued", runs![0].Status);
+        Assert.Single(runs[0].Events);
+        var detail = await client.GetFromJsonAsync<AgentInstallationResponse>(
+            $"/api/agents/installations/{installation.Id}");
+        Assert.Equal("Queued", detail!.LatestRuntime?.Status);
+
         Assert.Single(await dbContext.AgentInstallations.ToListAsync());
         Assert.Single(await dbContext.AgentInstallationGrants.ToListAsync());
         Assert.Single(await dbContext.AgentSchedules.ToListAsync());

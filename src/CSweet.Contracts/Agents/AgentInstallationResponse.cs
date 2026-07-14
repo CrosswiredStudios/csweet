@@ -19,4 +19,40 @@ public sealed record AgentInstallationResponse(
     int CpuPercent,
     AgentScheduleResponse Schedule,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    AgentBuildSummaryResponse? Build = null,
+    AgentRuntimeRunResponse? LatestRuntime = null);
+
+public sealed record AgentBuildSummaryResponse(
+    Guid BuildJobId,
+    string Status,
+    int Attempt,
+    DateTimeOffset QueuedAt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt,
+    bool HasLog,
+    string? FailureMessage);
+
+public sealed record AgentRuntimeRunResponse(
+    Guid Id,
+    Guid TickId,
+    string Status,
+    string? Reason,
+    DateTimeOffset QueuedAt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? BrokerRegisteredAt,
+    DateTimeOffset? CompletionReportedAt,
+    DateTimeOffset? CompletedAt,
+    IReadOnlyList<AgentRuntimeEventResponse> Events,
+    string? LogExcerpt = null);
+
+public sealed record AgentRuntimeEventResponse(
+    string Status,
+    string? Reason,
+    DateTimeOffset OccurredAt);
+
+public sealed record AgentBuildLogResponse(
+    Guid BuildJobId,
+    string Status,
+    string Content,
+    bool IsTruncated);

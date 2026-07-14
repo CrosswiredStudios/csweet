@@ -83,6 +83,28 @@ public sealed class AgentApiClient : IAgentApiClient
             null,
             cancellationToken);
 
+    public Task<AgentInstallationResponse> EnableAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default) =>
+        SendAsync<AgentInstallationResponse>(HttpMethod.Post, $"api/agents/installations/{installationId}/enable", null, cancellationToken);
+
+    public async Task<IReadOnlyList<AgentRuntimeRunResponse>> ListRunsAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default) =>
+        await _httpClient.GetFromJsonAsync<IReadOnlyList<AgentRuntimeRunResponse>>(
+            $"api/agents/installations/{installationId}/runs", cancellationToken) ?? [];
+
+    public async Task<AgentBuildLogResponse> GetBuildLogAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync($"api/agents/installations/{installationId}/build-log", cancellationToken);
+        if (response.IsSuccessStatusCode)
+            return await response.Content.ReadFromJsonAsync<AgentBuildLogResponse>(cancellationToken)
+                ?? throw new ApiClientException(response.StatusCode, "Build log response was empty.");
+        throw new ApiClientException(response.StatusCode, "No build log is available for this installation.");
+    }
+
     public async Task<AgentConfigurationSchemaResponse> GetConfigurationAsync(
         string agentId,
         CancellationToken cancellationToken = default)

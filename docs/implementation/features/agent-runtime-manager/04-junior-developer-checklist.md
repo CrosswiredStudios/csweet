@@ -105,26 +105,26 @@ coherent subset of one phase.
 
 ## Phase 7 - Agents page management
 
-- [ ] Show imported installations in agent list.
-- [ ] Show build/schedule/runtime status badges.
-- [ ] Show tick frequency and next run.
-- [ ] Add Run Now action.
-- [ ] Add Enable/Disable action.
-- [ ] Add Edit Schedule action.
-- [ ] Add View Runs action.
-- [ ] Add View Build Log action.
-- [ ] Preserve existing configurable-agent editor behavior.
+- [x] Show imported installations in agent list.
+- [x] Show build/schedule/runtime status badges.
+- [x] Show tick frequency and next run.
+- [x] Add Run Now action.
+- [x] Add Enable/Disable action.
+- [x] Add Edit Schedule action.
+- [x] Add View Runs action.
+- [x] Add View Build Log action.
+- [x] Preserve existing configurable-agent editor behavior.
 
 ## Phase 8 - Cleanup and observability
 
-- [ ] Add cleanup worker.
-- [ ] Remove completed containers when configured.
-- [ ] Remove old workspaces when configured.
-- [ ] Retain failed logs according to settings.
-- [ ] Add audit events.
-- [ ] Add metrics/logging for starts, stops, failures, and timeouts.
-- [ ] Add rate limits for import/build/run-now.
-- [ ] Add final manual end-to-end QA script.
+- [x] Add cleanup worker.
+- [x] Remove completed containers when configured.
+- [x] Remove old workspaces when configured.
+- [x] Retain failed logs according to settings.
+- [x] Add audit events.
+- [x] Add metrics/logging for starts, stops, failures, and timeouts.
+- [x] Add rate limits for import/build/run-now.
+- [x] Add final manual end-to-end QA script.
 
 ## Final end-to-end acceptance
 

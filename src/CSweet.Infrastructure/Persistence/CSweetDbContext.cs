@@ -223,6 +223,7 @@ public sealed class CSweetDbContext : DbContext
             entity.Property(x => x.ContainerId).HasMaxLength(128);
             entity.Property(x => x.ContainerName).HasMaxLength(128);
             entity.Property(x => x.Reason).HasMaxLength(2048);
+            entity.Property(x => x.LogExcerpt).HasColumnType("text");
             entity.HasIndex(x => x.TickId).IsUnique();
             entity.HasIndex(x => new { x.AgentInstallationId, x.Status });
             entity.HasOne(x => x.AgentInstallation)

@@ -55,6 +55,9 @@ services:
       CSWEET_LLM__DEFAULT_PROVIDER_TYPE: ${CSWEET_LLM__DEFAULT_PROVIDER_TYPE:-LMStudio}
       CSWEET_LLM__DEFAULT_BASE_URL: ${CSWEET_LLM__DEFAULT_BASE_URL:-http://host.docker.internal:1234/v1}
       CSWEET_LLM__DEFAULT_API_KEY: ${CSWEET_LLM__DEFAULT_API_KEY:-lm-studio}
+      CSWEET_AGENT_PACKAGE_CACHE: /var/lib/csweet/agents/packages
+    volumes:
+      - csweet-agent-packages:/var/lib/csweet/agents/packages:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/health || exit 1"]
       interval: 10s

@@ -12,6 +12,7 @@ namespace CSweet.Infrastructure.Setup;
 public sealed class AgentRuntimeManager(
     CSweetDbContext dbContext,
     IAgentContainerRunner containers,
+    IAuditEventWriter auditWriter,
     IOptions<AgentRuntimeManagerOptions> options,
     ILogger<AgentRuntimeManager> logger) : IAgentRuntimeManager
 {
@@ -23,7 +24,9 @@ public sealed class AgentRuntimeManager(
         var now = DateTimeOffset.UtcNow;
         var dueIds = await dbContext.AgentSchedules.AsNoTracking()
             .Where(x => x.IsEnabled && x.NextTickAt != null && x.NextTickAt <= now)
-            .OrderBy(x => x.NextTickAt).Select(x => x.Id).Take(10).ToListAsync(cancellationToken);
+            .OrderBy(x => x.NextTickAt).Select(x => x.Id)
+            .Take(Math.Clamp(options.Value.MaximumScheduleClaimsPerIteration, 1, 100))
+            .ToListAsync(cancellationToken);
         var processed = 0;
         foreach (var id in dueIds)
         {
@@ -57,6 +60,13 @@ public sealed class AgentRuntimeManager(
                 changed++;
                 continue;
             }
+            if (instance.Status != AgentRuntimeStatus.Queued &&
+                (instance.AgentInstallation?.IsEnabled != true || instance.AgentInstallation.Schedule?.IsEnabled != true))
+            {
+                await StopAndFinishAsync(instance, AgentRuntimeStatus.Cancelled, "Installation or schedule was disabled.", now, cancellationToken);
+                changed++;
+                continue;
+            }
             if (instance.Status == AgentRuntimeStatus.WaitingForBrokerRegistration && instance.StartedAt?.AddSeconds((await SettingsAsync(cancellationToken)).BrokerRegistrationTimeoutSeconds) <= now)
             {
                 await StopAndFinishAsync(instance, AgentRuntimeStatus.BrokerRegistrationTimedOut, "Broker registration timed out.", now, cancellationToken);
@@ -75,8 +85,7 @@ public sealed class AgentRuntimeManager(
                 if (status is null || status.State is AgentContainerState.Exited or AgentContainerState.Dead)
                 {
                     var terminal = status?.ExitCode is 0 ? AgentRuntimeStatus.ExitedWithoutCompletion : AgentRuntimeStatus.Failed;
-                    Transition(instance, terminal, now, status?.Error ?? "Container exited without a completion event.");
-                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await StopAndFinishAsync(instance, terminal, status?.Error ?? "Container exited without a completion event.", now, cancellationToken);
                     changed++;
                 }
             }
@@ -101,8 +110,10 @@ public sealed class AgentRuntimeManager(
 
         var active = await dbContext.AgentRuntimeInstances.Where(x => x.AgentInstallationId == schedule.AgentInstallationId && (x.Status == AgentRuntimeStatus.Queued || ContainerActiveStatuses.Contains(x.Status))).OrderBy(x => x.QueuedAt).ToListAsync(cancellationToken);
         var cancelPrevious = new List<AgentRuntimeInstance>();
+        var tickOutcome = "queued";
         if (active.Count > 0 && schedule.OverlapPolicy == OverlapPolicy.Skip)
         {
+            tickOutcome = "skipped";
             AddTerminalInstance(schedule.AgentInstallationId, AgentRuntimeStatus.Skipped, now, "Skipped because a prior runtime is active.");
         }
         else
@@ -116,6 +127,9 @@ public sealed class AgentRuntimeManager(
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+            AgentRuntimeMetrics.Tick(schedule.ActivationMode.ToString(), tickOutcome);
+            await auditWriter.WriteAsync("agent-runtime.schedule.tick", nameof(AgentSchedule), schedule.Id,
+                $"Schedule tick {tickOutcome} for installation {schedule.AgentInstallationId}.", cancellationToken: cancellationToken);
             foreach (var prior in cancelPrevious)
                 await StopAndFinishAsync(prior, AgentRuntimeStatus.Cancelled, "Cancelled by overlap policy.", now, cancellationToken);
             return true;
@@ -142,6 +156,7 @@ public sealed class AgentRuntimeManager(
         {
             Transition(instance, AgentRuntimeStatus.PolicyDenied, now, "Installation is disabled or its package is not built.");
             await dbContext.SaveChangesAsync(cancellationToken);
+            await AuditOutcomeAsync(instance, AgentRuntimeStatus.PolicyDenied, cancellationToken);
             return true;
         }
 
@@ -165,6 +180,7 @@ public sealed class AgentRuntimeManager(
                 installation.Schedule.MaxRuntimeSeconds), startTimeout.Token);
             instance.ContainerId = status.ContainerId;
             instance.RuntimeDeadlineAt = now.AddSeconds(installation.Schedule.MaxRuntimeSeconds);
+            AgentRuntimeMetrics.ContainerStarted();
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -178,6 +194,11 @@ public sealed class AgentRuntimeManager(
             Transition(instance, AgentRuntimeStatus.StartFailed, DateTimeOffset.UtcNow, exception.Message);
         }
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (instance.Status == AgentRuntimeStatus.WaitingForBrokerRegistration)
+            await auditWriter.WriteAsync("agent-runtime.container.started", nameof(AgentRuntimeInstance), instance.Id,
+                $"Started container {instance.ContainerId} for installation {instance.AgentInstallationId}.", cancellationToken: cancellationToken);
+        else if (instance.Status == AgentRuntimeStatus.StartFailed)
+            await AuditOutcomeAsync(instance, AgentRuntimeStatus.StartFailed, cancellationToken);
         return true;
     }
 
@@ -191,20 +212,39 @@ public sealed class AgentRuntimeManager(
     {
         Transition(instance, AgentRuntimeStatus.Stopping, now, reason);
         await dbContext.SaveChangesAsync(cancellationToken);
+        var settings = await SettingsAsync(cancellationToken);
         if (instance.ContainerId is not null)
         {
-            var settings = await SettingsAsync(cancellationToken);
+            var containerId = instance.ContainerId;
             try
             {
-                await containers.StopAsync(instance.ContainerId, TimeSpan.FromSeconds(settings.ContainerStopGraceSeconds), cancellationToken);
-                if (settings.RemoveContainersAfterCompletion) await containers.RemoveAsync(instance.ContainerId, cancellationToken: cancellationToken);
+                var maximumLogBytes = Math.Min(settings.DefaultContainerLogLimitMb * 1024 * 1024, 64 * 1024);
+                instance.LogExcerpt = await containers.GetLogsAsync(containerId, maximumLogBytes, cancellationToken);
+            }
+            catch (AgentContainerException exception)
+            {
+                logger.LogWarning(exception, "Could not retain logs for runtime {RuntimeInstanceId}.", instance.Id);
+            }
+            try
+            {
+                await containers.StopAsync(containerId, TimeSpan.FromSeconds(settings.ContainerStopGraceSeconds), cancellationToken);
+                if (settings.RemoveContainersAfterCompletion)
+                {
+                    await containers.RemoveAsync(containerId, cancellationToken: cancellationToken);
+                    instance.ContainerId = null;
+                }
+                AgentRuntimeMetrics.ContainerStopped(terminal.ToString());
+                await auditWriter.WriteAsync("agent-runtime.container.stopped", nameof(AgentRuntimeInstance), instance.Id,
+                    $"Stopped container {containerId}: {reason}", cancellationToken: cancellationToken);
             }
             catch (AgentContainerException exception) { logger.LogWarning(exception, "Container cleanup failed for runtime {RuntimeInstanceId}", instance.Id); }
         }
         Transition(instance, terminal, DateTimeOffset.UtcNow, reason);
         if (terminal == AgentRuntimeStatus.Completed && instance.AgentInstallation?.Schedule is { } schedule)
             schedule.LastCompletedAt = DateTimeOffset.UtcNow;
+        ScheduleAlwaysOnRestart(instance, terminal, settings);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await AuditOutcomeAsync(instance, terminal, cancellationToken);
     }
 
     private void AddTerminalInstance(Guid installationId, AgentRuntimeStatus status, DateTimeOffset now, string reason)
@@ -219,6 +259,35 @@ public sealed class AgentRuntimeManager(
     {
         instance.TransitionTo(status, at, reason);
         dbContext.AgentRuntimeEvents.Add(new AgentRuntimeEvent { Id = Guid.NewGuid(), AgentRuntimeInstanceId = instance.Id, Status = status, Reason = reason, OccurredAt = at });
+        logger.LogInformation("Agent runtime {RuntimeInstanceId} transitioned to {RuntimeStatus}: {Reason}", instance.Id, status, reason);
+        if (AgentRuntimeInstance.IsTerminal(status))
+            AgentRuntimeMetrics.RuntimeOutcome(status, instance.StartedAt is { } started ? at - started : null);
+    }
+
+    private Task AuditOutcomeAsync(AgentRuntimeInstance instance, AgentRuntimeStatus status, CancellationToken cancellationToken)
+    {
+        var eventType = status switch
+        {
+            AgentRuntimeStatus.Completed => "agent-runtime.completed",
+            AgentRuntimeStatus.RuntimeTimedOut or AgentRuntimeStatus.BrokerRegistrationTimedOut => "agent-runtime.timeout",
+            AgentRuntimeStatus.PolicyDenied => "agent-runtime.policy-denied",
+            AgentRuntimeStatus.StartFailed or AgentRuntimeStatus.Failed or AgentRuntimeStatus.ExitedWithoutCompletion => "agent-runtime.failed",
+            AgentRuntimeStatus.Cancelled => "agent-runtime.cancelled",
+            _ => "agent-runtime.outcome"
+        };
+        return auditWriter.WriteAsync(eventType, nameof(AgentRuntimeInstance), instance.Id,
+            $"Runtime ended as {status}: {instance.Reason}", cancellationToken: cancellationToken);
+    }
+
+    private static void ScheduleAlwaysOnRestart(AgentRuntimeInstance instance, AgentRuntimeStatus terminal, AgentRuntimeGlobalSettings settings)
+    {
+        var schedule = instance.AgentInstallation?.Schedule;
+        if (schedule?.ActivationMode != ActivationMode.AlwaysOn || !schedule.IsEnabled || instance.AgentInstallation?.IsEnabled != true)
+            return;
+        var failed = terminal is not (AgentRuntimeStatus.Completed or AgentRuntimeStatus.Cancelled);
+        if (settings.DefaultRestartPolicy == RestartPolicy.Always ||
+            (settings.DefaultRestartPolicy == RestartPolicy.OnFailure && failed))
+            schedule.NextTickAt = DateTimeOffset.UtcNow;
     }
 
     private async Task<AgentRuntimeGlobalSettings> SettingsAsync(CancellationToken cancellationToken)

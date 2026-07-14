@@ -102,7 +102,7 @@ public sealed class AgentRuntimeManagerTests
     }
 
     private static AgentRuntimeManager CreateManager(CSweetDbContext db, IAgentContainerRunner runner) =>
-        new(db, runner, Options.Create(new AgentRuntimeManagerOptions { BrokerEndpoint = "http://broker:8080", DockerNetworkName = "broker-only" }), NullLogger<AgentRuntimeManager>.Instance);
+        new(db, runner, new TestAuditEventWriter(), Options.Create(new AgentRuntimeManagerOptions { BrokerEndpoint = "http://broker:8080", DockerNetworkName = "broker-only" }), NullLogger<AgentRuntimeManager>.Instance);
 
     private static CSweetDbContext CreateDb() => new(new DbContextOptionsBuilder<CSweetDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);

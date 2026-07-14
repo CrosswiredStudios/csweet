@@ -15,6 +15,7 @@ builder.AddServiceDefaults();
 builder.AddCSweetInfrastructure();
 builder.Services.AddChatGateway(builder.Configuration);
 builder.Services.AddAgentManagement(builder.Configuration);
+builder.Services.AddAgentRateLimiting();
 
 builder.Services.AddCors(options =>
 {
@@ -45,6 +46,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<FirstRunSetupGuardMiddleware>();
+app.UseRateLimiter();
 
 app.MapGet("/api/health", () => new { status = "ok", service = "CSweet.Api" });
 

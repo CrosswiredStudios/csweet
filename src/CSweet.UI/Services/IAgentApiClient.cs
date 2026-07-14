@@ -31,6 +31,18 @@ public interface IAgentApiClient
         Guid installationId,
         CancellationToken cancellationToken = default);
 
+    Task<AgentInstallationResponse> EnableAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<AgentRuntimeRunResponse>> ListRunsAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default);
+
+    Task<AgentBuildLogResponse> GetBuildLogAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default);
+
     Task<AgentConfigurationSchemaResponse> GetConfigurationAsync(
         string agentId,
         CancellationToken cancellationToken = default);

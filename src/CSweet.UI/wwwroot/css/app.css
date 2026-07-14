@@ -726,6 +726,24 @@ code {
     padding: 1rem;
 }
 
+.agent-status-chips {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.agent-build-log {
+    margin-top: 1rem;
+    max-height: 55vh;
+    overflow: auto;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    background: #111827;
+    color: #e5e7eb;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: 0.8rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .agent-import-approval-list {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));

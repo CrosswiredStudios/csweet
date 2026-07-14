@@ -106,11 +106,33 @@ Last updated: 2026-07-13
 
 ## Phase 7 - Agents Page Management
 
-- [ ] Not started
+- [x] Unified Agent Fleet view for first-party agents and imported installations
+- [x] Installed, build queued/building/failed/built, scheduled, running, and disabled status badges
+- [x] Activation mode, tick frequency, next tick, resource limits, and latest run result summaries
+- [x] Import Agent, Run Now, Enable/Disable, and Edit Schedule actions
+- [x] Runtime history dialog with lifecycle events, timestamps, and outcome reasons
+- [x] Retained build-log dialog with bounded API response and truncation indicator
+- [x] Installation enable, runtime-history, and build-log API endpoints and UI client methods
+- [x] Existing first-party per-agent configuration-schema editor preserved
+- [x] Integration coverage for enable, run history, and build-log endpoints
+- [x] UI and API builds plus full unit/integration verification
 
 ## Phase 8 - Cleanup & Observability
 
-- [ ] Not started
+- [x] `AgentRuntimeCleanupWorker` hourly reconciliation with scoped cleanup service
+- [x] Deferred terminal-container inspection/removal after runtime-manager or Docker failures
+- [x] Safe source-workspace deletion constrained to the approved source root
+- [x] Build-log deletion constrained to the approved package root and configured retention window
+- [x] Separate completed and failed runtime-history retention windows with event cascade cleanup
+- [x] Bounded container-log excerpts retained with runtime history and visible in View Runs
+- [x] OpenTelemetry runtime counters and duration histogram for ticks, starts, stops, outcomes, and cleanup
+- [x] Structured lifecycle, policy, timeout, failure, and cleanup logging
+- [x] Audit events for schedule ticks, container start/stop, completion, timeout, policy denial, failure, and cleanup
+- [x] Fixed-window per-client rate limits for import preview, build-triggering install approval, and Run Now
+- [x] Bounded schedule claims and sequential build processing for internal worker backpressure
+- [x] Always-on restart-policy reconciliation and active-runtime cancellation after disable
+- [x] Final manual end-to-end QA script: `scripts/agent-runtime-e2e.ps1`
+- [x] Cleanup, retention, audit, and API rate-limit tests
 
 ## Notes
 

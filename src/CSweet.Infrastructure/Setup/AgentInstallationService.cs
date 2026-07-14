@@ -223,11 +223,69 @@ public sealed class AgentInstallationService : IAgentInstallationService
         return ToResponse(installation);
     }
 
+    public async Task<AgentInstallationResponse> EnableAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default)
+    {
+        var installation = await GetInstallationAsync(installationId, cancellationToken);
+        var settings = await GetSettingsAsync(cancellationToken);
+        if (!settings.EnableImportedAgents)
+            throw new AgentInstallationException("Imported agents are disabled in global runtime settings.");
+        var now = DateTimeOffset.UtcNow;
+        installation.IsEnabled = true;
+        installation.Schedule!.IsEnabled = true;
+        installation.Schedule.NextTickAt = ComputeNextTick(
+            installation.Schedule.ActivationMode,
+            installation.Schedule.TickFrequencySeconds,
+            now);
+        installation.UpdatedAt = now;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await WriteScheduleAuditAsync(installation, "agent-installation.enabled", cancellationToken);
+        return ToResponse(installation);
+    }
+
+    public async Task<IReadOnlyList<AgentRuntimeRunResponse>> ListRunsAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await _dbContext.AgentInstallations.AnyAsync(x => x.Id == installationId, cancellationToken))
+            throw new AgentInstallationException("The agent installation was not found.");
+        var runs = await _dbContext.AgentRuntimeInstances.AsNoTracking()
+            .Include(x => x.Events)
+            .Where(x => x.AgentInstallationId == installationId)
+            .OrderByDescending(x => x.QueuedAt)
+            .Take(50)
+            .ToListAsync(cancellationToken);
+        return runs.Select(ToRunResponse).ToList();
+    }
+
+    public async Task<AgentBuildLogResponse?> GetBuildLogAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default)
+    {
+        var job = await _dbContext.AgentInstallations.AsNoTracking()
+            .Where(x => x.Id == installationId)
+            .SelectMany(x => x.PackageVersion!.BuildJobs)
+            .OrderByDescending(x => x.Attempt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (job is null) return null;
+        if (string.IsNullOrWhiteSpace(job.LogPath) || !File.Exists(job.LogPath))
+            return new AgentBuildLogResponse(job.Id, job.Status.ToString(), string.Empty, false);
+        var settings = await GetSettingsAsync(cancellationToken);
+        var maximumBytes = checked(settings.MaximumBuildLogMb * 1024 * 1024);
+        await using var stream = new FileStream(job.LogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 81920, true);
+        var length = (int)Math.Min(stream.Length, maximumBytes);
+        var bytes = new byte[length];
+        var read = await stream.ReadAtLeastAsync(bytes, length, throwOnEndOfStream: false, cancellationToken: cancellationToken);
+        return new AgentBuildLogResponse(job.Id, job.Status.ToString(), System.Text.Encoding.UTF8.GetString(bytes, 0, read), stream.Length > maximumBytes);
+    }
+
     private IQueryable<AgentInstallation> InstallationQuery() =>
         _dbContext.AgentInstallations
-            .Include(x => x.PackageVersion)
+            .Include(x => x.PackageVersion)!.ThenInclude(x => x!.BuildJobs)
             .Include(x => x.Grant)
-            .Include(x => x.Schedule);
+            .Include(x => x.Schedule)
+            .Include(x => x.RuntimeInstances).ThenInclude(x => x.Events);
 
     private async Task<AgentInstallation> GetInstallationAsync(
         Guid installationId,
@@ -366,6 +424,8 @@ public sealed class AgentInstallationService : IAgentInstallationService
         var package = installation.PackageVersion!;
         var grant = installation.Grant!;
         var schedule = installation.Schedule!;
+        var build = package.BuildJobs.OrderByDescending(x => x.Attempt).FirstOrDefault();
+        var runtime = installation.RuntimeInstances.OrderByDescending(x => x.QueuedAt).FirstOrDefault();
         return new AgentInstallationResponse(
             installation.Id,
             installation.PackageVersionId,
@@ -396,6 +456,25 @@ public sealed class AgentInstallationService : IAgentInstallationService
                 schedule.OverlapPolicy.ToString(),
                 schedule.IsEnabled),
             installation.CreatedAt,
-            installation.UpdatedAt);
+            installation.UpdatedAt,
+            build is null ? null : new AgentBuildSummaryResponse(
+                build.Id, build.Status.ToString(), build.Attempt, build.QueuedAt, build.StartedAt,
+                build.CompletedAt, !string.IsNullOrWhiteSpace(build.LogPath), build.FailureMessage),
+            runtime is null ? null : ToRunResponse(runtime));
     }
+
+    private static AgentRuntimeRunResponse ToRunResponse(AgentRuntimeInstance runtime) => new(
+        runtime.Id,
+        runtime.TickId,
+        runtime.Status.ToString(),
+        runtime.Reason,
+        runtime.QueuedAt,
+        runtime.StartedAt,
+        runtime.BrokerRegisteredAt,
+        runtime.CompletionReportedAt,
+        runtime.CompletedAt,
+        runtime.Events.OrderBy(x => x.OccurredAt)
+            .Select(x => new AgentRuntimeEventResponse(x.Status.ToString(), x.Reason, x.OccurredAt))
+            .ToList(),
+        runtime.LogExcerpt);
 }

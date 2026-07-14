@@ -10,6 +10,7 @@ public sealed class AgentRuntimeInstance
     public string? ContainerId { get; set; }
     public string? ContainerName { get; set; }
     public string? Reason { get; private set; }
+    public string? LogExcerpt { get; set; }
     public DateTimeOffset QueuedAt { get; set; }
     public DateTimeOffset? StartedAt { get; private set; }
     public DateTimeOffset? BrokerRegisteredAt { get; private set; }
@@ -48,7 +49,7 @@ public sealed class AgentRuntimeInstance
             (AgentRuntimeStatus.WaitingForBrokerRegistration, AgentRuntimeStatus.Running or AgentRuntimeStatus.Stopping or AgentRuntimeStatus.BrokerRegistrationTimedOut or AgentRuntimeStatus.StartFailed or AgentRuntimeStatus.Cancelled) => true,
             (AgentRuntimeStatus.Running, AgentRuntimeStatus.CompletionReported or AgentRuntimeStatus.Stopping or AgentRuntimeStatus.RuntimeTimedOut or AgentRuntimeStatus.ExitedWithoutCompletion or AgentRuntimeStatus.Failed or AgentRuntimeStatus.Cancelled) => true,
             (AgentRuntimeStatus.CompletionReported, AgentRuntimeStatus.Stopping or AgentRuntimeStatus.Completed or AgentRuntimeStatus.Failed) => true,
-            (AgentRuntimeStatus.Stopping, AgentRuntimeStatus.Completed or AgentRuntimeStatus.RuntimeTimedOut or AgentRuntimeStatus.Failed or AgentRuntimeStatus.Cancelled) => true,
+            (AgentRuntimeStatus.Stopping, AgentRuntimeStatus.Completed or AgentRuntimeStatus.BrokerRegistrationTimedOut or AgentRuntimeStatus.RuntimeTimedOut or AgentRuntimeStatus.ExitedWithoutCompletion or AgentRuntimeStatus.Failed or AgentRuntimeStatus.Cancelled) => true,
             _ => false
         };
 }

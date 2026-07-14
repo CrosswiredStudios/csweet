@@ -46,7 +46,7 @@ public static class AgentManagementEndpoints
             {
                 return Results.BadRequest(new { error = exception.Message });
             }
-        });
+        }).RequireRateLimiting(AgentRateLimiting.ImportPolicy);
 
         group.MapPost("/imports/{importId:guid}/install", async (
             Guid importId,
@@ -54,7 +54,8 @@ public static class AgentManagementEndpoints
             IAgentInstallationService installationService,
             CancellationToken cancellationToken) =>
             await ExecuteInstallationActionAsync(
-                () => installationService.InstallAsync(importId, request, cancellationToken)));
+                () => installationService.InstallAsync(importId, request, cancellationToken)))
+            .RequireRateLimiting(AgentRateLimiting.BuildPolicy);
 
         group.MapGet("/installations", async (
             IAgentInstallationService installationService,
@@ -83,7 +84,8 @@ public static class AgentManagementEndpoints
             IAgentInstallationService installationService,
             CancellationToken cancellationToken) =>
             await ExecuteInstallationActionAsync(
-                () => installationService.RunNowAsync(installationId, cancellationToken)));
+                () => installationService.RunNowAsync(installationId, cancellationToken)))
+            .RequireRateLimiting(AgentRateLimiting.RunPolicy);
 
         group.MapPost("/installations/{installationId:guid}/disable", async (
             Guid installationId,
@@ -91,6 +93,31 @@ public static class AgentManagementEndpoints
             CancellationToken cancellationToken) =>
             await ExecuteInstallationActionAsync(
                 () => installationService.DisableAsync(installationId, cancellationToken)));
+
+        group.MapPost("/installations/{installationId:guid}/enable", async (
+            Guid installationId,
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+            await ExecuteInstallationActionAsync(
+                () => installationService.EnableAsync(installationId, cancellationToken)));
+
+        group.MapGet("/installations/{installationId:guid}/runs", async (
+            Guid installationId,
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+        {
+            try { return Results.Ok(await installationService.ListRunsAsync(installationId, cancellationToken)); }
+            catch (AgentInstallationException exception) { return Results.BadRequest(new { error = exception.Message }); }
+        });
+
+        group.MapGet("/installations/{installationId:guid}/build-log", async (
+            Guid installationId,
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+        {
+            var log = await installationService.GetBuildLogAsync(installationId, cancellationToken);
+            return log is null ? Results.NotFound() : Results.Ok(log);
+        });
 
         group.MapGet("/{agentId}/configuration", async (
             string agentId,

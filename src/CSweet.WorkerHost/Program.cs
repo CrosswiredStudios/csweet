@@ -11,6 +11,7 @@ builder.AddCSweetInfrastructure();
 
 builder.Services.AddHostedService<AgentBuildWorker>();
 builder.Services.AddHostedService<AgentScheduleWorker>();
+builder.Services.AddHostedService<AgentRuntimeCleanupWorker>();
 
 var host = builder.Build();
 host.Run();
