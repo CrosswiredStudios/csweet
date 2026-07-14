@@ -2,10 +2,12 @@
 
   <ItemGroup>
     <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\CSweet.Agent.Contracts\CSweet.Agent.Contracts.csproj" />
+    <ProjectReference Include="..\CSweet.Infrastructure\CSweet.Infrastructure.csproj" />
     <ProjectReference Include="..\CSweet.ServiceDefaults\CSweet.ServiceDefaults.csproj" />
   </ItemGroup>
 

@@ -29,7 +29,10 @@ var migrator = builder.AddExecutable(
     .WithReference(postgres)
     .WaitFor(postgres);
 
-var agentHost = builder.AddProject<Projects.CSweet_AgentHost>("agenthost");
+var agentHost = builder.AddProject<Projects.CSweet_AgentHost>("agenthost")
+    .WithReference(postgres)
+    .WaitFor(postgres)
+    .WaitForCompletion(migrator);
 
 var api = builder.AddProject<Projects.CSweet_Api>("api")
     .WithReference(postgres)

@@ -39,6 +39,50 @@ public sealed class AgentApiClient : IAgentApiClient
         throw new ApiClientException(response.StatusCode, error?.Error ?? "Agent import could not be previewed.");
     }
 
+    public Task<AgentInstallationResponse> InstallAsync(
+        Guid importId,
+        InstallAgentRequest request,
+        CancellationToken cancellationToken = default) =>
+        SendAsync<AgentInstallationResponse>(
+            HttpMethod.Post,
+            $"api/agents/imports/{importId}/install",
+            request,
+            cancellationToken);
+
+    public async Task<IReadOnlyList<AgentInstallationResponse>> ListInstallationsAsync(
+        CancellationToken cancellationToken = default) =>
+        await _httpClient.GetFromJsonAsync<IReadOnlyList<AgentInstallationResponse>>(
+            "api/agents/installations",
+            cancellationToken) ?? [];
+
+    public Task<AgentInstallationResponse> UpdateScheduleAsync(
+        Guid installationId,
+        UpdateAgentScheduleRequest request,
+        CancellationToken cancellationToken = default) =>
+        SendAsync<AgentInstallationResponse>(
+            HttpMethod.Put,
+            $"api/agents/installations/{installationId}/schedule",
+            request,
+            cancellationToken);
+
+    public Task<AgentInstallationResponse> RunNowAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default) =>
+        SendAsync<AgentInstallationResponse>(
+            HttpMethod.Post,
+            $"api/agents/installations/{installationId}/run-now",
+            null,
+            cancellationToken);
+
+    public Task<AgentInstallationResponse> DisableAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default) =>
+        SendAsync<AgentInstallationResponse>(
+            HttpMethod.Post,
+            $"api/agents/installations/{installationId}/disable",
+            null,
+            cancellationToken);
+
     public async Task<AgentConfigurationSchemaResponse> GetConfigurationAsync(
         string agentId,
         CancellationToken cancellationToken = default)
@@ -75,6 +119,29 @@ public sealed class AgentApiClient : IAgentApiClient
 
         var error = await response.Content.ReadFromJsonAsync<AgentApiErrorResponse>(cancellationToken);
         throw new ApiClientException(response.StatusCode, error?.Error ?? "Agent configuration could not be saved.");
+    }
+
+    private async Task<T> SendAsync<T>(
+        HttpMethod method,
+        string uri,
+        object? body,
+        CancellationToken cancellationToken)
+    {
+        using var message = new HttpRequestMessage(method, uri);
+        if (body is not null)
+        {
+            message.Content = JsonContent.Create(body);
+        }
+
+        using var response = await _httpClient.SendAsync(message, cancellationToken);
+        if (response.IsSuccessStatusCode)
+        {
+            return await response.Content.ReadFromJsonAsync<T>(cancellationToken)
+                ?? throw new ApiClientException(response.StatusCode, "Agent management response was empty.");
+        }
+
+        var error = await response.Content.ReadFromJsonAsync<AgentApiErrorResponse>(cancellationToken);
+        throw new ApiClientException(response.StatusCode, error?.Error ?? "Agent management action failed.");
     }
 
     private sealed record AgentApiErrorResponse(string? Error);

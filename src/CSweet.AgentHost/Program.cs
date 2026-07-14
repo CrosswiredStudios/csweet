@@ -1,4 +1,6 @@
 using CSweet.AgentHost.Broker;
+using CSweet.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -8,7 +10,12 @@ builder.Services
     .AddOptions<AgentBrokerPolicyOptions>()
     .Bind(builder.Configuration.GetSection(AgentBrokerPolicyOptions.SectionName))
     .ValidateOnStart();
-builder.Services.AddSingleton<IAgentAuthorizationPolicy, ConfiguredAgentAuthorizationPolicy>();
+var connectionString = builder.Configuration.GetConnectionString("Postgres")
+    ?? builder.Configuration.GetConnectionString("csweet")
+    ?? throw new InvalidOperationException("ConnectionStrings:Postgres or ConnectionStrings:csweet must be configured.");
+builder.Services.AddDbContext<CSweetDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddSingleton<ConfiguredAgentAuthorizationPolicy>();
+builder.Services.AddScoped<IAgentAuthorizationPolicy, PersistedAgentAuthorizationPolicy>();
 builder.Services.AddSingleton<AgentSessionRegistry>();
 
 var app = builder.Build();

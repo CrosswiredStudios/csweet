@@ -38,15 +38,16 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
             return;
         }
 
-        if (!_authorizationPolicy.TryAuthorize(
-                firstMessage.Register,
-                out var grant,
-                out var rejectionReason) ||
-            grant is null)
+        var authorization = await _authorizationPolicy.AuthorizeAsync(
+            firstMessage.Register,
+            context.CancellationToken);
+        if (!authorization.Accepted || authorization.Grant is null)
         {
-            await responseStream.WriteAsync(CreateRejectedRegistration(rejectionReason));
+            await responseStream.WriteAsync(CreateRejectedRegistration(authorization.RejectionReason));
             return;
         }
+
+        var grant = authorization.Grant;
 
         var session = _sessions.Register(firstMessage.Register, grant);
         var registration = new RegistrationResult

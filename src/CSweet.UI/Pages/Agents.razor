@@ -2,8 +2,10 @@
 @using System.Text.Json
 @using CSweet.Contracts.Agents
 @using CSweet.Contracts.Llm
+@using CSweet.Contracts.Setup
 @inject IAgentApiClient AgentApi
 @inject ILlmProviderApiClient LlmProviderApi
+@inject IAgentRuntimeSettingsApiClient AgentRuntimeSettingsApi
 
 <PageTitle>Agents - C-Sweet</PageTitle>
 
@@ -51,6 +53,66 @@
     }
     else
     {
+        <section class="agent-installations-section" aria-label="Imported agent installations">
+            <div class="configuration-section-header">
+                <div>
+                    <MudText Typo="Typo.h6">Imported Installations</MudText>
+                    <MudText Color="Color.Secondary">Approved grants and persisted activation schedules.</MudText>
+                </div>
+                <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@_installations.Count</MudChip>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_installationActionMessage))
+            {
+                <MudAlert Severity="@(_installationActionSucceeded ? Severity.Success : Severity.Error)" Variant="Variant.Outlined">
+                    @_installationActionMessage
+                </MudAlert>
+            }
+
+            @if (_installations.Count == 0)
+            {
+                <MudText Color="Color.Secondary">No imported agents have been installed.</MudText>
+            }
+            else
+            {
+                <div class="agent-installations-grid">
+                    @foreach (var installation in _installations)
+                    {
+                        <MudPaper Elevation="1" Class="agent-installation-card">
+                            <div class="configuration-section-header">
+                                <div>
+                                    <MudText Typo="Typo.subtitle1">@installation.AgentName</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@installation.AgentId · @installation.BusinessId</MudText>
+                                </div>
+                                <MudChip T="string" Size="Size.Small" Color="@InstallationStatusColor(installation)" Variant="Variant.Filled">
+                                    @(installation.IsEnabled && installation.Schedule.IsEnabled ? "Enabled" : "Disabled")
+                                </MudChip>
+                            </div>
+                            <dl class="configuration-details agents-details">
+                                <div><dt>Activation</dt><dd>@installation.Schedule.ActivationMode</dd></div>
+                                <div><dt>Frequency</dt><dd>@FormatFrequency(installation.Schedule.TickFrequencySeconds)</dd></div>
+                                <div><dt>Next tick</dt><dd>@FormatNextTick(installation.Schedule.NextTickAt)</dd></div>
+                                <div><dt>Runtime limit</dt><dd>@installation.Schedule.MaxRuntimeSeconds s</dd></div>
+                                <div><dt>Memory</dt><dd>@installation.MemoryMb MB</dd></div>
+                                <div><dt>CPU</dt><dd>@installation.CpuPercent%</dd></div>
+                            </dl>
+                            <MudStack Row="true" Class="setup-actions">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.EditCalendar" Disabled="@_isManagingInstallation" OnClick="@(() => OpenScheduleDialog(installation))">
+                                    Edit Schedule
+                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(_isManagingInstallation || !installation.IsEnabled || !installation.Schedule.IsEnabled)" OnClick="@(() => RunNowAsync(installation))">
+                                    Run Now
+                                </MudButton>
+                                <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Block" Disabled="@(_isManagingInstallation || !installation.IsEnabled)" OnClick="@(() => DisableInstallationAsync(installation))">
+                                    Disable
+                                </MudButton>
+                            </MudStack>
+                        </MudPaper>
+                    }
+                </div>
+            }
+        </section>
+
         <section class="agents-grid">
             <MudPaper Elevation="1" Class="surface-panel agents-list-panel">
                 <div class="configuration-section-header">
@@ -294,13 +356,13 @@
                           @bind-Value="_importRepositoryUrl"
                           Placeholder="https://github.com/owner/repository"
                           Variant="Variant.Outlined"
-                          Disabled="@_isPreviewingImport"
+                          Disabled="@(_isPreviewingImport || _isInstallingImport || _importPreview is not null)"
                           Immediate="true" />
             <MudTextField Label="Branch, tag, or commit (optional)"
                           @bind-Value="_importRef"
                           Placeholder="Default branch"
                           Variant="Variant.Outlined"
-                          Disabled="@_isPreviewingImport" />
+                          Disabled="@(_isPreviewingImport || _isInstallingImport || _importPreview is not null)" />
 
             @if (!string.IsNullOrWhiteSpace(_importError))
             {
@@ -339,19 +401,91 @@
                             }
                         </MudStack>
                     }
+
+                    <MudDivider />
+                    <MudText Typo="Typo.subtitle1">Approval and Schedule</MudText>
+                    <div class="setup-form-grid">
+                        <MudTextField Label="Business ID" @bind-Value="_installBusinessId" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
+                        <MudSelect T="string" Label="Activation mode" @bind-Value="_installActivationMode" Variant="Variant.Outlined" Disabled="@_isInstallingImport">
+                            <MudSelectItem T="string" Value="@("AlwaysOn")">Always On</MudSelectItem>
+                            <MudSelectItem T="string" Value="@("Periodic")">Periodic</MudSelectItem>
+                            <MudSelectItem T="string" Value="@("Manual")">Manual</MudSelectItem>
+                        </MudSelect>
+                        <MudNumericField T="int" Label="Tick frequency (seconds)" @bind-Value="_installTickFrequencySeconds" Min="@(_runtimeSettings?.MinimumTickFrequencySeconds ?? 60)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
+                        <MudSelect T="string" Label="Overlap policy" @bind-Value="_installOverlapPolicy" Variant="Variant.Outlined" Disabled="@_isInstallingImport">
+                            <MudSelectItem T="string" Value="@("Skip")">Skip</MudSelectItem>
+                            <MudSelectItem T="string" Value="@("Queue")">Queue</MudSelectItem>
+                            <MudSelectItem T="string" Value="@("CancelPrevious")">Cancel Previous</MudSelectItem>
+                        </MudSelect>
+                        <MudNumericField T="int" Label="Max runtime (seconds)" @bind-Value="_installMaxRuntimeSeconds" Min="1" Max="@(_runtimeSettings?.DefaultMaxRuntimeSeconds ?? int.MaxValue)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
+                        <MudNumericField T="int" Label="Memory (MB)" @bind-Value="_installMemoryMb" Min="1" Max="@(_runtimeSettings?.MaximumContainerMemoryMb ?? int.MaxValue)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
+                        <MudNumericField T="int" Label="CPU (%)" @bind-Value="_installCpuPercent" Min="1" Max="@(_runtimeSettings?.MaximumContainerCpuPercent ?? int.MaxValue)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
+                    </div>
+
+                    @ApprovalSection("Capabilities", _importPreview.Capabilities, _approvedCapabilities)
+                    @ApprovalSection("Subscriptions", _importPreview.RequestedSubscriptions, _approvedSubscriptions)
+                    @ApprovalSection("Publications", _importPreview.RequestedPublications, _approvedPublications)
+                    @ApprovalSection("Permissions", _importPreview.RequestedPermissions, _approvedPermissions)
+                    @ApprovalSection("Network access", _importPreview.RequestedNetworkAccess, _approvedNetworkAccess)
                 </div>
             }
         </MudStack>
     </DialogContent>
     <DialogActions>
-        <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@_isPreviewingImport" OnClick="CloseImportDialog">
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@(_isPreviewingImport || _isInstallingImport)" OnClick="CloseImportDialog">
             Close
         </MudButton>
-        <MudButton Variant="Variant.Filled"
-                   Color="Color.Primary"
-                   Disabled="@(_isPreviewingImport || string.IsNullOrWhiteSpace(_importRepositoryUrl))"
-                   OnClick="PreviewImportAsync">
-            @(_isPreviewingImport ? "Previewing..." : "Preview Manifest")
+        @if (_importPreview is null)
+        {
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Disabled="@(_isPreviewingImport || string.IsNullOrWhiteSpace(_importRepositoryUrl))"
+                       OnClick="PreviewImportAsync">
+                @(_isPreviewingImport ? "Previewing..." : "Preview Manifest")
+            </MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@_isInstallingImport" OnClick="ResetImportPreview">
+                Back
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isInstallingImport" OnClick="InstallImportAsync" StartIcon="@Icons.Material.Filled.VerifiedUser">
+                @(_isInstallingImport ? "Installing..." : "Approve and Install")
+            </MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_scheduleDialogOpen" Options="_scheduleDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Edit Schedule</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudText Color="Color.Secondary">@_scheduleInstallation?.AgentName</MudText>
+            <MudSelect T="string" Label="Activation mode" @bind-Value="_scheduleActivationMode" Variant="Variant.Outlined" Disabled="@_isManagingInstallation">
+                <MudSelectItem T="string" Value="@("AlwaysOn")">Always On</MudSelectItem>
+                <MudSelectItem T="string" Value="@("Periodic")">Periodic</MudSelectItem>
+                <MudSelectItem T="string" Value="@("Manual")">Manual</MudSelectItem>
+            </MudSelect>
+            <MudNumericField T="int" Label="Tick frequency (seconds)" @bind-Value="_scheduleTickFrequencySeconds" Min="@(_runtimeSettings?.MinimumTickFrequencySeconds ?? 60)" Variant="Variant.Outlined" Disabled="@_isManagingInstallation" />
+            <MudSelect T="string" Label="Overlap policy" @bind-Value="_scheduleOverlapPolicy" Variant="Variant.Outlined" Disabled="@_isManagingInstallation">
+                <MudSelectItem T="string" Value="@("Skip")">Skip</MudSelectItem>
+                <MudSelectItem T="string" Value="@("Queue")">Queue</MudSelectItem>
+                <MudSelectItem T="string" Value="@("CancelPrevious")">Cancel Previous</MudSelectItem>
+            </MudSelect>
+            <MudNumericField T="int" Label="Max runtime (seconds)" @bind-Value="_scheduleMaxRuntimeSeconds" Min="1" Max="@(_runtimeSettings?.DefaultMaxRuntimeSeconds ?? int.MaxValue)" Variant="Variant.Outlined" Disabled="@_isManagingInstallation" />
+            <MudCheckBox T="bool" Label="Schedule enabled" @bind-Value="_scheduleEnabled" Disabled="@_isManagingInstallation" />
+            @if (!string.IsNullOrWhiteSpace(_scheduleError))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_scheduleError</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Disabled="@_isManagingInstallation" OnClick="CloseScheduleDialog">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isManagingInstallation" OnClick="SaveScheduleAsync">
+            @(_isManagingInstallation ? "Saving..." : "Save Schedule")
         </MudButton>
     </DialogActions>
 </MudDialog>
@@ -360,7 +494,9 @@
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
     private IReadOnlyList<AgentCatalogItemResponse> _agents = [];
+    private IReadOnlyList<AgentInstallationResponse> _installations = [];
     private IReadOnlyList<LlmProviderProfileResponse> _providerProfiles = [];
+    private AgentRuntimeSettingsResponse? _runtimeSettings;
     private LlmTokenUsageSummaryResponse? _usageSummary;
     private AgentCatalogItemResponse? _selectedAgent;
     private AgentConfigurationSchemaResponse? _schema;
@@ -368,17 +504,42 @@
     private bool _isLoading = true;
     private bool _isLoadingConfiguration;
     private bool _isBusy;
+    private bool _isManagingInstallation;
     private string? _pageError;
+    private string? _installationActionMessage;
+    private bool _installationActionSucceeded;
     private string? _configurationError;
     private string? _actionMessage;
     private bool? _actionSucceeded;
     private readonly DialogOptions _importDialogOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
     private bool _importDialogOpen;
     private bool _isPreviewingImport;
+    private bool _isInstallingImport;
     private string _importRepositoryUrl = string.Empty;
     private string _importRef = string.Empty;
     private string? _importError;
     private AgentImportPreviewResponse? _importPreview;
+    private string _installBusinessId = "default";
+    private string _installActivationMode = "Periodic";
+    private int _installTickFrequencySeconds = 3600;
+    private string _installOverlapPolicy = "Skip";
+    private int _installMaxRuntimeSeconds = 600;
+    private int _installMemoryMb = 512;
+    private int _installCpuPercent = 50;
+    private readonly HashSet<string> _approvedCapabilities = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _approvedSubscriptions = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _approvedPublications = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _approvedPermissions = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _approvedNetworkAccess = new(StringComparer.Ordinal);
+    private readonly DialogOptions _scheduleDialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+    private bool _scheduleDialogOpen;
+    private AgentInstallationResponse? _scheduleInstallation;
+    private string _scheduleActivationMode = "Periodic";
+    private int _scheduleTickFrequencySeconds = 3600;
+    private string _scheduleOverlapPolicy = "Skip";
+    private int _scheduleMaxRuntimeSeconds = 600;
+    private bool _scheduleEnabled = true;
+    private string? _scheduleError;
 
     private string SchemaChipLabel => _schema is null ? "Offline" : "Configurable";
     private Color SchemaChipColor => _schema is null ? Color.Warning : Color.Success;
@@ -399,14 +560,18 @@
         try
         {
             var agentsTask = AgentApi.ListAsync();
+            var installationsTask = AgentApi.ListInstallationsAsync();
             var providersTask = LlmProviderApi.ListAsync();
             var usageTask = LlmProviderApi.GetUsageSummaryAsync();
+            var runtimeSettingsTask = AgentRuntimeSettingsApi.GetAsync();
 
-            await Task.WhenAll(agentsTask, providersTask, usageTask);
+            await Task.WhenAll(agentsTask, installationsTask, providersTask, usageTask, runtimeSettingsTask);
 
             _agents = await agentsTask;
+            _installations = await installationsTask;
             _providerProfiles = await providersTask;
             _usageSummary = await usageTask;
+            _runtimeSettings = await runtimeSettingsTask;
             if (_selectedAgent is not null)
             {
                 _selectedAgent = _agents.FirstOrDefault(agent => agent.Id == _selectedAgent.Id);
@@ -434,6 +599,7 @@
         _importRef = string.Empty;
         _importError = null;
         _importPreview = null;
+        ClearImportApproval();
         _importDialogOpen = true;
     }
 
@@ -453,6 +619,7 @@
             _importPreview = await AgentApi.PreviewImportAsync(new PreviewAgentImportRequest(
                 _importRepositoryUrl.Trim(),
                 string.IsNullOrWhiteSpace(_importRef) ? null : _importRef.Trim()));
+            InitializeImportApproval(_importPreview);
         }
         catch (Exception exception)
         {
@@ -462,6 +629,193 @@
         {
             _isPreviewingImport = false;
         }
+    }
+
+    private void ResetImportPreview()
+    {
+        _importPreview = null;
+        _importError = null;
+        ClearImportApproval();
+    }
+
+    private void InitializeImportApproval(AgentImportPreviewResponse preview)
+    {
+        _installBusinessId = "default";
+        _installActivationMode = preview.DefaultActivationMode ?? _runtimeSettings?.DefaultActivationMode ?? "Periodic";
+        _installTickFrequencySeconds = _runtimeSettings?.DefaultTickFrequencySeconds ?? 3600;
+        _installOverlapPolicy = _runtimeSettings?.DefaultOverlapPolicy ?? "Skip";
+        _installMaxRuntimeSeconds = _runtimeSettings?.DefaultMaxRuntimeSeconds ?? 600;
+        _installMemoryMb = _runtimeSettings?.DefaultContainerMemoryMb ?? 512;
+        _installCpuPercent = _runtimeSettings?.DefaultContainerCpuPercent ?? 50;
+        ReplaceApproval(_approvedCapabilities, preview.Capabilities);
+        ReplaceApproval(_approvedSubscriptions, preview.RequestedSubscriptions);
+        ReplaceApproval(_approvedPublications, preview.RequestedPublications);
+        ReplaceApproval(_approvedPermissions, preview.RequestedPermissions);
+        ReplaceApproval(_approvedNetworkAccess, preview.RequestedNetworkAccess);
+    }
+
+    private async Task InstallImportAsync()
+    {
+        if (_importPreview is null)
+        {
+            return;
+        }
+
+        _isInstallingImport = true;
+        _importError = null;
+        try
+        {
+            var installation = await AgentApi.InstallAsync(
+                _importPreview.ImportId,
+                new InstallAgentRequest(
+                    _installBusinessId.Trim(),
+                    _installActivationMode,
+                    _installTickFrequencySeconds,
+                    _installOverlapPolicy,
+                    _approvedCapabilities.ToList(),
+                    _approvedSubscriptions.ToList(),
+                    _approvedPublications.ToList(),
+                    _approvedPermissions.ToList(),
+                    _approvedNetworkAccess.ToList(),
+                    _installMaxRuntimeSeconds,
+                    _installMemoryMb,
+                    _installCpuPercent));
+            _installations = _installations.Append(installation).ToList();
+            _importDialogOpen = false;
+            SetInstallationMessage($"{installation.AgentName} installed.", true);
+        }
+        catch (Exception exception)
+        {
+            _importError = exception.Message;
+        }
+        finally
+        {
+            _isInstallingImport = false;
+        }
+    }
+
+    private void ClearImportApproval()
+    {
+        _approvedCapabilities.Clear();
+        _approvedSubscriptions.Clear();
+        _approvedPublications.Clear();
+        _approvedPermissions.Clear();
+        _approvedNetworkAccess.Clear();
+    }
+
+    private static void ReplaceApproval(HashSet<string> target, IReadOnlyList<string> values)
+    {
+        target.Clear();
+        target.UnionWith(values);
+    }
+
+    private static void SetApproval(HashSet<string> values, string value, bool approved)
+    {
+        if (approved)
+        {
+            values.Add(value);
+        }
+        else
+        {
+            values.Remove(value);
+        }
+    }
+
+    private void OpenScheduleDialog(AgentInstallationResponse installation)
+    {
+        _scheduleInstallation = installation;
+        _scheduleActivationMode = installation.Schedule.ActivationMode;
+        _scheduleTickFrequencySeconds = installation.Schedule.TickFrequencySeconds;
+        _scheduleOverlapPolicy = installation.Schedule.OverlapPolicy;
+        _scheduleMaxRuntimeSeconds = installation.Schedule.MaxRuntimeSeconds;
+        _scheduleEnabled = installation.Schedule.IsEnabled;
+        _scheduleError = null;
+        _scheduleDialogOpen = true;
+    }
+
+    private void CloseScheduleDialog()
+    {
+        _scheduleDialogOpen = false;
+    }
+
+    private async Task SaveScheduleAsync()
+    {
+        if (_scheduleInstallation is null)
+        {
+            return;
+        }
+
+        _isManagingInstallation = true;
+        _scheduleError = null;
+        try
+        {
+            var updated = await AgentApi.UpdateScheduleAsync(
+                _scheduleInstallation.Id,
+                new UpdateAgentScheduleRequest(
+                    _scheduleActivationMode,
+                    _scheduleTickFrequencySeconds,
+                    _scheduleOverlapPolicy,
+                    _scheduleMaxRuntimeSeconds,
+                    _scheduleEnabled));
+            ReplaceInstallation(updated);
+            _scheduleDialogOpen = false;
+            SetInstallationMessage("Schedule updated.", true);
+        }
+        catch (Exception exception)
+        {
+            _scheduleError = exception.Message;
+        }
+        finally
+        {
+            _isManagingInstallation = false;
+        }
+    }
+
+    private async Task RunNowAsync(AgentInstallationResponse installation)
+    {
+        await ExecuteInstallationActionAsync(
+            () => AgentApi.RunNowAsync(installation.Id),
+            "Run requested. The scheduler will claim it when runtime execution is available.");
+    }
+
+    private async Task DisableInstallationAsync(AgentInstallationResponse installation)
+    {
+        await ExecuteInstallationActionAsync(
+            () => AgentApi.DisableAsync(installation.Id),
+            "Agent installation disabled.");
+    }
+
+    private async Task ExecuteInstallationActionAsync(
+        Func<Task<AgentInstallationResponse>> action,
+        string successMessage)
+    {
+        _isManagingInstallation = true;
+        try
+        {
+            ReplaceInstallation(await action());
+            SetInstallationMessage(successMessage, true);
+        }
+        catch (Exception exception)
+        {
+            SetInstallationMessage(exception.Message, false);
+        }
+        finally
+        {
+            _isManagingInstallation = false;
+        }
+    }
+
+    private void ReplaceInstallation(AgentInstallationResponse installation)
+    {
+        _installations = _installations
+            .Select(existing => existing.Id == installation.Id ? installation : existing)
+            .ToList();
+    }
+
+    private void SetInstallationMessage(string message, bool succeeded)
+    {
+        _installationActionMessage = message;
+        _installationActionSucceeded = succeeded;
     }
 
     private async Task LoadConfigurationAsync(AgentCatalogItemResponse agent)
@@ -663,6 +1017,18 @@
     private static string DisplayImportValue(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "Not specified" : value;
 
+    private static Color InstallationStatusColor(AgentInstallationResponse installation) =>
+        installation.IsEnabled && installation.Schedule.IsEnabled ? Color.Success : Color.Default;
+
+    private static string FormatFrequency(int seconds) => seconds % 3600 == 0
+        ? $"{seconds / 3600}h"
+        : seconds % 60 == 0
+            ? $"{seconds / 60}m"
+            : $"{seconds}s";
+
+    private static string FormatNextTick(DateTimeOffset? nextTickAt) =>
+        nextTickAt?.ToLocalTime().ToString("g") ?? "Not scheduled";
+
     private static RenderFragment ImportValueSection(string title, IReadOnlyList<string> values) => @<div class="agent-import-values-section">
         <MudText Typo="Typo.subtitle2">@title</MudText>
         @if (values.Count == 0)
@@ -675,6 +1041,26 @@
                 @foreach (var value in values)
                 {
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@value</MudChip>
+                }
+            </div>
+        }
+    </div>;
+
+    private RenderFragment ApprovalSection(string title, IReadOnlyList<string> requested, HashSet<string> approved) => @<div class="agent-import-values-section">
+        <MudText Typo="Typo.subtitle2">Approved @title.ToLowerInvariant()</MudText>
+        @if (requested.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">None requested</MudText>
+        }
+        else
+        {
+            <div class="agent-import-approval-list">
+                @foreach (var value in requested)
+                {
+                    <MudCheckBox T="bool"
+                                 Label="@value"
+                                 Value="@approved.Contains(value)"
+                                 ValueChanged="@((bool isApproved) => SetApproval(approved, value, isApproved))" />
                 }
             </div>
         }

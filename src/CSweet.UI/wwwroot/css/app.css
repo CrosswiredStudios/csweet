@@ -709,6 +709,29 @@ code {
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
+.agent-installations-section {
+    display: grid;
+    gap: 1rem;
+}
+
+.agent-installations-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    gap: 1rem;
+}
+
+.agent-installation-card {
+    display: grid;
+    gap: 1rem;
+    padding: 1rem;
+}
+
+.agent-import-approval-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+    gap: 0.25rem 1rem;
+}
+
 .llm-provider-header-actions {
     margin-top: 0;
 }

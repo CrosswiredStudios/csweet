@@ -22,6 +22,9 @@ public sealed class CSweetDbContext : DbContext
     public DbSet<AgentRuntimeGlobalSettings> AgentRuntimeGlobalSettings => Set<AgentRuntimeGlobalSettings>();
     public DbSet<AgentPackageSource> AgentPackageSources => Set<AgentPackageSource>();
     public DbSet<AgentPackageVersion> AgentPackageVersions => Set<AgentPackageVersion>();
+    public DbSet<AgentInstallation> AgentInstallations => Set<AgentInstallation>();
+    public DbSet<AgentInstallationGrant> AgentInstallationGrants => Set<AgentInstallationGrant>();
+    public DbSet<AgentSchedule> AgentSchedules => Set<AgentSchedule>();
 
     // Planning entities
     public DbSet<PlanningTask> PlanningTasks => Set<PlanningTask>();
@@ -148,6 +151,44 @@ public sealed class CSweetDbContext : DbContext
             entity.HasOne(x => x.PackageSource)
                 .WithMany()
                 .HasForeignKey(x => x.PackageSourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AgentInstallation>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.BusinessId).HasMaxLength(200).IsRequired();
+            entity.HasIndex(x => new { x.PackageVersionId, x.BusinessId }).IsUnique();
+            entity.HasOne(x => x.PackageVersion)
+                .WithMany()
+                .HasForeignKey(x => x.PackageVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AgentInstallationGrant>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.CapabilitiesJson).HasColumnType("text").IsRequired();
+            entity.Property(x => x.SubscriptionsJson).HasColumnType("text").IsRequired();
+            entity.Property(x => x.PublicationsJson).HasColumnType("text").IsRequired();
+            entity.Property(x => x.PermissionsJson).HasColumnType("text").IsRequired();
+            entity.Property(x => x.NetworkAccessJson).HasColumnType("text").IsRequired();
+            entity.HasIndex(x => x.AgentInstallationId).IsUnique();
+            entity.HasOne(x => x.AgentInstallation)
+                .WithOne(x => x.Grant)
+                .HasForeignKey<AgentInstallationGrant>(x => x.AgentInstallationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AgentSchedule>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ActivationMode).HasConversion<string>().HasMaxLength(20).IsRequired();
+            entity.Property(x => x.OverlapPolicy).HasConversion<string>().HasMaxLength(20).IsRequired();
+            entity.HasIndex(x => x.AgentInstallationId).IsUnique();
+            entity.HasOne(x => x.AgentInstallation)
+                .WithOne(x => x.Schedule)
+                .HasForeignKey<AgentSchedule>(x => x.AgentInstallationId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

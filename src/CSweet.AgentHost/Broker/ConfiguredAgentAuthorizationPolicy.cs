@@ -5,13 +5,17 @@ namespace CSweet.AgentHost.Broker;
 
 public interface IAgentAuthorizationPolicy
 {
-    bool TryAuthorize(
+    Task<AgentAuthorizationResult> AuthorizeAsync(
         RegisterAgent registration,
-        out AuthorizedAgentGrant? grant,
-        out string rejectionReason);
+        CancellationToken cancellationToken);
 }
 
-public sealed class ConfiguredAgentAuthorizationPolicy : IAgentAuthorizationPolicy
+public sealed record AgentAuthorizationResult(
+    bool Accepted,
+    AuthorizedAgentGrant? Grant,
+    string RejectionReason);
+
+public sealed class ConfiguredAgentAuthorizationPolicy
 {
     private readonly AgentBrokerPolicyOptions _options;
 
@@ -55,6 +59,8 @@ public sealed class ConfiguredAgentAuthorizationPolicy : IAgentAuthorizationPoli
         rejectionReason = string.Empty;
         return true;
     }
+
+    public bool HasConfiguration(string agentId) => _options.Agents.ContainsKey(agentId);
 
     private static IReadOnlySet<string> Intersect(
         IEnumerable<string> requested,

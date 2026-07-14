@@ -48,6 +48,50 @@ public static class AgentManagementEndpoints
             }
         });
 
+        group.MapPost("/imports/{importId:guid}/install", async (
+            Guid importId,
+            InstallAgentRequest request,
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+            await ExecuteInstallationActionAsync(
+                () => installationService.InstallAsync(importId, request, cancellationToken)));
+
+        group.MapGet("/installations", async (
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+            Results.Ok(await installationService.ListAsync(cancellationToken)));
+
+        group.MapGet("/installations/{installationId:guid}", async (
+            Guid installationId,
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+        {
+            var installation = await installationService.GetAsync(installationId, cancellationToken);
+            return installation is null ? Results.NotFound() : Results.Ok(installation);
+        });
+
+        group.MapPut("/installations/{installationId:guid}/schedule", async (
+            Guid installationId,
+            UpdateAgentScheduleRequest request,
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+            await ExecuteInstallationActionAsync(
+                () => installationService.UpdateScheduleAsync(installationId, request, cancellationToken)));
+
+        group.MapPost("/installations/{installationId:guid}/run-now", async (
+            Guid installationId,
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+            await ExecuteInstallationActionAsync(
+                () => installationService.RunNowAsync(installationId, cancellationToken)));
+
+        group.MapPost("/installations/{installationId:guid}/disable", async (
+            Guid installationId,
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+            await ExecuteInstallationActionAsync(
+                () => installationService.DisableAsync(installationId, cancellationToken)));
+
         group.MapGet("/{agentId}/configuration", async (
             string agentId,
             IAgentBrokerClient broker,
@@ -81,6 +125,19 @@ public static class AgentManagementEndpoints
         });
 
         return endpoints;
+    }
+
+    private static async Task<IResult> ExecuteInstallationActionAsync(
+        Func<Task<AgentInstallationResponse>> action)
+    {
+        try
+        {
+            return Results.Ok(await action());
+        }
+        catch (AgentInstallationException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
     }
 
     private static async Task<CapabilityResult> InvokeAgentConfigurationCapabilityAsync(

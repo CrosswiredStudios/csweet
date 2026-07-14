@@ -40,6 +40,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAuditEventWriter, AuditEventWriter>();
         builder.Services.AddScoped<IAgentRuntimeSettingsService, AgentRuntimeSettingsService>();
         builder.Services.AddScoped<IAgentImportPreviewService, AgentImportPreviewService>();
+        builder.Services.AddScoped<IAgentInstallationService, AgentInstallationService>();
         builder.Services.AddHttpClient<IGitHubAgentRepositoryClient, GitHubAgentRepositoryClient>(client =>
         {
             client.BaseAddress = new Uri("https://api.github.com/");

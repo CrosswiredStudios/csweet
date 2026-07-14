@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Agents;
+using CSweet.Contracts.Setup;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -55,6 +56,78 @@ public class AgentImportPreviewEndpointTests
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("GitHub", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Install_CreatesGrantAndScheduleAndSupportsManagementActions()
+    {
+        await using var factory = CreateFactory();
+        var client = factory.CreateClient();
+        await MarkSetupCompleteAsync(factory);
+        var settingsResponse = await client.PutAsJsonAsync(
+            "/api/agent-runtime/settings",
+            new UpdateAgentRuntimeSettingsRequest(EnableImportedAgents: true));
+        settingsResponse.EnsureSuccessStatusCode();
+        var previewResponse = await client.PostAsJsonAsync(
+            "/api/agents/imports/preview",
+            new PreviewAgentImportRequest("https://github.com/example/research-agent"));
+        var preview = await previewResponse.Content.ReadFromJsonAsync<AgentImportPreviewResponse>();
+        Assert.NotNull(preview);
+
+        var installResponse = await client.PostAsJsonAsync(
+            $"/api/agents/imports/{preview.ImportId}/install",
+            new InstallAgentRequest(
+                "default",
+                "Periodic",
+                900,
+                "Skip",
+                ["research.execute.v1"],
+                [],
+                [],
+                [],
+                [],
+                600,
+                512,
+                50));
+        var installation = await installResponse.Content.ReadFromJsonAsync<AgentInstallationResponse>();
+
+        Assert.Equal(HttpStatusCode.OK, installResponse.StatusCode);
+        Assert.NotNull(installation);
+        Assert.Equal("Periodic", installation.Schedule.ActivationMode);
+        Assert.NotNull(installation.Schedule.NextTickAt);
+
+        var listed = await client.GetFromJsonAsync<IReadOnlyList<AgentInstallationResponse>>(
+            "/api/agents/installations");
+        Assert.Single(listed!);
+
+        var scheduleResponse = await client.PutAsJsonAsync(
+            $"/api/agents/installations/{installation.Id}/schedule",
+            new UpdateAgentScheduleRequest("Manual", 1200, "Queue", 300, true));
+        var scheduled = await scheduleResponse.Content.ReadFromJsonAsync<AgentInstallationResponse>();
+        Assert.Equal(HttpStatusCode.OK, scheduleResponse.StatusCode);
+        Assert.Equal("Manual", scheduled!.Schedule.ActivationMode);
+        Assert.Null(scheduled.Schedule.NextTickAt);
+
+        var runResponse = await client.PostAsync(
+            $"/api/agents/installations/{installation.Id}/run-now",
+            null);
+        var run = await runResponse.Content.ReadFromJsonAsync<AgentInstallationResponse>();
+        Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
+        Assert.NotNull(run?.Schedule.RunRequestedAt);
+
+        var disableResponse = await client.PostAsync(
+            $"/api/agents/installations/{installation.Id}/disable",
+            null);
+        var disabled = await disableResponse.Content.ReadFromJsonAsync<AgentInstallationResponse>();
+        Assert.Equal(HttpStatusCode.OK, disableResponse.StatusCode);
+        Assert.False(disabled!.IsEnabled);
+        Assert.False(disabled.Schedule.IsEnabled);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
+        Assert.Single(await dbContext.AgentInstallations.ToListAsync());
+        Assert.Single(await dbContext.AgentInstallationGrants.ToListAsync());
+        Assert.Single(await dbContext.AgentSchedules.ToListAsync());
     }
 
     private static async Task MarkSetupCompleteAsync(WebApplicationFactory<Program> factory)

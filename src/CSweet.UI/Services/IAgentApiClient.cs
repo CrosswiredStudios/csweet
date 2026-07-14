@@ -10,6 +10,27 @@ public interface IAgentApiClient
         PreviewAgentImportRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<AgentInstallationResponse> InstallAsync(
+        Guid importId,
+        InstallAgentRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<AgentInstallationResponse>> ListInstallationsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<AgentInstallationResponse> UpdateScheduleAsync(
+        Guid installationId,
+        UpdateAgentScheduleRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<AgentInstallationResponse> RunNowAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default);
+
+    Task<AgentInstallationResponse> DisableAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default);
+
     Task<AgentConfigurationSchemaResponse> GetConfigurationAsync(
         string agentId,
         CancellationToken cancellationToken = default);

@@ -42,7 +42,18 @@ Last updated: 2026-07-13
 
 ## Phase 3 - Install & Schedule
 
-- [ ] Not started
+- [x] Domain entities: `AgentInstallation`, `AgentInstallationGrant`, `AgentSchedule`
+- [x] EF configuration and `AddAgentInstallations` migration
+- [x] Install and schedule request/response contracts
+- [x] Grant intersection validation against the immutable manifest
+- [x] Tick frequency, activation policy, runtime, memory, and CPU validation
+- [x] Initial persisted next-tick calculation
+- [x] Install, list, detail, schedule update, run-now, and disable endpoints
+- [x] Audit events for approval and schedule management actions
+- [x] AgentHost authorization from persisted installation grants
+- [x] Import dialog approval and resource/schedule controls
+- [x] Installed-agent schedule cards and management controls
+- [x] Unit and integration tests for grants, schedules, persistence, endpoints, and broker policy
 
 ## Phase 4 - Build Pipeline
 
@@ -68,3 +79,4 @@ Last updated: 2026-07-13
 
 - Phase 1 is the foundation. All subsequent phases depend on the global settings.
 - Phase 4 (build pipeline) requires Docker-in-Docker or a remote builder, which may need infrastructure setup first.
+- Run Now marks a persisted schedule as immediately due; Phase 6 adds the worker that claims and executes due schedules.
