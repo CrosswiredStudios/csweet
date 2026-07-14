@@ -55,7 +55,8 @@ public sealed class ConfiguredAgentAuthorizationPolicy
         grant = new AuthorizedAgentGrant(
             Intersect(registration.DeclaredCapabilities, configured.Capabilities),
             Intersect(registration.RequestedSubscriptions, configured.Subscriptions),
-            Intersect(registration.RequestedPublications, configured.Publications));
+            Intersect(registration.RequestedPublications, configured.Publications),
+            Intersect(registration.RequestedPermissions, configured.Permissions));
         rejectionReason = string.Empty;
         return true;
     }

@@ -2,6 +2,7 @@ using CSweet.Agent.Contracts.Grpc;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using CSweet.Application.Setup;
+using CSweet.Agent.SDK;
 using System.Text.Json;
 
 namespace CSweet.AgentHost.Broker;
@@ -12,16 +13,19 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
     private readonly AgentSessionRegistry _sessions;
     private readonly ILogger<AgentBrokerService> _logger;
     private readonly IAgentRuntimeSignalService _runtimeSignals;
+    private readonly PlatformLlmCapabilityHandler _platformLlm;
 
     public AgentBrokerService(
         IAgentAuthorizationPolicy authorizationPolicy,
         AgentSessionRegistry sessions,
         IAgentRuntimeSignalService runtimeSignals,
+        PlatformLlmCapabilityHandler platformLlm,
         ILogger<AgentBrokerService> logger)
     {
         _authorizationPolicy = authorizationPolicy;
         _sessions = sessions;
         _runtimeSignals = runtimeSignals;
+        _platformLlm = platformLlm;
         _logger = logger;
     }
 
@@ -82,6 +86,7 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         registration.GrantedCapabilities.AddRange(grant.Capabilities);
         registration.GrantedSubscriptions.AddRange(grant.Subscriptions);
         registration.GrantedPublications.AddRange(grant.Publications);
+        registration.GrantedPermissions.AddRange(grant.Permissions);
 
         await responseStream.WriteAsync(new BrokerToAgentMessage
         {
@@ -145,6 +150,22 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                     break;
 
                 case AgentToBrokerMessage.PayloadOneofCase.CapabilityRequest:
+                    if (message.CapabilityRequest.Capability == BrokerLlmCapabilities.ChatStream)
+                    {
+                        await foreach (var result in _platformLlm.StreamAsync(
+                            session,
+                            message.CapabilityRequest,
+                            cancellationToken))
+                        {
+                            session.TrySend(new BrokerToAgentMessage
+                            {
+                                MessageId = Guid.NewGuid().ToString("N"),
+                                CorrelationId = message.CorrelationId,
+                                CapabilityResult = result
+                            });
+                        }
+                        break;
+                    }
                     _sessions.RequestCapability(
                         session,
                         message.CapabilityRequest,

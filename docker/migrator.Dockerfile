@@ -7,9 +7,11 @@ COPY ["Directory.Build.props", "./"]
 COPY ["Directory.Packages.props", "./"]
 COPY ["src/CSweet.Migrator/CSweet.Migrator.csproj", "src/CSweet.Migrator/"]
 COPY ["src/CSweet.Application/CSweet.Application.csproj", "src/CSweet.Application/"]
+COPY ["src/CSweet.Agent.Contracts/CSweet.Agent.Contracts.csproj", "src/CSweet.Agent.Contracts/"]
 COPY ["src/CSweet.Domain/CSweet.Domain.csproj", "src/CSweet.Domain/"]
 COPY ["src/CSweet.Contracts/CSweet.Contracts.csproj", "src/CSweet.Contracts/"]
 COPY ["src/CSweet.Infrastructure/CSweet.Infrastructure.csproj", "src/CSweet.Infrastructure/"]
+COPY ["src/CSweet.AI/CSweet.AI.csproj", "src/CSweet.AI/"]
 COPY ["src/CSweet.ServiceDefaults/CSweet.ServiceDefaults.csproj", "src/CSweet.ServiceDefaults/"]
 RUN dotnet restore "src/CSweet.Migrator/CSweet.Migrator.csproj"
 

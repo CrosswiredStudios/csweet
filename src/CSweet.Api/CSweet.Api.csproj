@@ -1,7 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
-    <ProjectReference Include="..\CSweet.Agent.Contracts\CSweet.Agent.Contracts.csproj" />
-    <ProjectReference Include="..\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj" />
     <ProjectReference Include="..\CSweet.Application\CSweet.Application.csproj" />
     <ProjectReference Include="..\CSweet.Contracts\CSweet.Contracts.csproj" />
     <ProjectReference Include="..\CSweet.Infrastructure\CSweet.Infrastructure.csproj" />
@@ -10,6 +8,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="CSweet.Agent.SDK" />
     <PackageReference Include="Google.Protobuf" />
     <PackageReference Include="Grpc.Net.ClientFactory" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">

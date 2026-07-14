@@ -1,7 +1,5 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/CSweet.Agent.Contracts/CSweet.Agent.Contracts.csproj" />
-    <Project Path="src/CSweet.Agent.SDK/CSweet.Agent.SDK.csproj" />
     <Project Path="src/CSweet.AgentHost/CSweet.AgentHost.csproj" />
     <Project Path="src/CSweet.Agents.PersonalAssistant/CSweet.Agents.PersonalAssistant.csproj" />
     <Project Path="src/CSweet.AI/CSweet.AI.csproj" />

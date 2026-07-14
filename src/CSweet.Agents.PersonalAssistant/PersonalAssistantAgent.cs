@@ -1,12 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Net.Http;
-using System.Security.Cryptography;
-using System.Text;
-using CSweet.Application.Llm;
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
-using CSweet.Contracts.Agents;
-using CSweet.Domain.Setup;
 using Google.Protobuf;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -17,9 +12,13 @@ namespace CSweet.Agents.PersonalAssistant;
 
 public sealed class PersonalAssistantAgent : CSweetAgentBase
 {
-    private readonly IAgentLlmClientFactory _llmClientFactory;
+    private readonly IAgentLlmClientFactory? _llmClientFactory;
     private readonly ILogger<PersonalAssistantAgent> _logger;
-    private readonly IServiceScopeFactory? _scopeFactory;
+
+    public PersonalAssistantAgent(ILogger<PersonalAssistantAgent> logger)
+    {
+        _logger = logger;
+    }
 
     public PersonalAssistantAgent(
         IAgentLlmClientFactory llmClientFactory,
@@ -28,7 +27,6 @@ public sealed class PersonalAssistantAgent : CSweetAgentBase
     {
         _llmClientFactory = llmClientFactory;
         _logger = logger;
-        _scopeFactory = scopeFactory;
     }
 
     public override string AgentId => PersonalAssistantProfile.AgentId;
@@ -367,9 +365,12 @@ public sealed class PersonalAssistantAgent : CSweetAgentBase
             input.ProviderProfileId,
             input.ConversationId);
 
-        var chatClient = await _llmClientFactory.CreateChatClientAsync(
-            new AgentLlmSelection(input.ProviderProfileId, Settings.GetString("llmModel")),
-            cancellationToken);
+        var selection = new AgentLlmSelection(
+            input.ProviderProfileId,
+            Settings.GetString("llmModel"));
+        var chatClient = _llmClientFactory is null
+            ? new BrokerLlmClient(runtimeContext.Broker, selection)
+            : await _llmClientFactory.CreateChatClientAsync(selection, cancellationToken);
 
         _logger.LogInformation(
             "Personal Assistant created chat client for provider {ProviderProfileId} and conversation {ConversationId}.",
@@ -436,7 +437,7 @@ public sealed class PersonalAssistantAgent : CSweetAgentBase
             PersonalAssistantProfile.SummarizeActivityCapability or
             PersonalAssistantProfile.PlanWorkCapability;
 
-    private async Task WriteRunLogAsync(
+    private static Task WriteRunLogAsync(
         Guid providerProfileId,
         string prompt,
         string? output,
@@ -446,31 +447,7 @@ public sealed class PersonalAssistantAgent : CSweetAgentBase
         UsageDetails? usage,
         string? failureMessage,
         CancellationToken cancellationToken)
-    {
-        if (_scopeFactory is null)
-        {
-            return;
-        }
-
-        using var scope = _scopeFactory.CreateScope();
-        var logWriter = scope.ServiceProvider.GetRequiredService<IAgentRunLogWriter>();
-
-        await logWriter.WriteAsync(new AgentRunLog
-        {
-            Id = Guid.NewGuid(),
-            AgentKey = PersonalAssistantProfile.AgentId,
-            ProviderProfileId = providerProfileId,
-            StartedAt = startedAt,
-            CompletedAt = DateTimeOffset.UtcNow,
-            Status = status,
-            PromptHash = ComputePromptHash(PersonalAssistantProfile.SystemPrompt + prompt),
-            OutputPreview = output is null ? null : Truncate(output, 500),
-            FailureMessage = failureMessage is null ? null : Truncate(failureMessage, 2048),
-            TokenInputCount = ToNullableInt(usage?.InputTokenCount),
-            TokenOutputCount = ToNullableInt(usage?.OutputTokenCount),
-            DurationMs = durationMs
-        }, cancellationToken);
-    }
+        => Task.CompletedTask;
 
     private static UsageDetails? ExtractUsage(IEnumerable<AIContent> contents)
     {
@@ -483,32 +460,6 @@ public sealed class PersonalAssistantAgent : CSweetAgentBase
         }
 
         return usage;
-    }
-
-    private static string ComputePromptHash(string prompt)
-    {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(prompt));
-        return Convert.ToBase64String(hash);
-    }
-
-    private static int? ToNullableInt(long? value)
-    {
-        if (!value.HasValue)
-        {
-            return null;
-        }
-
-        return value > int.MaxValue ? int.MaxValue : (int)value.Value;
-    }
-
-    private static string Truncate(string value, int maxLength)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return value;
-        }
-
-        return value.Length <= maxLength ? value : value[..maxLength];
     }
 
     private sealed record AssistantStreamUpdate(string Delta, UsageDetails? Usage);

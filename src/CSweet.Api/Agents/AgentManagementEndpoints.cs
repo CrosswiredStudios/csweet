@@ -1,6 +1,6 @@
 using System.Text.Json;
 using CSweet.Agent.Contracts.Grpc;
-using CSweet.Agent.SDK;
+using IAgentBrokerClient = CSweet.Agent.SDK.IAgentBrokerClient;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Agents;
 using Google.Protobuf;

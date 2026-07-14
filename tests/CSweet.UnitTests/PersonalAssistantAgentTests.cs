@@ -116,17 +116,12 @@ public sealed class PersonalAssistantAgentTests
     }
 
     [Fact]
-    public async Task HandleEventAsync_StreamingUsage_WritesAgentRunLog()
+    public async Task HandleEventAsync_StreamingUsage_DoesNotRequirePlatformPersistence()
     {
-        var logs = new List<AgentRunLog>();
-        var serviceProvider = new ServiceCollection()
-            .AddSingleton<IAgentRunLogWriter>(new RecordingAgentRunLogWriter(logs))
-            .BuildServiceProvider();
         var providerProfileId = Guid.NewGuid();
         var agent = new PersonalAssistantAgent(
             new FakeAgentLlmClientFactory(new UsageStreamingChatClient()),
-            NullLogger<PersonalAssistantAgent>.Instance,
-            serviceProvider.GetRequiredService<IServiceScopeFactory>());
+            NullLogger<PersonalAssistantAgent>.Instance);
         var broker = new RecordingBrokerClient();
         var context = new AgentRuntimeContext("business-1", "assistant-installation", broker);
 
@@ -135,12 +130,9 @@ public sealed class PersonalAssistantAgentTests
             context,
             CancellationToken.None);
 
-        var log = Assert.Single(logs);
-        Assert.Equal(PersonalAssistantProfile.AgentId, log.AgentKey);
-        Assert.Equal(providerProfileId, log.ProviderProfileId);
-        Assert.Equal("Completed", log.Status);
-        Assert.Equal(42, log.TokenInputCount);
-        Assert.Equal(17, log.TokenOutputCount);
+        Assert.Contains(
+            broker.PublishedEvents,
+            e => e.EventType == PersonalAssistantProfile.AssistantResponseCreatedEvent);
     }
 
     private static async Task<RecordingBrokerClient> RunAgentAsync(IChatClient chatClient)

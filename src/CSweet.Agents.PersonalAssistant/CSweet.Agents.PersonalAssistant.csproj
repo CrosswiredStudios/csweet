@@ -5,16 +5,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="CSweet.Agent.SDK" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Agents.AI" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj" />
-    <ProjectReference Include="..\CSweet.Application\CSweet.Application.csproj" />
-    <ProjectReference Include="..\CSweet.Contracts\CSweet.Contracts.csproj" />
-    <ProjectReference Include="..\CSweet.Infrastructure\CSweet.Infrastructure.csproj" />
-    <ProjectReference Include="..\CSweet.ServiceDefaults\CSweet.ServiceDefaults.csproj" />
   </ItemGroup>
 
   <ItemGroup>

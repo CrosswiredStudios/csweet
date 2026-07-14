@@ -133,6 +133,7 @@ Last updated: 2026-07-13
 - [x] Always-on restart-policy reconciliation and active-runtime cancellation after disable
 - [x] Final manual end-to-end QA script: `scripts/agent-runtime-e2e.ps1`
 - [x] Cleanup, retention, audit, and API rate-limit tests
+- [x] Migrator restore graph updated for the runtime manager's Agent Contracts and AI dependencies
 
 ## Notes
 

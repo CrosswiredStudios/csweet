@@ -1,7 +1,6 @@
 using System.Text.Json;
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
-using CSweet.Contracts.Agents;
 using Google.Protobuf;
 
 namespace CSweet.UnitTests;

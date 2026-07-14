@@ -176,5 +176,6 @@ public sealed class AgentSessionRegistryTests
             new AuthorizedAgentGrant(
                 (capabilities ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
                 (subscriptions ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
-                (publications ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal)));
+                (publications ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
+                new HashSet<string>(StringComparer.Ordinal)));
 }

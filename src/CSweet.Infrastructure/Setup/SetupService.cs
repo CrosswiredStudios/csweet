@@ -104,7 +104,7 @@ public sealed class SetupService : ISetupService
                 BlockedNetworkCidrs = string.Empty,
                 AgentSourceRootPath = string.Empty,
                 AgentPackageCachePath = string.Empty,
-                DotNetBuilderImage = "mcr.microsoft.com/dotnet/sdk:9.0",
+                DotNetBuilderImage = "mcr.microsoft.com/dotnet/sdk:10.0",
                 DotNetRuntimeBaseImage = "mcr.microsoft.com/dotnet/runtime:9.0",
                 BuildTimeoutSeconds = 600,
                 BuildMemoryMb = 2048,

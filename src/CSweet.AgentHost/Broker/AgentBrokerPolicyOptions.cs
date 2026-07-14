@@ -19,9 +19,12 @@ public sealed class AgentGrantOptions
     public List<string> Subscriptions { get; set; } = [];
 
     public List<string> Publications { get; set; } = [];
+
+    public List<string> Permissions { get; set; } = [];
 }
 
 public sealed record AuthorizedAgentGrant(
     IReadOnlySet<string> Capabilities,
     IReadOnlySet<string> Subscriptions,
-    IReadOnlySet<string> Publications);
+    IReadOnlySet<string> Publications,
+    IReadOnlySet<string> Permissions);

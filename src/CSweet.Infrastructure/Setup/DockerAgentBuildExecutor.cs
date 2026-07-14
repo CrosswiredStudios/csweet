@@ -76,7 +76,7 @@ public sealed class DockerAgentBuildExecutor : IAgentBuildExecutor
         {
             "run", "--rm",
             "--name", containerName,
-            "--network", "none",
+            "--network", "bridge",
             "--read-only",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges=true",
@@ -95,7 +95,7 @@ public sealed class DockerAgentBuildExecutor : IAgentBuildExecutor
             request.BuilderImage,
             "/bin/sh", "-c",
             "set -eu; mkdir -p /work/source; cp -a /source/. /work/source/; " +
-            "dotnet restore \"/work/source/$PROJECT_PATH\" --nologo; " +
+            "dotnet restore \"/work/source/$PROJECT_PATH\" --nologo --source https://api.nuget.org/v3/index.json; " +
             "dotnet publish \"/work/source/$PROJECT_PATH\" --configuration Release --no-restore --nologo --output /output; " +
             "cp /source/csweet-agent.json /output/csweet-agent.json"
         };

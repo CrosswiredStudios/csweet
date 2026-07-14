@@ -273,7 +273,7 @@ public sealed class AgentSessionRegistry
             return;
         }
 
-        if (!_pendingCapabilities.TryRemove(result.RequestId, out _))
+        if (!result.HasMore && !_pendingCapabilities.TryRemove(result.RequestId, out _))
         {
             SendError(
                 provider,
