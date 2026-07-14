@@ -33,6 +33,10 @@ public interface IAgentInstallationService
         Guid installationId,
         CancellationToken cancellationToken = default);
 
+    Task<RemoveAgentInstallationResponse> RemoveAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<AgentRuntimeRunResponse>> ListRunsAsync(
         Guid installationId,
         CancellationToken cancellationToken = default);

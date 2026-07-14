@@ -219,6 +219,9 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("AgentInstallationId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -254,6 +257,8 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AgentInstallationId");
 
                     b.HasIndex("OrganizationId");
 
@@ -798,6 +803,38 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.ToTable("AgentInstallations");
                 });
 
+            modelBuilder.Entity("CSweet.Domain.Setup.AgentInstallationConfiguration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AgentInstallationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SchemaVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SettingsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AgentInstallationId")
+                        .IsUnique();
+
+                    b.ToTable("AgentInstallationConfigurations");
+                });
+
             modelBuilder.Entity("CSweet.Domain.Setup.AgentInstallationGrant", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1253,6 +1290,15 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<DateTimeOffset?>("IdleDeadlineAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsInteractive")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("LastInteractiveActivityAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("LogExcerpt")
                         .HasColumnType("text");
 
@@ -1283,6 +1329,11 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(64)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AgentInstallationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AgentRuntimeInstances_ActiveInstallation")
+                        .HasFilter("\"Status\" IN ('Queued', 'Starting', 'WaitingForBrokerRegistration', 'Running', 'CompletionReported', 'Stopping')");
 
                     b.HasIndex("TickId")
                         .IsUnique();
@@ -1621,6 +1672,11 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("CSweet.Domain.Core.OrganizationUser", b =>
                 {
+                    b.HasOne("CSweet.Domain.Setup.AgentInstallation", "AgentInstallation")
+                        .WithMany()
+                        .HasForeignKey("AgentInstallationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("CSweet.Domain.Core.Organization", "Organization")
                         .WithMany()
                         .HasForeignKey("OrganizationId")
@@ -1642,6 +1698,8 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("WorkerId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AgentInstallation");
 
                     b.Navigation("Organization");
 
@@ -1778,6 +1836,17 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.Navigation("PackageVersion");
                 });
 
+            modelBuilder.Entity("CSweet.Domain.Setup.AgentInstallationConfiguration", b =>
+                {
+                    b.HasOne("CSweet.Domain.Setup.AgentInstallation", "AgentInstallation")
+                        .WithOne("Configuration")
+                        .HasForeignKey("CSweet.Domain.Setup.AgentInstallationConfiguration", "AgentInstallationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AgentInstallation");
+                });
+
             modelBuilder.Entity("CSweet.Domain.Setup.AgentInstallationGrant", b =>
                 {
                     b.HasOne("CSweet.Domain.Setup.AgentInstallation", "AgentInstallation")
@@ -1851,6 +1920,8 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("CSweet.Domain.Setup.AgentInstallation", b =>
                 {
+                    b.Navigation("Configuration");
+
                     b.Navigation("Grant");
 
                     b.Navigation("RuntimeInstances");

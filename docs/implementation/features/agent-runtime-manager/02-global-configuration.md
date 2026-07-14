@@ -114,8 +114,8 @@ public sealed class AgentRuntimeGlobalSettings
     public int ContainerStartTimeoutSeconds { get; set; } = 60;
     public int BrokerRegistrationTimeoutSeconds { get; set; } = 30;
     public int ContainerStopGraceSeconds { get; set; } = 15;
-    public string DotNetBuilderImage { get; set; } = "mcr.microsoft.com/dotnet/sdk:9.0";
-    public string DotNetRuntimeBaseImage { get; set; } = "mcr.microsoft.com/dotnet/runtime:9.0";
+    public string DotNetBuilderImage { get; set; } = "mcr.microsoft.com/dotnet/sdk:10.0";
+    public string DotNetRuntimeBaseImage { get; set; } = "mcr.microsoft.com/dotnet/runtime:10.0";
     public int BuildTimeoutSeconds { get; set; } = 600;
     public int BuildMemoryMb { get; set; } = 2048;
     public int BuildCpuPercent { get; set; } = 200;

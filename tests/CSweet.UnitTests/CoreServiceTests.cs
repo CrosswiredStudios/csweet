@@ -79,7 +79,7 @@ public class CoreServiceTests
     }
 
     [Fact]
-    public async Task OrganizationCreation_SeedsCeoAndPersonalAssistantHierarchy()
+    public async Task OrganizationCreation_SeedsOnlyTheCeoEmployee()
     {
         await using var dbContext = CreateDbContext();
         var auditWriter = new TestAuditEventWriter();
@@ -96,21 +96,16 @@ public class CoreServiceTests
         var employees = await dbContext.CoreOrganizationUsers
             .Where(x => x.OrganizationId == organizationId)
             .ToListAsync();
-        var personalAssistantWorker = await dbContext.CoreWorkers
-            .SingleAsync(x => x.OrganizationId == organizationId && x.Name == "Personal Assistant");
         var ceoRole = await dbContext.CoreRoles
             .SingleAsync(x => x.OrganizationId == organizationId && x.Name == "CEO");
 
-        var ceo = Assert.Single(employees, x => x.DisplayName == "Self");
-        var assistant = Assert.Single(employees, x => x.DisplayName == "Personal Assistant");
+        var ceo = Assert.Single(employees);
 
+        Assert.Equal("Self", ceo.DisplayName);
         Assert.Equal(EmployeeType.Human, ceo.EmployeeType);
         Assert.Equal(OrganizationPermissionLevel.Owner, ceo.PermissionLevel);
         Assert.Equal(ceoRole.Id, ceo.RoleId);
-        Assert.Equal(EmployeeType.Agent, assistant.EmployeeType);
-        Assert.Equal(ceo.Id, assistant.ReportsToOrganizationUserId);
-        Assert.Equal(personalAssistantWorker.Id, assistant.WorkerId);
-        Assert.Contains("Balanced and practical", personalAssistantWorker.EndpointConfigurationJson);
+        Assert.Empty(await dbContext.CoreWorkers.Where(x => x.OrganizationId == organizationId).ToListAsync());
     }
 
     [Fact]
@@ -129,6 +124,108 @@ public class CoreServiceTests
 
         Assert.False(result.Succeeded);
         Assert.Equal("not_found", result.ErrorCode);
+    }
+
+    #endregion
+
+    #region Organization User Tests
+
+    [Fact]
+    public async Task OrganizationUserCreation_AgentRequiresAnAvailableAgentInstance()
+    {
+        await using var dbContext = CreateDbContext();
+        var service = new OrganizationUserService(dbContext, new TestAuditEventWriter());
+        var organization = CreateOrganization();
+        dbContext.CoreOrganizations.Add(organization);
+        await dbContext.SaveChangesAsync();
+
+        var result = await service.CreateAsync(organization.Id, new CreateOrganizationUserRequest(
+            DisplayName: "New Agent",
+            Email: null,
+            PermissionLevel: 0,
+            EmployeeType: (int)EmployeeType.Agent));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("agent_instance_required", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task OrganizationUserDeletion_RemovesAgentConversationsAndUnassignsReports()
+    {
+        await using var dbContext = CreateDbContext();
+        var service = new OrganizationUserService(dbContext, new TestAuditEventWriter());
+        var organization = CreateOrganization();
+        var manager = new OrganizationUser
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organization.Id,
+            DisplayName = "Personal Assistant",
+            EmployeeType = EmployeeType.Agent,
+            PermissionLevel = OrganizationPermissionLevel.Viewer,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        var report = new OrganizationUser
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organization.Id,
+            ReportsToOrganizationUserId = manager.Id,
+            DisplayName = "Specialist",
+            EmployeeType = EmployeeType.Agent,
+            PermissionLevel = OrganizationPermissionLevel.Viewer,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        var conversation = new Conversation
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organization.Id,
+            AgentOrganizationUserId = manager.Id,
+            InitiatedByOrganizationUserId = report.Id,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.CoreOrganizations.Add(organization);
+        dbContext.CoreOrganizationUsers.AddRange(manager, report);
+        dbContext.CoreConversations.Add(conversation);
+        await dbContext.SaveChangesAsync();
+
+        var result = await service.DeleteAsync(manager.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.Null((await dbContext.CoreOrganizationUsers.SingleAsync(x => x.Id == report.Id)).ReportsToOrganizationUserId);
+        Assert.False(await dbContext.CoreOrganizationUsers.AnyAsync(x => x.Id == manager.Id));
+        Assert.False(await dbContext.CoreConversations.AnyAsync(x => x.Id == conversation.Id));
+    }
+
+    [Theory]
+    [InlineData(EmployeeType.Human, OrganizationPermissionLevel.Owner)]
+    [InlineData(EmployeeType.Agent, OrganizationPermissionLevel.Viewer)]
+    public async Task OrganizationUserDeletion_RejectsSelfRegardlessOfRole(
+        EmployeeType employeeType,
+        OrganizationPermissionLevel permissionLevel)
+    {
+        await using var dbContext = CreateDbContext();
+        var service = new OrganizationUserService(dbContext, new TestAuditEventWriter());
+        var organization = CreateOrganization();
+        var self = new OrganizationUser
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organization.Id,
+            DisplayName = "Self",
+            EmployeeType = employeeType,
+            PermissionLevel = permissionLevel,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.CoreOrganizations.Add(organization);
+        dbContext.CoreOrganizationUsers.Add(self);
+        await dbContext.SaveChangesAsync();
+
+        var result = await service.DeleteAsync(self.Id);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("cannot_delete_self", result.ErrorCode);
+        Assert.True(await dbContext.CoreOrganizationUsers.AnyAsync(x => x.Id == self.Id));
     }
 
     #endregion

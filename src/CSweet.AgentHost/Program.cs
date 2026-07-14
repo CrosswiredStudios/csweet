@@ -4,9 +4,12 @@ using Microsoft.EntityFrameworkCore;
 using CSweet.Application.Setup;
 using CSweet.Infrastructure.Setup;
 using CSweet.Infrastructure;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.WebHost.ConfigureKestrel(options =>
+    options.ConfigureEndpointDefaults(endpoint => endpoint.Protocols = HttpProtocols.Http2));
 builder.AddServiceDefaults();
 builder.Services.AddGrpc();
 builder.AddCSweetInfrastructure();

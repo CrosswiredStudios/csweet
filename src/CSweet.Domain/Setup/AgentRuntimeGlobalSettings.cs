@@ -30,7 +30,7 @@ public sealed class AgentRuntimeGlobalSettings
     public string AgentSourceRootPath { get; set; } = string.Empty;
     public string AgentPackageCachePath { get; set; } = string.Empty;
     public string DotNetBuilderImage { get; set; } = "mcr.microsoft.com/dotnet/sdk:10.0";
-    public string DotNetRuntimeBaseImage { get; set; } = "mcr.microsoft.com/dotnet/runtime:9.0";
+    public string DotNetRuntimeBaseImage { get; set; } = "mcr.microsoft.com/dotnet/runtime:10.0";
     public int BuildTimeoutSeconds { get; set; } = 600;
     public int BuildMemoryMb { get; set; } = 2048;
     public int BuildCpuPercent { get; set; } = 200;

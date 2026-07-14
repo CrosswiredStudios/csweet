@@ -106,7 +106,9 @@ public sealed class AgentBuildService : IAgentBuildService
             package.CommitSha,
             package.ProjectPath,
             package.TargetFramework,
-            settings.DotNetBuilderImage,
+            DotNetAgentImageResolver.ResolveBuilderImage(
+                settings.DotNetBuilderImage,
+                package.TargetFramework),
             settings.AgentSourceRootPath,
             settings.AgentPackageCachePath,
             settings.BuildTimeoutSeconds,

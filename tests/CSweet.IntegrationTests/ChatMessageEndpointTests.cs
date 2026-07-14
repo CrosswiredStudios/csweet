@@ -1,13 +1,17 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
 using CSweet.Api.Chat;
+using CSweet.Application.Setup;
+using CSweet.Contracts.Agents;
 using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
 using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Persistence;
+using Google.Protobuf;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -96,7 +100,46 @@ public sealed class ChatMessageEndpointTests
         Assert.Contains("No enabled LLM provider", body);
     }
 
-    private static WebApplicationFactory<Program> CreateFactory()
+    [Fact]
+    public async Task StreamMessage_RuntimeStillStartingReturnsConflictWithoutPersistingMessage()
+    {
+        await using var factory = CreateFactory(runtimeReady: false);
+        var seeded = await SeedConversationAsync(factory, includeProvider: true);
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/core/organizations/{seeded.OrganizationId}/conversations/{seeded.ConversationId}/messages/stream",
+            new SendChatMessageRequest("Hello."));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Contains("still starting", await response.Content.ReadAsStringAsync());
+        var messages = await client.GetFromJsonAsync<IReadOnlyList<ConversationMessageResponse>>(
+            $"/api/core/organizations/{seeded.OrganizationId}/conversations/{seeded.ConversationId}/messages");
+        Assert.Empty(messages!);
+    }
+
+    [Fact]
+    public async Task StreamMessage_PersistedConfigurationSelectsProviderAndHydratesRuntime()
+    {
+        await using var factory = CreateFactory();
+        var seeded = await SeedConversationAsync(
+            factory,
+            includeProvider: true,
+            includeConfiguredProvider: true);
+        var client = factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync(
+            $"/api/core/organizations/{seeded.OrganizationId}/conversations/{seeded.ConversationId}/messages/stream",
+            new SendChatMessageRequest("Use my configured provider."));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var broker = Assert.IsType<FakeBrokerClient>(
+            factory.Services.GetRequiredService<IAgentBrokerClient>());
+        Assert.Equal(seeded.ConfiguredProviderId, broker.PublishedProviderId);
+        Assert.Equal(1, broker.HydrationRequests);
+    }
+
+    private static WebApplicationFactory<Program> CreateFactory(bool runtimeReady = true)
     {
         var databaseName = Guid.NewGuid().ToString();
 
@@ -110,16 +153,20 @@ public sealed class ChatMessageEndpointTests
                     services.RemoveAll<IDbContextOptionsConfiguration<CSweetDbContext>>();
                     services.RemoveAll<IHostedService>();
                     services.RemoveAll<IAgentBrokerClient>();
+                    services.RemoveAll<IAgentInteractiveRuntimeService>();
                     services.AddDbContext<CSweetDbContext>(options =>
                         options.UseInMemoryDatabase(databaseName));
                     services.AddSingleton<IAgentBrokerClient, FakeBrokerClient>();
+                    services.AddSingleton<IAgentInteractiveRuntimeService>(
+                        new FakeInteractiveRuntimeService(runtimeReady));
                 });
             });
     }
 
     private static async Task<SeededConversation> SeedConversationAsync(
         WebApplicationFactory<Program> factory,
-        bool includeProvider)
+        bool includeProvider,
+        bool includeConfiguredProvider = false)
     {
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
@@ -140,6 +187,7 @@ public sealed class ChatMessageEndpointTests
             PermissionLevel = OrganizationPermissionLevel.Owner,
             CreatedAt = now
         };
+        var installationId = Guid.NewGuid();
         var agent = new OrganizationUser
         {
             Id = Guid.NewGuid(),
@@ -147,6 +195,7 @@ public sealed class ChatMessageEndpointTests
             DisplayName = "Personal Assistant",
             EmployeeType = EmployeeType.Agent,
             PermissionLevel = OrganizationPermissionLevel.Viewer,
+            AgentInstallationId = installationId,
             CreatedAt = now.AddSeconds(1)
         };
         var conversation = new Conversation
@@ -163,6 +212,7 @@ public sealed class ChatMessageEndpointTests
         dbContext.CoreOrganizationUsers.AddRange(self, agent);
         dbContext.CoreConversations.Add(conversation);
 
+        Guid? configuredProviderId = null;
         if (includeProvider)
         {
             dbContext.LlmProviderProfiles.Add(new LlmProviderProfile
@@ -177,13 +227,72 @@ public sealed class ChatMessageEndpointTests
                 CreatedAt = now,
                 UpdatedAt = now
             });
+
+            if (includeConfiguredProvider)
+            {
+                configuredProviderId = Guid.NewGuid();
+                dbContext.LlmProviderProfiles.Add(new LlmProviderProfile
+                {
+                    Id = configuredProviderId.Value,
+                    Name = "Configured Provider",
+                    ProviderType = LlmProviderType.LmStudio,
+                    BaseUrl = "http://configured:1234",
+                    DefaultChatModel = "configured-model",
+                    SupportsStreaming = true,
+                    IsEnabled = true,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+                dbContext.AgentInstallationConfigurations.Add(new AgentInstallationConfiguration
+                {
+                    Id = Guid.NewGuid(),
+                    AgentInstallationId = installationId,
+                    SchemaVersion = "1.0",
+                    SettingsJson = JsonSerializer.Serialize(new Dictionary<string, object?>
+                    {
+                        ["llmProviderId"] = configuredProviderId.Value.ToString(),
+                        ["llmModel"] = "configured-model"
+                    }),
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+            }
         }
 
         await dbContext.SaveChangesAsync();
-        return new SeededConversation(organization.Id, conversation.Id);
+        return new SeededConversation(organization.Id, conversation.Id, configuredProviderId);
     }
 
-    private sealed record SeededConversation(Guid OrganizationId, Guid ConversationId);
+    private sealed record SeededConversation(
+        Guid OrganizationId,
+        Guid ConversationId,
+        Guid? ConfiguredProviderId);
+
+    private sealed class FakeInteractiveRuntimeService(bool isReady) : IAgentInteractiveRuntimeService
+    {
+        public Task<AgentRuntimeReadinessResponse> EnsureReadyAsync(
+            Guid installationId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Response(installationId));
+
+        public Task<AgentRuntimeReadinessResponse> GetStatusAsync(
+            Guid installationId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Response(installationId));
+
+        private AgentRuntimeReadinessResponse Response(Guid installationId) =>
+            new(
+                installationId,
+                Guid.NewGuid(),
+                isReady ? AgentRuntimeReadinessStages.Ready : AgentRuntimeReadinessStages.WaitingForBroker,
+                isReady ? AgentRuntimeStatus.Running.ToString() : AgentRuntimeStatus.WaitingForBrokerRegistration.ToString(),
+                null,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                isReady ? DateTimeOffset.UtcNow : null,
+                IsReady: isReady,
+                IsTerminal: false);
+    }
 
     private sealed class FakeBrokerClient : IAgentBrokerClient
     {
@@ -193,6 +302,9 @@ public sealed class ChatMessageEndpointTests
         {
             _router = router;
         }
+
+        public Guid? PublishedProviderId { get; private set; }
+        public int HydrationRequests { get; private set; }
 
         public Task StartAsync(RegisterAgent registration, CancellationToken cancellationToken) =>
             Task.CompletedTask;
@@ -210,7 +322,11 @@ public sealed class ChatMessageEndpointTests
             CancellationToken cancellationToken = default)
         {
             Assert.Equal("com.csweet.user.message.received.v1", message.EventType);
-            var conversationId = Guid.Parse(message.Subject["conversation/".Length..]);
+            using var payload = JsonDocument.Parse(message.Payload.ToByteArray());
+            PublishedProviderId = payload.RootElement.GetProperty("providerProfileId").GetGuid();
+            var conversationMarker = message.Subject.LastIndexOf("/conversation/", StringComparison.Ordinal);
+            Assert.True(conversationMarker >= 0);
+            var conversationId = Guid.Parse(message.Subject[(conversationMarker + "/conversation/".Length)..]);
 
             _router.Publish(conversationId, new ChatStreamChunk(0, "Hello ", IsFinal: false));
             _router.Publish(conversationId, new ChatStreamChunk(1, "there", IsFinal: false));
@@ -222,8 +338,21 @@ public sealed class ChatMessageEndpointTests
         public Task<CapabilityResult> InvokeCapabilityAsync(
             RequestCapability request,
             string? correlationId = null,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(CSweet.Contracts.Agents.AgentConfigurationCapabilities.Update, request.Capability);
+            HydrationRequests++;
+            var response = new CSweet.Contracts.Agents.AgentConfigurationUpdateResponse(
+                true,
+                "Configuration applied.",
+                JsonSerializer.Deserialize<IReadOnlyDictionary<string, JsonElement>>(
+                    request.Payload.ToByteArray()) ?? new Dictionary<string, JsonElement>());
+            return Task.FromResult(new CapabilityResult
+            {
+                Succeeded = true,
+                Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(response))
+            });
+        }
 
         public Task SendCapabilityResultAsync(
             CapabilityResult result,

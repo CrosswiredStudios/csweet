@@ -105,7 +105,7 @@ public sealed class SetupService : ISetupService
                 AgentSourceRootPath = string.Empty,
                 AgentPackageCachePath = string.Empty,
                 DotNetBuilderImage = "mcr.microsoft.com/dotnet/sdk:10.0",
-                DotNetRuntimeBaseImage = "mcr.microsoft.com/dotnet/runtime:9.0",
+                DotNetRuntimeBaseImage = "mcr.microsoft.com/dotnet/runtime:10.0",
                 BuildTimeoutSeconds = 600,
                 BuildMemoryMb = 2048,
                 BuildCpuPercent = 200,

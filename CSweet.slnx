@@ -1,7 +1,6 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/CSweet.AgentHost/CSweet.AgentHost.csproj" />
-    <Project Path="src/CSweet.Agents.PersonalAssistant/CSweet.Agents.PersonalAssistant.csproj" />
     <Project Path="src/CSweet.AI/CSweet.AI.csproj" />
     <Project Path="src/CSweet.Api/CSweet.Api.csproj" />
     <Project Path="src/CSweet.App/CSweet.App.csproj" />

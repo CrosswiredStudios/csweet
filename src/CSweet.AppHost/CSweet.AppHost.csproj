@@ -16,7 +16,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CSweet.AgentHost\CSweet.AgentHost.csproj" IsAspireProjectResource="true" />
-    <ProjectReference Include="..\CSweet.Agents.PersonalAssistant\CSweet.Agents.PersonalAssistant.csproj" IsAspireProjectResource="true" />
     <ProjectReference Include="..\CSweet.Api\CSweet.Api.csproj" IsAspireProjectResource="true" />
     <ProjectReference Include="..\CSweet.App\CSweet.App.csproj" IsAspireProjectResource="true" />
     <ProjectReference Include="..\CSweet.Migrator\CSweet.Migrator.csproj" IsAspireProjectResource="true" />

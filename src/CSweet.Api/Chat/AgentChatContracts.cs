@@ -1,6 +1,6 @@
 namespace CSweet.Api.Chat;
 
-internal static class PersonalAssistantChatEvents
+internal static class AgentChatEvents
 {
     public const string UserMessageReceivedEvent = "com.csweet.user.message.received.v1";
 

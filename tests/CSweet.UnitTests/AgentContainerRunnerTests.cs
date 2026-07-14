@@ -10,6 +10,7 @@ public sealed class AgentContainerRunnerTests
     public async Task StartAsync_AppliesLimitsAndOnlyApprovedEnvironment()
     {
         var docker = new FakeDockerCommandExecutor(
+            new DockerCommandResult(0, "[]", string.Empty),
             new DockerCommandResult(0, "container-id\n", string.Empty),
             new DockerCommandResult(0, InspectJson, string.Empty));
         var runner = new DockerAgentContainerRunner(docker, NullLogger<DockerAgentContainerRunner>.Instance);
@@ -17,7 +18,8 @@ public sealed class AgentContainerRunnerTests
         var status = await runner.StartAsync(CreateRequest());
 
         Assert.Equal(AgentContainerState.Running, status.State);
-        var args = docker.Commands[0];
+        Assert.Equal(["network", "inspect", "csweet-broker"], docker.Commands[0]);
+        var args = docker.Commands[1];
         Assert.Contains("--read-only", args);
         Assert.Contains("ALL", args);
         Assert.Contains("no-new-privileges=true", args);
@@ -29,6 +31,44 @@ public sealed class AgentContainerRunnerTests
         Assert.DoesNotContain(args, value => value.Contains("docker.sock", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(args, value => value.Contains("ConnectionStrings", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(9, args.Count(value => value == "--env"));
+    }
+
+    [Fact]
+    public async Task StartAsync_CreatesMissingRuntimeNetworkBeforeContainer()
+    {
+        var docker = new FakeDockerCommandExecutor(
+            new DockerCommandResult(1, string.Empty, "network csweet-broker not found"),
+            new DockerCommandResult(0, "network-id", string.Empty),
+            new DockerCommandResult(0, "container-id\n", string.Empty),
+            new DockerCommandResult(0, InspectJson, string.Empty));
+        var runner = new DockerAgentContainerRunner(docker, NullLogger<DockerAgentContainerRunner>.Instance);
+
+        await runner.StartAsync(CreateRequest());
+
+        Assert.Equal(["network", "create", "--driver", "bridge", "csweet-broker"], docker.Commands[1]);
+        Assert.Equal("run", docker.Commands[2][0]);
+    }
+
+    [Fact]
+    public void RuntimeOptions_TranslateAspireLocalhostBrokerForDocker()
+    {
+        var endpoint = AgentRuntimeManagerOptions.ResolveBrokerEndpoint(
+            AgentRuntimeManagerOptions.DefaultBrokerEndpoint,
+            "http://localhost:54821",
+            "https://localhost:7182");
+
+        Assert.Equal("http://host.docker.internal:54821", endpoint);
+    }
+
+    [Fact]
+    public void RuntimeOptions_PreserveExplicitComposeBroker()
+    {
+        var endpoint = AgentRuntimeManagerOptions.ResolveBrokerEndpoint(
+            "http://csweet-agenthost:8080",
+            "http://localhost:54821",
+            null);
+
+        Assert.Equal("http://csweet-agenthost:8080", endpoint);
     }
 
     [Fact]

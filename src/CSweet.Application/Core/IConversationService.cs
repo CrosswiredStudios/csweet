@@ -13,6 +13,12 @@ public interface IConversationService
 
     Task<Guid?> GetDefaultProviderProfileIdAsync(CancellationToken cancellationToken = default);
 
+    Task<bool> IsProviderProfileEnabledAsync(
+        Guid providerProfileId,
+        CancellationToken cancellationToken = default);
+
+    Task<Guid?> GetAgentInstallationIdAsync(Guid conversationId, CancellationToken cancellationToken = default);
+
     /// <summary>Creates a conversation with the given agent employee, or returns a failure.</summary>
     Task<ConversationActionResponse> StartAsync(
         Guid organizationId,

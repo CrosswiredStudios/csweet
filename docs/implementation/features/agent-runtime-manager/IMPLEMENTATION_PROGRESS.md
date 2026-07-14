@@ -1,6 +1,6 @@
 # Agent Runtime Manager - Implementation Progress
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 ## Phase 1 - Global Agent Runtime Settings
 
@@ -135,6 +135,32 @@ Last updated: 2026-07-13
 - [x] Cleanup, retention, audit, and API rate-limit tests
 - [x] Migrator restore graph updated for the runtime manager's Agent Contracts and AI dependencies
 
+## Phase 9 - Business Agent Instances & Interactive Readiness
+
+- [x] Immutable package versions remain shared templates; employees target business-owned `AgentInstallation` instances
+- [x] Durable per-installation configuration with schema versioning, bounded JSON, auditing, and cascade cleanup
+- [x] Configuration migrations: `AddAgentInstallationConfiguration` and `AddAgentRuntimeIdleTracking`
+- [x] Runtime ensure/status API shared by Configure, Chat, and server-side request enforcement
+- [x] Configure and Chat dialogs show queued, container-starting, broker-connecting, ready, timeout, and failure states
+- [x] Manual and periodic agents wake on demand, refresh a five-minute idle deadline, and stop after inactivity
+- [x] Always-on reconciliation restores missing containers and exempts them from interactive idle shutdown
+- [x] Chat resolves the installation's enabled LLM provider with default-provider fallback
+- [x] Saved instance configuration is hydrated through the targeted broker capability before each chat turn
+- [x] Employee cards show live runtime status with cancellable background refresh
+- [x] Stable `csweet-runtime` Docker network is inspected and self-provisioned before container launch
+- [x] Local AppHost AgentHost endpoints are translated to `host.docker.internal` for spawned containers
+- [x] AppHost injects AgentHost service discovery into WorkerHost, and AgentHost cleartext endpoints use HTTP/2 for container gRPC
+- [x] Failed terminal runtimes can be retried with a fresh runtime instance and container
+- [x] Interrupted `Starting` and `Stopping` runtimes self-recover after bounded grace periods instead of blocking the installation slot
+- [x] Queued runtimes report global, business, and installation capacity usage when throttled
+- [x] Employee cards provide Start/Retry, Stop, and retained/live runtime Console controls
+- [x] Chat startup shows backend status, reason, runtime ID, elapsed time, retry, and Employee Console navigation
+- [x] Startup diagnostics retain image, network, broker endpoint, Docker error, and lifecycle transitions
+- [x] Partial unique database index prevents concurrent requests from creating multiple active runtimes per installation
+- [x] Unit coverage for configuration persistence, interactive reuse, idle shutdown, AlwaysOn behavior, and index metadata
+- [x] Integration coverage for runtime startup, provider selection, configuration hydration, and targeted chat routing
+- [x] Verification: 145 unit tests and 185 integration tests passed; solution build and Docker Compose validation succeeded
+
 ## Notes
 
 - Phase 1 is the foundation. All subsequent phases depend on the global settings.
@@ -143,3 +169,5 @@ Last updated: 2026-07-13
   external NuGet packages need those packages pre-seeded in a custom builder image until an
   approved-feed egress proxy is added.
 - Run Now marks a persisted schedule as immediately due; Phase 6 adds the worker that claims and executes due schedules.
+- The external runtime E2E script requires a live stack and a public importable agent repository URL. It was not run
+  during the Phase 9 verification pass because no repository target was supplied.

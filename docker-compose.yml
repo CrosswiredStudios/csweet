@@ -47,6 +47,8 @@ services:
         condition: service_healthy
       csweet-migrator:
         condition: service_completed_successfully
+      csweet-agenthost:
+        condition: service_started
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       DOTNET_ENVIRONMENT: ${DOTNET_ENVIRONMENT:-Production}
@@ -56,6 +58,7 @@ services:
       CSWEET_LLM__DEFAULT_BASE_URL: ${CSWEET_LLM__DEFAULT_BASE_URL:-http://host.docker.internal:1234/v1}
       CSWEET_LLM__DEFAULT_API_KEY: ${CSWEET_LLM__DEFAULT_API_KEY:-lm-studio}
       CSWEET_AGENT_PACKAGE_CACHE: /var/lib/csweet/agents/packages
+      CSweet__ApiGateway__BrokerEndpoint: http://csweet-agenthost:8080
     volumes:
       - csweet-agent-packages:/var/lib/csweet/agents/packages:ro
     healthcheck:

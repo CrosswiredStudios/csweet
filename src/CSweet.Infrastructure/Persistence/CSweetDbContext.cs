@@ -24,6 +24,7 @@ public sealed class CSweetDbContext : DbContext
     public DbSet<AgentPackageVersion> AgentPackageVersions => Set<AgentPackageVersion>();
     public DbSet<AgentInstallation> AgentInstallations => Set<AgentInstallation>();
     public DbSet<AgentInstallationGrant> AgentInstallationGrants => Set<AgentInstallationGrant>();
+    public DbSet<AgentInstallationConfiguration> AgentInstallationConfigurations => Set<AgentInstallationConfiguration>();
     public DbSet<AgentSchedule> AgentSchedules => Set<AgentSchedule>();
     public DbSet<AgentBuildJob> AgentBuildJobs => Set<AgentBuildJob>();
     public DbSet<AgentRuntimeInstance> AgentRuntimeInstances => Set<AgentRuntimeInstance>();
@@ -185,6 +186,18 @@ public sealed class CSweetDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+            modelBuilder.Entity<AgentInstallationConfiguration>(entity =>
+            {
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.SchemaVersion).HasMaxLength(64).IsRequired();
+                entity.Property(x => x.SettingsJson).HasColumnType("text").IsRequired();
+                entity.HasIndex(x => x.AgentInstallationId).IsUnique();
+                entity.HasOne(x => x.AgentInstallation)
+                .WithOne(x => x.Configuration)
+                .HasForeignKey<AgentInstallationConfiguration>(x => x.AgentInstallationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            });
+
         modelBuilder.Entity<AgentSchedule>(entity =>
         {
             entity.HasKey(x => x.Id);
@@ -226,6 +239,10 @@ public sealed class CSweetDbContext : DbContext
             entity.Property(x => x.LogExcerpt).HasColumnType("text");
             entity.HasIndex(x => x.TickId).IsUnique();
             entity.HasIndex(x => new { x.AgentInstallationId, x.Status });
+            entity.HasIndex(x => x.AgentInstallationId)
+                .HasDatabaseName("UX_AgentRuntimeInstances_ActiveInstallation")
+                .IsUnique()
+                .HasFilter("\"Status\" IN ('Queued', 'Starting', 'WaitingForBrokerRegistration', 'Running', 'CompletionReported', 'Stopping')");
             entity.HasOne(x => x.AgentInstallation)
                 .WithMany(x => x.RuntimeInstances)
                 .HasForeignKey(x => x.AgentInstallationId)

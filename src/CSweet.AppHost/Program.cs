@@ -47,16 +47,10 @@ builder.AddProject<Projects.CSweet_App>("app")
 
 builder.AddProject<Projects.CSweet_WorkerHost>("workerhost")
     .WithReference(api)
+    .WithReference(agentHost)
     .WithReference(postgres)
     .WaitFor(postgres)
     .WaitForCompletion(migrator)
     .WaitFor(api);
-
-builder.AddProject<Projects.CSweet_Agents_PersonalAssistant>("personal-assistant")
-    .WithReference(agentHost)
-    .WithReference(postgres)
-    .WaitFor(agentHost)
-    .WaitFor(postgres)
-    .WaitForCompletion(migrator);
 
 builder.Build().Run();

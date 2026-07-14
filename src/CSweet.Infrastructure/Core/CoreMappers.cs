@@ -37,7 +37,13 @@ internal static class CoreMappers
             user.Email,
             (int)user.EmployeeType,
             (int)user.PermissionLevel,
-            user.CreatedAt);
+            user.CreatedAt)
+        {
+            AgentInstallationId = user.AgentInstallationId,
+            SupportsAgentConfiguration = user.AgentInstallation?.Grant?.CapabilitiesJson.Contains(
+                "\"agent.configuration.describe.v1\"",
+                StringComparison.Ordinal) == true
+        };
     }
 
     #endregion

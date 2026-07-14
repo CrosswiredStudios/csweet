@@ -87,9 +87,10 @@ public sealed class ApiGatewayBrokerWorker : BackgroundService
             BusinessId = _options.BusinessId
         };
 
-        registration.RequestedPublications.Add(PersonalAssistantChatEvents.UserMessageReceivedEvent);
-        registration.RequestedSubscriptions.Add(PersonalAssistantChatEvents.AssistantResponseChunkEvent);
-        registration.RequestedSubscriptions.Add(PersonalAssistantChatEvents.AssistantResponseCreatedEvent);
+        registration.RequestedPublications.Add(AgentChatEvents.UserMessageReceivedEvent);
+        registration.RequestedSubscriptions.Add(AgentChatEvents.AssistantResponseChunkEvent);
+        registration.RequestedSubscriptions.Add(AgentChatEvents.AssistantResponseCreatedEvent);
+        registration.RequestedPermissions.Add("installation.route");
 
         return registration;
     }
@@ -124,7 +125,7 @@ public sealed class ApiGatewayBrokerWorker : BackgroundService
 
     private void HandleEvent(DeliveredEvent evt)
     {
-        if (evt.EventType != PersonalAssistantChatEvents.AssistantResponseChunkEvent)
+        if (evt.EventType != AgentChatEvents.AssistantResponseChunkEvent)
         {
             _logger.LogInformation(
                 "API gateway received broker event {EventType} from {SourceAgentId} with subject {Subject}; ignoring for chat stream routing.",

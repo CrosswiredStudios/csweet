@@ -2,6 +2,14 @@ namespace CSweet.Application.Setup;
 
 public interface IAgentRuntimeManager
 {
+    Task<bool> EnsureRuntimeQueuedAsync(
+        Guid installationId,
+        string reason,
+        bool interactive = false,
+        CancellationToken cancellationToken = default);
+
+    Task<int> EnsureAlwaysOnRuntimesAsync(CancellationToken cancellationToken = default);
+
     Task<int> ProcessDueSchedulesAsync(CancellationToken cancellationToken = default);
     Task<int> ReconcileAsync(CancellationToken cancellationToken = default);
 }

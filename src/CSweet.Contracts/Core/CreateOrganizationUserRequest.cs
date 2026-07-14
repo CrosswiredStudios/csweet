@@ -9,4 +9,6 @@ public sealed record CreateOrganizationUserRequest(
     int EmployeeType = 0,
     Guid? RoleId = null,
     Guid? WorkerId = null,
-    Guid? ReportsToOrganizationUserId = null);
+    Guid? ReportsToOrganizationUserId = null,
+    IReadOnlyList<Guid>? ManagedOrganizationUserIds = null,
+    Guid? AgentInstallationId = null);

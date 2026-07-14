@@ -37,7 +37,10 @@ public sealed record AgentConfigurationOption(
     string Label);
 
 public sealed record UpdateAgentConfigurationRequest(
-    IReadOnlyDictionary<string, JsonElement> Settings);
+    IReadOnlyDictionary<string, JsonElement> Settings)
+{
+    public string? SchemaVersion { get; init; }
+}
 
 public sealed record AgentConfigurationUpdateResponse(
     bool Succeeded,

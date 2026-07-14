@@ -16,6 +16,7 @@ public sealed class DockerAgentContainerRunner(
         CancellationToken cancellationToken = default)
     {
         ValidateStartRequest(request);
+        await EnsureNetworkAsync(request.NetworkName, cancellationToken);
         var cpus = (request.CpuPercent / 100m).ToString("0.##", CultureInfo.InvariantCulture);
         var args = new List<string>
         {
@@ -44,7 +45,14 @@ public sealed class DockerAgentContainerRunner(
             "dotnet", $"/app/{request.EntryAssembly}"
         };
 
-        logger.LogInformation("Starting agent container {ContainerName} for runtime {RuntimeInstanceId} and installation {InstallationId}", request.ContainerName, request.RuntimeInstanceId, request.InstallationId);
+        logger.LogInformation(
+            "Starting agent container {ContainerName} for runtime {RuntimeInstanceId}, installation {InstallationId}, image {RuntimeImage}, network {NetworkName}, and broker {BrokerEndpoint}",
+            request.ContainerName,
+            request.RuntimeInstanceId,
+            request.InstallationId,
+            request.RuntimeImage,
+            request.NetworkName,
+            request.BrokerEndpoint);
         var result = await docker.ExecuteAsync(args, cancellationToken);
         if (result.ExitCode != 0)
         {
@@ -120,12 +128,39 @@ public sealed class DockerAgentContainerRunner(
         }
     }
 
+    private async Task EnsureNetworkAsync(string networkName, CancellationToken cancellationToken)
+    {
+        var inspect = await docker.ExecuteAsync(["network", "inspect", networkName], cancellationToken);
+        if (inspect.ExitCode == 0)
+        {
+            logger.LogDebug("Using existing Docker network {NetworkName} for agent runtimes.", networkName);
+            return;
+        }
+
+        if (!inspect.StandardError.Contains("not found", StringComparison.OrdinalIgnoreCase) &&
+            !inspect.StandardError.Contains("No such network", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new AgentContainerException(
+                $"Docker failed to inspect agent runtime network '{networkName}': {SanitizeError(inspect.StandardError)}");
+        }
+
+        logger.LogWarning("Docker network {NetworkName} was missing; creating a bridge network for agent runtimes.", networkName);
+        var create = await docker.ExecuteAsync(["network", "create", "--driver", "bridge", networkName], cancellationToken);
+        if (create.ExitCode != 0 && !create.StandardError.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new AgentContainerException(
+                $"Docker failed to create agent runtime network '{networkName}': {SanitizeError(create.StandardError)}");
+        }
+    }
+
     private static void ValidateStartRequest(AgentContainerStartRequest request)
     {
         if (request.MemoryMb <= 0 || request.CpuPercent <= 0 || request.PidsLimit <= 0 || request.MaxRuntimeSeconds <= 0)
             throw new AgentContainerException("Container resource and runtime limits must be positive.");
         if (string.IsNullOrWhiteSpace(request.AgentId) || string.IsNullOrWhiteSpace(request.BusinessId) || string.IsNullOrWhiteSpace(request.RuntimeImage) || string.IsNullOrWhiteSpace(request.NetworkName) || string.IsNullOrWhiteSpace(request.BrokerEndpoint) || string.IsNullOrWhiteSpace(request.WorkloadToken))
             throw new AgentContainerException("Runtime image, broker endpoint, workload token, and isolated network are required.");
+        if (request.NetworkName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')))
+            throw new AgentContainerException("The runtime network name contains unsupported characters.");
         if (!Path.IsPathFullyQualified(request.PackagePath) || request.PackagePath.Contains(',', StringComparison.Ordinal))
             throw new AgentContainerException("The package path must be absolute and cannot contain Docker mount delimiters.");
         if (request.EntryAssembly != Path.GetFileName(request.EntryAssembly) || !request.EntryAssembly.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))

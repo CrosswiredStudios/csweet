@@ -23,13 +23,13 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Remove="PersonalAssistantAgentTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CSweet.Agent.SDK" />
     <ProjectReference Include="..\..\src\CSweet.Api\CSweet.Api.csproj" />
     <ProjectReference Include="..\..\src\CSweet.AgentHost\CSweet.AgentHost.csproj" />
-    <ProjectReference Include="..\..\src\CSweet.Agents.PersonalAssistant\CSweet.Agents.PersonalAssistant.csproj" />
     <ProjectReference Include="..\..\src\CSweet.Domain\CSweet.Domain.csproj" />
     <ProjectReference Include="..\..\src\CSweet.Application\CSweet.Application.csproj" />
     <ProjectReference Include="..\..\src\CSweet.AI\CSweet.AI.csproj" />

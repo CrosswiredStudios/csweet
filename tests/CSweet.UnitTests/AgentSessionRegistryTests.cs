@@ -51,6 +51,63 @@ public sealed class AgentSessionRegistryTests
     }
 
     [Fact]
+    public async Task PublishEvent_WithInstallationSubject_DeliversOnlyToTargetInstance()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var source = Register(registry, "source", "business-1", publications: new[] { "chat.v1" });
+        var target = Register(registry, "same-agent", "business-1", subscriptions: new[] { "chat.v1" }, installationId: "target-instance");
+        var sibling = Register(registry, "same-agent", "business-1", subscriptions: new[] { "chat.v1" }, installationId: "sibling-instance");
+
+        registry.PublishEvent(source, new PublishEvent
+        {
+            EventType = "chat.v1",
+            Subject = "agent-installation/target-instance/conversation/1"
+        }, "correlation-targeted");
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        Assert.Equal(BrokerToAgentMessage.PayloadOneofCase.Event, (await target.Outbound.ReadAsync(timeout.Token)).PayloadCase);
+        Assert.False(sibling.Outbound.TryRead(out _));
+    }
+
+    [Fact]
+    public async Task RequestCapability_WithInstallationSelector_UsesTargetInstance()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var requester = Register(registry, "requester", "business-1");
+        var target = Register(registry, "same-agent", "business-1", capabilities: new[] { "configure.v1" }, installationId: "target-instance");
+        var sibling = Register(registry, "same-agent", "business-1", capabilities: new[] { "configure.v1" }, installationId: "sibling-instance");
+
+        registry.RequestCapability(requester, new RequestCapability
+        {
+            RequestId = "targeted-request",
+            Capability = "configure.v1",
+            TargetAgentId = "installation:target-instance"
+        }, "correlation-targeted");
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        Assert.Equal(BrokerToAgentMessage.PayloadOneofCase.CapabilityRequest, (await target.Outbound.ReadAsync(timeout.Token)).PayloadCase);
+        Assert.False(sibling.Outbound.TryRead(out _));
+    }
+
+    [Fact]
+    public async Task RequestCapability_WithInstallationRoutePermission_CanTargetAnotherBusiness()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var requester = Register(registry, "platform", "default", permissions: new[] { "installation.route" });
+        var target = Register(registry, "agent", "business-2", capabilities: new[] { "configure.v1" }, installationId: "target-instance");
+
+        registry.RequestCapability(requester, new RequestCapability
+        {
+            RequestId = "cross-business-request",
+            Capability = "configure.v1",
+            TargetAgentId = "installation:target-instance"
+        }, "cross-business-correlation");
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        Assert.Equal(BrokerToAgentMessage.PayloadOneofCase.CapabilityRequest, (await target.Outbound.ReadAsync(timeout.Token)).PayloadCase);
+    }
+
+    [Fact]
     public async Task CapabilityResult_ReturnsOnlyFromBrokerSelectedProvider()
     {
         var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
@@ -164,18 +221,20 @@ public sealed class AgentSessionRegistryTests
         string businessId,
         IEnumerable<string>? capabilities = null,
         IEnumerable<string>? subscriptions = null,
-        IEnumerable<string>? publications = null) =>
+        IEnumerable<string>? publications = null,
+        IEnumerable<string>? permissions = null,
+        string? installationId = null) =>
         registry.Register(
             new RegisterAgent
             {
                 AgentId = agentId,
                 AgentVersion = "1.0.0",
-                InstallationId = $"{agentId}-installation",
+                InstallationId = installationId ?? $"{agentId}-installation",
                 BusinessId = businessId
             },
             new AuthorizedAgentGrant(
                 (capabilities ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
                 (subscriptions ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
                 (publications ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
-                new HashSet<string>(StringComparer.Ordinal)));
+                (permissions ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal)));
 }

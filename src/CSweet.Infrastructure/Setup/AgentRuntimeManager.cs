@@ -6,6 +6,7 @@ using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace CSweet.Infrastructure.Setup;
 
@@ -18,6 +19,134 @@ public sealed class AgentRuntimeManager(
 {
     private static readonly AgentRuntimeStatus[] ContainerActiveStatuses =
     [AgentRuntimeStatus.Starting, AgentRuntimeStatus.WaitingForBrokerRegistration, AgentRuntimeStatus.Running, AgentRuntimeStatus.CompletionReported, AgentRuntimeStatus.Stopping];
+
+    public async Task<bool> EnsureRuntimeQueuedAsync(
+        Guid installationId,
+        string reason,
+        bool interactive = false,
+        CancellationToken cancellationToken = default)
+    {
+        var activeRuntime = await dbContext.AgentRuntimeInstances
+            .Include(x => x.AgentInstallation)!.ThenInclude(x => x!.Schedule)
+            .OrderByDescending(x => x.QueuedAt)
+            .FirstOrDefaultAsync(
+                x => x.AgentInstallationId == installationId &&
+                    (x.Status == AgentRuntimeStatus.Queued || ContainerActiveStatuses.Contains(x.Status)),
+                cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        if (activeRuntime is not null)
+        {
+            if (interactive && activeRuntime.AgentInstallation?.Schedule?.ActivationMode != ActivationMode.AlwaysOn)
+            {
+                activeRuntime.IsInteractive = true;
+                activeRuntime.LastInteractiveActivityAt = now;
+                activeRuntime.IdleDeadlineAt = now.AddSeconds(
+                    Math.Max(1, options.Value.InteractiveIdleTimeoutSeconds));
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            return false;
+        }
+
+        var activationMode = await dbContext.AgentSchedules
+            .Where(x => x.AgentInstallationId == installationId)
+            .Select(x => x.ActivationMode)
+            .SingleAsync(cancellationToken);
+        var instance = new AgentRuntimeInstance
+        {
+            Id = Guid.NewGuid(),
+            TickId = Guid.NewGuid(),
+            AgentInstallationId = installationId,
+            QueuedAt = now,
+            IsInteractive = interactive,
+            LastInteractiveActivityAt = interactive ? now : null,
+            IdleDeadlineAt = interactive && activationMode != ActivationMode.AlwaysOn
+                ? now.AddSeconds(Math.Max(1, options.Value.InteractiveIdleTimeoutSeconds))
+                : null
+        };
+        instance.Events.Add(new AgentRuntimeEvent
+        {
+            Id = Guid.NewGuid(),
+            AgentRuntimeInstanceId = instance.Id,
+            Status = AgentRuntimeStatus.Queued,
+            Reason = reason,
+            OccurredAt = now
+        });
+        dbContext.AgentRuntimeInstances.Add(instance);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (
+            exception.InnerException is PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName: "UX_AgentRuntimeInstances_ActiveInstallation"
+            })
+        {
+            foreach (var entry in dbContext.ChangeTracker.Entries()
+                         .Where(entry => ReferenceEquals(entry.Entity, instance) || instance.Events.Contains(entry.Entity)))
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            if (interactive)
+            {
+                var winner = await dbContext.AgentRuntimeInstances
+                    .Include(x => x.AgentInstallation)!.ThenInclude(x => x!.Schedule)
+                    .OrderByDescending(x => x.QueuedAt)
+                    .FirstAsync(
+                        x => x.AgentInstallationId == installationId &&
+                            (x.Status == AgentRuntimeStatus.Queued || ContainerActiveStatuses.Contains(x.Status)),
+                        cancellationToken);
+                if (winner.AgentInstallation?.Schedule?.ActivationMode != ActivationMode.AlwaysOn)
+                {
+                    winner.IsInteractive = true;
+                    winner.LastInteractiveActivityAt = now;
+                    winner.IdleDeadlineAt = now.AddSeconds(
+                        Math.Max(1, options.Value.InteractiveIdleTimeoutSeconds));
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                }
+            }
+
+            return false;
+        }
+        await auditWriter.WriteAsync(
+            "agent-runtime.interactive.queued",
+            nameof(AgentRuntimeInstance),
+            instance.Id,
+            reason,
+            cancellationToken: cancellationToken);
+        return true;
+    }
+
+    public async Task<int> EnsureAlwaysOnRuntimesAsync(CancellationToken cancellationToken = default)
+    {
+        var installationIds = await dbContext.AgentInstallations
+            .AsNoTracking()
+            .Where(x => x.IsEnabled &&
+                x.Schedule != null &&
+                x.Schedule.IsEnabled &&
+                x.Schedule.ActivationMode == ActivationMode.AlwaysOn &&
+                !x.RuntimeInstances.Any(runtime =>
+                    runtime.Status == AgentRuntimeStatus.Queued ||
+                    ContainerActiveStatuses.Contains(runtime.Status)))
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        var queued = 0;
+        foreach (var installationId in installationIds)
+        {
+            if (await EnsureRuntimeQueuedAsync(
+                    installationId,
+                    "Queued by always-on runtime reconciliation.",
+                    cancellationToken: cancellationToken))
+            {
+                queued++;
+            }
+        }
+
+        return queued;
+    }
 
     public async Task<int> ProcessDueSchedulesAsync(CancellationToken cancellationToken = default)
     {
@@ -42,13 +171,40 @@ public sealed class AgentRuntimeManager(
         var instances = await dbContext.AgentRuntimeInstances
             .Include(x => x.AgentInstallation)!.ThenInclude(x => x!.Schedule)
             .Include(x => x.AgentInstallation)!.ThenInclude(x => x!.Grant)
-            .Include(x => x.AgentInstallation)!.ThenInclude(x => x!.PackageVersion)
+            .Include(x => x.AgentInstallation)!.ThenInclude(x => x!.PackageVersion)!.ThenInclude(x => x!.BuildJobs)
+            .Include(x => x.Events)
             .Where(x => x.Status == AgentRuntimeStatus.Queued || ContainerActiveStatuses.Contains(x.Status))
             .OrderBy(x => x.QueuedAt).ToListAsync(cancellationToken);
 
         foreach (var instance in instances)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (instance.Status == AgentRuntimeStatus.Stopping)
+            {
+                var settings = await SettingsAsync(cancellationToken);
+                var stoppingAt = instance.Events
+                    .Where(x => x.Status == AgentRuntimeStatus.Stopping)
+                    .MaxBy(x => x.OccurredAt)?.OccurredAt ?? instance.StartedAt ?? instance.QueuedAt;
+                if (stoppingAt.AddSeconds(settings.ContainerStopGraceSeconds + 5) <= now)
+                {
+                    await RecoverInterruptedStopAsync(instance, settings, now, cancellationToken);
+                    changed++;
+                }
+                continue;
+            }
+            if (instance.Status == AgentRuntimeStatus.Starting)
+            {
+                var settings = await SettingsAsync(cancellationToken);
+                var startingAt = instance.Events
+                    .Where(x => x.Status == AgentRuntimeStatus.Starting)
+                    .MaxBy(x => x.OccurredAt)?.OccurredAt ?? instance.StartedAt ?? instance.QueuedAt;
+                if (startingAt.AddSeconds(settings.ContainerStartTimeoutSeconds + 5) <= now)
+                {
+                    await RecoverInterruptedStartAsync(instance, settings, now, cancellationToken);
+                    changed++;
+                }
+                continue;
+            }
             if (instance.Status == AgentRuntimeStatus.Queued)
             {
                 if (await TryStartAsync(instance, now, cancellationToken)) changed++;
@@ -79,6 +235,20 @@ public sealed class AgentRuntimeManager(
                 changed++;
                 continue;
             }
+            if (instance.Status == AgentRuntimeStatus.Running &&
+                instance.IdleDeadlineAt is { } idleDeadline &&
+                idleDeadline <= now &&
+                instance.AgentInstallation?.Schedule?.ActivationMode != ActivationMode.AlwaysOn)
+            {
+                await StopAndFinishAsync(
+                    instance,
+                    AgentRuntimeStatus.Cancelled,
+                    "Interactive runtime idle timeout elapsed.",
+                    now,
+                    cancellationToken);
+                changed++;
+                continue;
+            }
             if (instance.ContainerId is not null && instance.Status is AgentRuntimeStatus.WaitingForBrokerRegistration or AgentRuntimeStatus.Running)
             {
                 var status = await containers.InspectAsync(instance.ContainerId, cancellationToken);
@@ -91,6 +261,80 @@ public sealed class AgentRuntimeManager(
             }
         }
         return changed;
+    }
+
+    private async Task RecoverInterruptedStopAsync(
+        AgentRuntimeInstance instance,
+        AgentRuntimeGlobalSettings settings,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (instance.ContainerId is { } containerId)
+        {
+            try
+            {
+                var status = await containers.InspectAsync(containerId, cancellationToken);
+                if (status is not null)
+                {
+                    await containers.RemoveAsync(containerId, force: true, cancellationToken: cancellationToken);
+                }
+                instance.ContainerId = null;
+            }
+            catch (AgentContainerException exception)
+            {
+                logger.LogWarning(exception, "Interrupted stop cleanup failed for runtime {RuntimeInstanceId}.", instance.Id);
+            }
+        }
+
+        const string recoveryReason = "Recovered a runtime interrupted while stopping; a fresh attempt can now start.";
+        Transition(instance, AgentRuntimeStatus.Failed, now, recoveryReason);
+        ScheduleAlwaysOnRestart(instance, AgentRuntimeStatus.Failed, settings);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await AuditOutcomeAsync(instance, AgentRuntimeStatus.Failed, cancellationToken);
+    }
+
+    private async Task RecoverInterruptedStartAsync(
+        AgentRuntimeInstance instance,
+        AgentRuntimeGlobalSettings settings,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var containerName = instance.ContainerName;
+        if (!string.IsNullOrWhiteSpace(containerName))
+        {
+            try
+            {
+                var status = await containers.InspectAsync(containerName, cancellationToken);
+                if (status?.State == AgentContainerState.Running)
+                {
+                    instance.ContainerId = status.ContainerId;
+                    instance.RuntimeDeadlineAt = now.AddSeconds(instance.AgentInstallation!.Schedule!.MaxRuntimeSeconds);
+                    Transition(
+                        instance,
+                        AgentRuntimeStatus.WaitingForBrokerRegistration,
+                        now,
+                        $"Recovered running container {status.ContainerId}; awaiting broker registration at {options.Value.BrokerEndpoint}.");
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    return;
+                }
+
+                if (status is not null)
+                {
+                    await containers.RemoveAsync(containerName, force: true, cancellationToken: cancellationToken);
+                }
+            }
+            catch (AgentContainerException exception)
+            {
+                logger.LogWarning(exception, "Interrupted start inspection failed for runtime {RuntimeInstanceId}.", instance.Id);
+                instance.LogExcerpt = $"Could not recover interrupted container start: {exception.Message}";
+            }
+        }
+
+        const string recoveryReason = "Container startup was interrupted before completion; retry to start a fresh runtime.";
+        Transition(instance, AgentRuntimeStatus.StartFailed, now, recoveryReason);
+        ScheduleAlwaysOnRestart(instance, AgentRuntimeStatus.StartFailed, settings);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await AuditOutcomeAsync(instance, AgentRuntimeStatus.StartFailed, cancellationToken);
     }
 
     private async Task<bool> ClaimAndQueueAsync(Guid scheduleId, DateTimeOffset now, CancellationToken cancellationToken)
@@ -146,26 +390,77 @@ public sealed class AgentRuntimeManager(
     {
         var installation = instance.AgentInstallation!;
         var settings = await SettingsAsync(cancellationToken);
-        var globalCount = await dbContext.AgentRuntimeInstances.CountAsync(x => ContainerActiveStatuses.Contains(x.Status), cancellationToken);
-        var businessCount = await dbContext.AgentRuntimeInstances.CountAsync(x => ContainerActiveStatuses.Contains(x.Status) && x.AgentInstallation!.BusinessId == installation.BusinessId, cancellationToken);
-        var installationCount = await dbContext.AgentRuntimeInstances.CountAsync(x => ContainerActiveStatuses.Contains(x.Status) && x.AgentInstallationId == installation.Id, cancellationToken);
-        if (globalCount >= settings.GlobalMaxActiveContainers || businessCount >= settings.PerBusinessMaxActiveContainers || installationCount >= settings.PerInstallationMaxActiveContainers)
-            return false;
         var package = installation.PackageVersion!;
-        if (!installation.IsEnabled || installation.Schedule?.IsEnabled != true || package.Status != AgentPackageVersionStatus.Built || string.IsNullOrWhiteSpace(package.PackagePath) || installation.Grant is null)
+        if (!installation.IsEnabled || installation.Schedule?.IsEnabled != true || installation.Grant is null)
         {
-            Transition(instance, AgentRuntimeStatus.PolicyDenied, now, "Installation is disabled or its package is not built.");
+            Transition(instance, AgentRuntimeStatus.PolicyDenied, now, "The installation, schedule, or approved grant is disabled or unavailable.");
             await dbContext.SaveChangesAsync(cancellationToken);
             await AuditOutcomeAsync(instance, AgentRuntimeStatus.PolicyDenied, cancellationToken);
             return true;
         }
 
+        if (package.Status == AgentPackageVersionStatus.Approved)
+        {
+            var buildInProgress = package.BuildJobs.Any(x => x.Status is
+                AgentBuildStatus.Queued or AgentBuildStatus.Cloning or AgentBuildStatus.Building);
+            if (buildInProgress)
+            {
+                logger.LogDebug(
+                    "Runtime {RuntimeInstanceId} is waiting for package {PackageVersionId} to finish building.",
+                    instance.Id,
+                    package.Id);
+                return false;
+            }
+
+            await FailBeforeStartAsync(instance, now, "The approved package has no active build.", cancellationToken);
+            return true;
+        }
+
+        if (package.Status == AgentPackageVersionStatus.Failed)
+        {
+            var buildFailure = package.BuildJobs
+                .OrderByDescending(x => x.Attempt)
+                .Select(x => x.FailureMessage)
+                .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+            await FailBeforeStartAsync(
+                instance,
+                now,
+                buildFailure is null ? "The agent package build failed." : $"The agent package build failed: {buildFailure}",
+                cancellationToken);
+            return true;
+        }
+
+        if (package.Status is AgentPackageVersionStatus.Previewed or AgentPackageVersionStatus.Revoked)
+        {
+            Transition(instance, AgentRuntimeStatus.PolicyDenied, now, $"The agent package is {package.Status} and is not approved to run.");
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await AuditOutcomeAsync(instance, AgentRuntimeStatus.PolicyDenied, cancellationToken);
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(package.PackagePath) || string.IsNullOrWhiteSpace(package.ProjectPath))
+        {
+            await FailBeforeStartAsync(instance, now, "The built agent package is incomplete.", cancellationToken);
+            return true;
+        }
+
+        var globalCount = await dbContext.AgentRuntimeInstances.CountAsync(x => ContainerActiveStatuses.Contains(x.Status), cancellationToken);
+        var businessCount = await dbContext.AgentRuntimeInstances.CountAsync(x => ContainerActiveStatuses.Contains(x.Status) && x.AgentInstallation!.BusinessId == installation.BusinessId, cancellationToken);
+        var installationCount = await dbContext.AgentRuntimeInstances.CountAsync(x => ContainerActiveStatuses.Contains(x.Status) && x.AgentInstallationId == installation.Id, cancellationToken);
+        if (globalCount >= settings.GlobalMaxActiveContainers || businessCount >= settings.PerBusinessMaxActiveContainers || installationCount >= settings.PerInstallationMaxActiveContainers)
+        {
+            var capacityReason = $"Waiting for container capacity: global {globalCount}/{settings.GlobalMaxActiveContainers}, business {businessCount}/{settings.PerBusinessMaxActiveContainers}, installation {installationCount}/{settings.PerInstallationMaxActiveContainers}.";
+            if (!string.Equals(instance.Reason, capacityReason, StringComparison.Ordinal))
+            {
+                Transition(instance, AgentRuntimeStatus.Queued, now, capacityReason);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            return false;
+        }
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         instance.WorkloadTokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
         instance.ContainerName = $"csweet-agent-{instance.Id:N}";
         Transition(instance, AgentRuntimeStatus.Starting, now, "Starting runtime container.");
-        await dbContext.SaveChangesAsync(cancellationToken);
-        Transition(instance, AgentRuntimeStatus.WaitingForBrokerRegistration, DateTimeOffset.UtcNow, "Container launch authorized; awaiting broker registration.");
         await dbContext.SaveChangesAsync(cancellationToken);
         try
         {
@@ -174,23 +469,33 @@ public sealed class AgentRuntimeManager(
             var entryAssembly = Path.GetFileNameWithoutExtension(package.ProjectPath) + ".dll";
             var status = await containers.StartAsync(new AgentContainerStartRequest(
                 instance.Id, instance.TickId, installation.Id, package.AgentId, installation.BusinessId,
-                instance.ContainerName, settings.DotNetRuntimeBaseImage, package.PackagePath, entryAssembly,
+                instance.ContainerName,
+                DotNetAgentImageResolver.ResolveRuntimeImage(
+                    settings.DotNetRuntimeBaseImage,
+                    package.TargetFramework),
+                package.PackagePath, entryAssembly,
                 options.Value.BrokerEndpoint, token, "/app/csweet-agent.json", options.Value.DockerNetworkName,
                 installation.Grant.MemoryMb, installation.Grant.CpuPercent, settings.DefaultContainerPidsLimit,
                 installation.Schedule.MaxRuntimeSeconds), startTimeout.Token);
             instance.ContainerId = status.ContainerId;
             instance.RuntimeDeadlineAt = now.AddSeconds(installation.Schedule.MaxRuntimeSeconds);
+            Transition(instance, AgentRuntimeStatus.WaitingForBrokerRegistration, DateTimeOffset.UtcNow,
+                $"Container {status.ContainerId} started on network {options.Value.DockerNetworkName}; awaiting broker registration at {options.Value.BrokerEndpoint}.");
             AgentRuntimeMetrics.ContainerStarted();
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             await TryRemoveFailedStartAsync(instance.ContainerName, cancellationToken);
+            instance.LogExcerpt =
+                $"Container launch timed out. Image: {settings.DotNetRuntimeBaseImage}; network: {options.Value.DockerNetworkName}; broker: {options.Value.BrokerEndpoint}.";
             Transition(instance, AgentRuntimeStatus.StartFailed, DateTimeOffset.UtcNow, "Container start timed out.");
         }
         catch (Exception exception) when (exception is AgentContainerException or InvalidOperationException)
         {
             logger.LogError(exception, "Failed to start runtime {RuntimeInstanceId}", instance.Id);
             await TryRemoveFailedStartAsync(instance.ContainerName, cancellationToken);
+            instance.LogExcerpt =
+                $"Container launch failed. Image: {settings.DotNetRuntimeBaseImage}; network: {options.Value.DockerNetworkName}; broker: {options.Value.BrokerEndpoint}.{Environment.NewLine}{exception.Message}";
             Transition(instance, AgentRuntimeStatus.StartFailed, DateTimeOffset.UtcNow, exception.Message);
         }
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -200,6 +505,17 @@ public sealed class AgentRuntimeManager(
         else if (instance.Status == AgentRuntimeStatus.StartFailed)
             await AuditOutcomeAsync(instance, AgentRuntimeStatus.StartFailed, cancellationToken);
         return true;
+    }
+
+    private async Task FailBeforeStartAsync(
+        AgentRuntimeInstance instance,
+        DateTimeOffset occurredAt,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        Transition(instance, AgentRuntimeStatus.Failed, occurredAt, reason);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await AuditOutcomeAsync(instance, AgentRuntimeStatus.Failed, cancellationToken);
     }
 
     private async Task TryRemoveFailedStartAsync(string containerName, CancellationToken cancellationToken)

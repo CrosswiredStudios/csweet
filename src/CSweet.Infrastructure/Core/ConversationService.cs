@@ -47,6 +47,21 @@ public sealed class ConversationService : IConversationService
         return profile?.Id;
     }
 
+    public Task<bool> IsProviderProfileEnabledAsync(
+        Guid providerProfileId,
+        CancellationToken cancellationToken = default) =>
+        _dbContext.LlmProviderProfiles.AnyAsync(
+            x => x.Id == providerProfileId && x.IsEnabled,
+            cancellationToken);
+
+    public Task<Guid?> GetAgentInstallationIdAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default) =>
+        _dbContext.CoreConversations
+            .Where(x => x.Id == conversationId)
+            .Select(x => x.AgentOrganizationUser!.AgentInstallationId)
+            .SingleOrDefaultAsync(cancellationToken);
+
     public async Task<ConversationActionResponse> StartAsync(
         Guid organizationId,
         StartConversationRequest request,

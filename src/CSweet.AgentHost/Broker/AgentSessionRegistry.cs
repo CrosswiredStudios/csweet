@@ -107,14 +107,18 @@ public sealed class AgentSessionRegistry
             OccurredAt = Timestamp.FromDateTime(DateTime.UtcNow)
         };
 
+        var targetInstallationId = GetTargetInstallationId(publishedEvent.Subject);
+        var mayRouteInstallation = targetInstallationId is not null && source.Grant.Permissions.Contains("installation.route");
         var deliveredCount = 0;
         var deliveredTargets = new List<string>();
         foreach (var target in _sessions.Values)
         {
-            if (!string.Equals(
+            if ((!string.Equals(
                     target.BusinessId,
                     source.BusinessId,
-                    StringComparison.Ordinal) ||
+                    StringComparison.Ordinal) && !mayRouteInstallation) ||
+                (targetInstallationId is not null &&
+                    !string.Equals(target.InstallationId, targetInstallationId, StringComparison.OrdinalIgnoreCase)) ||
                 !target.Grant.Subscriptions.Contains(publishedEvent.EventType))
             {
                 continue;
@@ -177,13 +181,19 @@ public sealed class AgentSessionRegistry
             return;
         }
 
+        var targetInstallationId = GetInstallationSelector(request.TargetAgentId);
+        var mayRouteInstallation = targetInstallationId is not null && requester.Grant.Permissions.Contains("installation.route");
         var provider = _sessions.Values
             .Where(session =>
-                string.Equals(
+                (string.Equals(
                     session.BusinessId,
                     requester.BusinessId,
-                    StringComparison.Ordinal) &&
+                    StringComparison.Ordinal) || mayRouteInstallation) &&
                 (string.IsNullOrWhiteSpace(request.TargetAgentId) ||
+                    (targetInstallationId is not null && string.Equals(
+                        session.InstallationId,
+                        targetInstallationId,
+                        StringComparison.OrdinalIgnoreCase)) ||
                     string.Equals(
                         session.AgentId,
                         request.TargetAgentId,
@@ -194,6 +204,20 @@ public sealed class AgentSessionRegistry
 
         if (provider is null)
         {
+            var installationSessions = targetInstallationId is null
+                ? new List<string>()
+                : _sessions.Values
+                    .Where(session => string.Equals(session.InstallationId, targetInstallationId, StringComparison.OrdinalIgnoreCase))
+                    .Select(session => $"{session.AgentId}/{session.InstallationId} business={session.BusinessId} capability={session.Grant.Capabilities.Contains(request.Capability)}")
+                    .ToList();
+            _logger.LogWarning(
+                "No provider selected for capability {Capability}, target {Target}, requester {RequesterAgentId} in business {RequesterBusinessId}. InstallationRouteAllowed {InstallationRouteAllowed}. Matching installation sessions: {@InstallationSessions}",
+                request.Capability,
+                request.TargetAgentId,
+                requester.AgentId,
+                requester.BusinessId,
+                mayRouteInstallation,
+                installationSessions);
             SendCapabilityFailure(
                 requester,
                 request.RequestId,
@@ -292,6 +316,24 @@ public sealed class AgentSessionRegistry
                 CapabilityResult = result
             });
         }
+    }
+
+    private static string? GetInstallationSelector(string? target) =>
+        target?.StartsWith("installation:", StringComparison.OrdinalIgnoreCase) == true
+            ? target["installation:".Length..]
+            : null;
+
+    private static string? GetTargetInstallationId(string? subject)
+    {
+        const string prefix = "agent-installation/";
+        if (subject?.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) != true)
+        {
+            return null;
+        }
+
+        var remainder = subject[prefix.Length..];
+        var separator = remainder.IndexOf('/');
+        return separator < 0 ? remainder : remainder[..separator];
     }
 
     private static void SendCapabilityFailure(

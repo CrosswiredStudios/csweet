@@ -56,8 +56,9 @@ public class BusinessOnboardingServiceTests
         Assert.Equal("Launch a paid MVP in 30 days", organization.PrimaryGoal);
         Assert.Contains("Balanced and practical", organization.ConstraintsJson);
         Assert.Contains(roles, x => x.Name == "CEO" && x.AuthorityLevel == AuthorityLevel.ExecutionWithApproval);
-        Assert.Contains(employees, x => x.DisplayName == "Self" && x.EmployeeType == EmployeeType.Human);
-        Assert.Contains(employees, x => x.DisplayName == "Personal Assistant" && x.EmployeeType == EmployeeType.Agent);
+        var self = Assert.Single(employees);
+        Assert.Equal("Self", self.DisplayName);
+        Assert.Equal(EmployeeType.Human, self.EmployeeType);
         Assert.Contains(roles, x => x.Name == "Marketing" && x.ResponsibilitiesJson.Contains("Define target customer"));
         Assert.Equal(ObjectiveStatus.Active, objective.Status);
         Assert.Equal("Launch a paid MVP in 30 days", objective.Title);

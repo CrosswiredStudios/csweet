@@ -14,8 +14,6 @@ public static class AgentManagementEndpoints
 
     public static IServiceCollection AddAgentManagement(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddOptions<AgentCatalogOptions>()
-            .Bind(configuration.GetSection(AgentCatalogOptions.SectionName));
         services.AddScoped<IAgentCatalogService, AgentCatalogService>();
 
         return services;
@@ -101,6 +99,21 @@ public static class AgentManagementEndpoints
             await ExecuteInstallationActionAsync(
                 () => installationService.EnableAsync(installationId, cancellationToken)));
 
+        group.MapDelete("/installations/{installationId:guid}", async (
+            Guid installationId,
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                return Results.Ok(await installationService.RemoveAsync(installationId, cancellationToken));
+            }
+            catch (AgentInstallationException exception)
+            {
+                return Results.BadRequest(new { error = exception.Message });
+            }
+        });
+
         group.MapGet("/installations/{installationId:guid}/runs", async (
             Guid installationId,
             IAgentInstallationService installationService,
@@ -119,36 +132,132 @@ public static class AgentManagementEndpoints
             return log is null ? Results.NotFound() : Results.Ok(log);
         });
 
-        group.MapGet("/{agentId}/configuration", async (
-            string agentId,
-            IAgentBrokerClient broker,
+        group.MapPost("/installations/{installationId:guid}/runtime/ensure", async (
+            Guid installationId,
+            IAgentInteractiveRuntimeService interactiveRuntime,
             CancellationToken cancellationToken) =>
         {
+            try
+            {
+                var readiness = await interactiveRuntime.EnsureReadyAsync(installationId, cancellationToken);
+                return readiness.IsReady
+                    ? Results.Ok(readiness)
+                    : Results.Accepted($"/api/agents/installations/{installationId}/runtime/status", readiness);
+            }
+            catch (AgentInstallationException exception)
+            {
+                return Results.BadRequest(new { error = exception.Message });
+            }
+        });
+
+        group.MapGet("/installations/{installationId:guid}/runtime/status", async (
+            Guid installationId,
+            IAgentInteractiveRuntimeService interactiveRuntime,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                return Results.Ok(await interactiveRuntime.GetStatusAsync(installationId, cancellationToken));
+            }
+            catch (AgentInstallationException exception)
+            {
+                return Results.BadRequest(new { error = exception.Message });
+            }
+        });
+
+        group.MapGet("/installations/{installationId:guid}/configuration", async (
+            Guid installationId,
+            IAgentBrokerClient broker,
+            IAgentInteractiveRuntimeService interactiveRuntime,
+            IAgentInstallationConfigurationService configurations,
+            CancellationToken cancellationToken) =>
+        {
+            var readiness = await interactiveRuntime.EnsureReadyAsync(installationId, cancellationToken);
+            if (!readiness.IsReady)
+            {
+                return Results.Accepted($"/api/agents/installations/{installationId}/runtime/status", readiness);
+            }
+
             var result = await InvokeAgentConfigurationCapabilityAsync(
                 broker,
-                agentId,
+                $"installation:{installationId}",
                 AgentConfigurationCapabilities.Describe,
                 payload: [],
                 cancellationToken);
 
-            return ToHttpResult<AgentConfigurationSchemaResponse>(result);
+            if (TryGetFailure(result, out var failure))
+            {
+                return failure;
+            }
+
+            var response = Deserialize<AgentConfigurationSchemaResponse>(result);
+            if (response is null)
+            {
+                return Results.Conflict(new { error = "The agent returned an empty configuration response." });
+            }
+
+            var persisted = await configurations.GetAsync(installationId, cancellationToken);
+            if (persisted is null)
+            {
+                return Results.Ok(response);
+            }
+
+            var supportedKeys = response.Fields.Select(x => x.Key).ToHashSet(StringComparer.Ordinal);
+            var settings = response.Settings.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+            foreach (var setting in persisted.Settings.Where(x => supportedKeys.Contains(x.Key)))
+            {
+                settings[setting.Key] = setting.Value;
+            }
+
+            return Results.Ok(response with { Settings = settings });
         });
 
-        group.MapPost("/{agentId}/configuration", async (
-            string agentId,
+        group.MapPost("/installations/{installationId:guid}/configuration", async (
+            Guid installationId,
             UpdateAgentConfigurationRequest request,
             IAgentBrokerClient broker,
+            IAgentInteractiveRuntimeService interactiveRuntime,
+            IAgentInstallationConfigurationService configurations,
             CancellationToken cancellationToken) =>
         {
+            var readiness = await interactiveRuntime.EnsureReadyAsync(installationId, cancellationToken);
+            if (!readiness.IsReady)
+            {
+                return Results.Accepted($"/api/agents/installations/{installationId}/runtime/status", readiness);
+            }
+
             var payload = JsonSerializer.SerializeToUtf8Bytes(request, SerializerOptions);
             var result = await InvokeAgentConfigurationCapabilityAsync(
                 broker,
-                agentId,
+                $"installation:{installationId}",
                 AgentConfigurationCapabilities.Update,
                 payload,
                 cancellationToken);
 
-            return ToHttpResult<AgentConfigurationUpdateResponse>(result);
+            if (TryGetFailure(result, out var failure))
+            {
+                return failure;
+            }
+
+            var response = Deserialize<AgentConfigurationUpdateResponse>(result);
+            if (response is null)
+            {
+                return Results.Conflict(new { error = "The agent returned an empty configuration response." });
+            }
+
+            if (!response.Succeeded)
+            {
+                return Results.Ok(response);
+            }
+
+            var existing = await configurations.GetAsync(installationId, cancellationToken);
+            var persisted = await configurations.SaveAsync(
+                installationId,
+                request.SchemaVersion ?? existing?.SchemaVersion ?? "1",
+                response.Settings,
+                cancellationToken);
+
+            return Results.Ok(response with { Settings = persisted.Settings });
         });
 
         return endpoints;
@@ -189,24 +298,25 @@ public static class AgentManagementEndpoints
             timeout.Token);
     }
 
-    private static IResult ToHttpResult<T>(CapabilityResult result)
+    private static bool TryGetFailure(CapabilityResult result, out IResult failure)
     {
         if (!result.Succeeded)
         {
-            return Results.Conflict(new
+            failure = Results.Conflict(new
             {
                 error = string.IsNullOrWhiteSpace(result.Error)
                     ? "The agent could not complete the configuration request."
                     : result.Error
             });
+            return true;
         }
 
-        var response = JsonSerializer.Deserialize<T>(
+        failure = null!;
+        return false;
+    }
+
+    private static T? Deserialize<T>(CapabilityResult result) =>
+        JsonSerializer.Deserialize<T>(
             result.Payload.ToByteArray(),
             SerializerOptions);
-
-        return response is null
-            ? Results.Conflict(new { error = "The agent returned an empty configuration response." })
-            : Results.Ok(response);
-    }
 }

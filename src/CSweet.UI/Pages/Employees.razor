@@ -1,8 +1,14 @@
 @page "/organizations/{OrganizationId:guid}/employees"
 @layout CommandCenterLayout
+@using System.Text.Json
+@using CSweet.Contracts.Agents
 @using CSweet.Contracts.Core
+@using CSweet.Contracts.Llm
+@implements IDisposable
 @inject HttpClient Http
 @inject NavigationManager Navigation
+@inject IAgentApiClient AgentApi
+@inject ILlmProviderApiClient LlmProviderApi
 
 <PageTitle>Employees - C-Sweet</PageTitle>
 
@@ -13,9 +19,10 @@
             <MudText Typo="Typo.h3">@(_organization?.Name ?? "Organization")</MudText>
             <MudText Color="Color.Secondary">A reporting graph of human teammates and agent employees.</MudText>
         </div>
-        <MudButton Href="@($"/organizations/{OrganizationId}/command-center")" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Dashboard">
-            Command Center
-        </MudButton>
+        <MudStack Row="true" Spacing="2">
+            <MudButton OnClick="OpenHireDialog" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd">Hire employee</MudButton>
+            <MudButton Href="@($"/organizations/{OrganizationId}/command-center")" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Dashboard">Command Center</MudButton>
+        </MudStack>
     </MudPaper>
 
     @if (_loading)
@@ -72,6 +79,12 @@
                             <div>
                                 <MudText Typo="Typo.subtitle1">@employee.DisplayName</MudText>
                                 <MudText Typo="Typo.body2" Color="Color.Secondary">@EmployeeLabel(employee)</MudText>
+                                @if (employee.AgentInstallationId.HasValue)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="@RuntimeStatusColor(employee)" Variant="Variant.Outlined">
+                                        @RuntimeStatusLabel(employee)
+                                    </MudChip>
+                                }
                             </div>
                         </MudStack>
                         <dl class="employee-card-details">
@@ -86,6 +99,46 @@
                         </dl>
                         @if (IsChattableAgent(employee))
                         {
+                            <span @onclick:stopPropagation="true">
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Primary"
+                                           Size="Size.Small"
+                                           Disabled="@(!CanStartRuntime(employee) || IsManagingRuntime(employee))"
+                                           StartIcon="@RuntimeActionIcon(employee)"
+                                           OnClick="@(() => StartRuntimeAsync(employee))">
+                                    @RuntimeActionLabel(employee)
+                                </MudButton>
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Warning"
+                                           Size="Size.Small"
+                                           Disabled="@(!CanStopRuntime(employee) || IsManagingRuntime(employee))"
+                                           StartIcon="@Icons.Material.Filled.StopCircle"
+                                           OnClick="@(() => StopRuntimeAsync(employee))">
+                                    Stop
+                                </MudButton>
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Default"
+                                           Size="Size.Small"
+                                           Disabled="@(employee.AgentInstallationId is null)"
+                                           StartIcon="@Icons.Material.Filled.Terminal"
+                                           OnClick="@(() => OpenRuntimeConsoleAsync(employee))">
+                                    Console
+                                </MudButton>
+                            </span>
+                            <span @onclick:stopPropagation="true">
+                                <MudTooltip Text="@(employee.SupportsAgentConfiguration ? "Configure this business agent instance" : "This agent plugin does not expose configurable settings")">
+                                    <span>
+                                        <MudButton Variant="Variant.Text"
+                                                   Color="Color.Secondary"
+                                                   Size="Size.Small"
+                                                   Disabled="@(!employee.SupportsAgentConfiguration)"
+                                                   StartIcon="@Icons.Material.Filled.Settings"
+                                                   OnClick="@(() => OpenConfigurationAsync(employee))">
+                                            Configure
+                                        </MudButton>
+                                    </span>
+                                </MudTooltip>
+                            </span>
                             <MudButton Variant="Variant.Text"
                                        Color="Color.Primary"
                                        Size="Size.Small"
@@ -95,6 +148,20 @@
                                 Open chat
                             </MudButton>
                         }
+                        @if (!IsSelf(employee))
+                        {
+                            <span @onclick:stopPropagation="true">
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Error"
+                                           Size="Size.Small"
+                                           Class="employee-fire-button"
+                                           StartIcon="@Icons.Material.Filled.PersonRemove"
+                                           Disabled="@_saving"
+                                           OnClick="@(() => OpenFireDialog(employee))">
+                                    Fire
+                                </MudButton>
+                            </span>
+                        }
                     </MudCardContent>
                 </MudCard>
             }
@@ -102,7 +169,231 @@
     }
 </div>
 
+<MudDialog @bind-Visible="_configurationDialogOpen" Options="_dialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Configure @_configurationEmployee?.DisplayName</MudText></TitleContent>
+    <DialogContent>
+        @if (_loadingConfiguration)
+        {
+            <MudStack Spacing="2" role="status" aria-live="polite">
+                <MudText Typo="Typo.subtitle2">@ConfigurationLoadingMessage</MudText>
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                @if (!string.IsNullOrWhiteSpace(_configurationRuntime?.Reason))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@_configurationRuntime.Reason</MudText>
+                }
+            </MudStack>
+        }
+        else if (!string.IsNullOrWhiteSpace(_configurationError))
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">@_configurationError</MudAlert>
+        }
+        else if (_configurationSchema is not null)
+        {
+            <MudStack Spacing="2">
+                @foreach (var field in _configurationSchema.Fields)
+                {
+                    @if (field.Type == AgentConfigurationFieldTypes.Boolean)
+                    {
+                        <MudCheckBox T="bool" Label="@field.Label" Value="@ConfigurationBoolean(field.Key)" ValueChanged="@(value => SetConfigurationValue(field.Key, value))" />
+                    }
+                    else if (field.Type == AgentConfigurationFieldTypes.Number)
+                    {
+                        <MudNumericField T="decimal?" Label="@field.Label" Value="@ConfigurationNumber(field.Key)" ValueChanged="@(value => SetConfigurationValue(field.Key, value))" Min="@field.Minimum" Max="@field.Maximum" Variant="Variant.Outlined" />
+                    }
+                    else if (field.Type == AgentConfigurationFieldTypes.Select)
+                    {
+                        <MudSelect T="string" Label="@field.Label" Value="@ConfigurationString(field.Key)" ValueChanged="@((string value) => SetConfigurationValue(field.Key, value))" Variant="Variant.Outlined">
+                            @foreach (var option in field.Options ?? [])
+                            {
+                                <MudSelectItem T="string" Value="@option.Value">@option.Label</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                    else if (field.Type == AgentConfigurationFieldTypes.LlmProvider)
+                    {
+                        <MudSelect T="string" Label="@field.Label" Value="@ConfigurationString(field.Key)" ValueChanged="@(value => SetProviderValue(field.Key, value))" Variant="Variant.Outlined">
+                            @foreach (var provider in _providerProfiles.Where(x => x.IsEnabled))
+                            {
+                                <MudSelectItem T="string" Value="@provider.Id.ToString()">@provider.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                    else if (field.Type == AgentConfigurationFieldTypes.LlmModel)
+                    {
+                        <MudSelect T="string" Label="@field.Label" Value="@ConfigurationString(field.Key)" ValueChanged="@(value => SetConfigurationValue(field.Key, value))" Variant="Variant.Outlined" Disabled="@(ConfigurationProvider(field) is null)">
+                            @if (ConfigurationProvider(field) is { } provider && !string.IsNullOrWhiteSpace(provider.DefaultChatModel))
+                            {
+                                <MudSelectItem T="string" Value="@provider.DefaultChatModel">@provider.DefaultChatModel</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                    else
+                    {
+                        <MudTextField Label="@field.Label" Value="@ConfigurationString(field.Key)" ValueChanged="@((string value) => SetConfigurationValue(field.Key, value))" Lines="@(field.Type == AgentConfigurationFieldTypes.TextArea ? 4 : 1)" Variant="Variant.Outlined" />
+                    }
+                    @if (!string.IsNullOrWhiteSpace(field.Description))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@field.Description</MudText>
+                    }
+                }
+                @if (!string.IsNullOrWhiteSpace(_configurationMessage))
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined">@_configurationMessage</MudAlert>
+                }
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseConfiguration" Disabled="@_savingConfiguration">Close</MudButton>
+        <MudButton OnClick="SaveConfigurationAsync" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_savingConfiguration || _configurationSchema is null)">
+            @(_savingConfiguration ? "Saving..." : "Save")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_runtimeConsoleOpen" Options="_runtimeConsoleOptions">
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudIcon Icon="@Icons.Material.Filled.Terminal" />
+            <MudText Typo="Typo.h6">@_runtimeConsoleEmployee?.DisplayName console</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        @if (_loadingRuntimeConsole)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (!string.IsNullOrWhiteSpace(_runtimeConsoleError))
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_runtimeConsoleError</MudAlert>
+        }
+        else if (_runtimeRuns.Count == 0)
+        {
+            <MudText Color="Color.Secondary">No runtime attempts have been recorded for this instance.</MudText>
+        }
+        else
+        {
+            <MudExpansionPanels MultiExpansion="true">
+                @foreach (var run in _runtimeRuns)
+                {
+                    <MudExpansionPanel Text="@($"{run.QueuedAt.LocalDateTime:g} · {run.Status}")">
+                        <MudStack Spacing="1">
+                            @if (!string.IsNullOrWhiteSpace(run.Reason))
+                            {
+                                <MudAlert Severity="@RuntimeRunSeverity(run.Status)" Dense="true" Variant="Variant.Outlined">@run.Reason</MudAlert>
+                            }
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Runtime @run.Id · Tick @run.TickId</MudText>
+                            <pre class="agent-build-log">@RuntimeEventLog(run)</pre>
+                            @if (!string.IsNullOrWhiteSpace(run.LogExcerpt))
+                            {
+                                <MudText Typo="Typo.subtitle2">Container output</MudText>
+                                <pre class="agent-build-log">@run.LogExcerpt</pre>
+                            }
+                        </MudStack>
+                    </MudExpansionPanel>
+                }
+            </MudExpansionPanels>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_loadingRuntimeConsole" OnClick="RefreshRuntimeConsoleAsync">Refresh</MudButton>
+        <MudButton Variant="Variant.Text" OnClick="CloseRuntimeConsole">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_hireDialogOpen" Options="_dialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Hire employee</MudText></TitleContent>
+    <DialogContent>
+        <MudStack Spacing="2">
+            @if (!string.IsNullOrWhiteSpace(_actionError))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_actionError</MudAlert>
+            }
+            <MudTextField Label="Name" @bind-Value="_hireName" Required="true" Variant="Variant.Outlined" Disabled="@_saving" />
+            <MudTextField Label="Email (optional)" @bind-Value="_hireEmail" InputType="InputType.Email" Variant="Variant.Outlined" Disabled="@_saving" />
+            <MudSelect T="int" Label="Employee type" @bind-Value="_hireEmployeeType" Variant="Variant.Outlined" Disabled="@_saving">
+                <MudSelectItem T="int" Value="0">Human</MudSelectItem>
+                <MudSelectItem T="int" Value="1">Agent</MudSelectItem>
+            </MudSelect>
+            @if (_hireEmployeeType == 1)
+            {
+                <MudSelect T="string" Label="Agent" @bind-Value="_hireAgentKey" Required="true" Variant="Variant.Outlined" Disabled="@_saving">
+                    @foreach (var agent in AvailableAgents)
+                    {
+                        <MudSelectItem T="string" Value="@agent.Key">@agent.Name</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (AvailableAgents.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                        No enabled agents are available. Add or enable an agent before hiring an agent employee.
+                    </MudAlert>
+                }
+            }
+            <MudSelect T="Guid?" Label="Managed by" @bind-Value="_hireManagerId" Clearable="true" Variant="Variant.Outlined" Disabled="@_saving">
+                @foreach (var employee in _employees)
+                {
+                    <MudSelectItem T="Guid?" Value="@((Guid?)employee.Id)">@employee.DisplayName</MudSelectItem>
+                }
+            </MudSelect>
+            <MudText Typo="Typo.subtitle2">Manages</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Select existing employees who will report to this new hire.</MudText>
+            @if (_employees.Count == 0)
+            {
+                <MudText Color="Color.Secondary">There are no existing employees to assign.</MudText>
+            }
+            else
+            {
+                <div class="employee-management-picker">
+                    @foreach (var employee in _employees)
+                    {
+                        <MudCheckBox T="bool"
+                                     Label="@employee.DisplayName"
+                                     Value="@_managedEmployeeIds.Contains(employee.Id)"
+                                     ValueChanged="@(value => SetManaged(employee.Id, value))"
+                                     Disabled="@(_saving || _hireManagerId == employee.Id)" />
+                    }
+                </div>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseHireDialog" Disabled="@_saving">Cancel</MudButton>
+        <MudButton OnClick="HireAsync" Variant="Variant.Filled" Color="Color.Primary" Disabled="@_saving">
+            @(_saving ? "Hiring..." : "Hire")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_fireDialogOpen" Options="_dialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Fire employee?</MudText></TitleContent>
+    <DialogContent>
+        @if (!string.IsNullOrWhiteSpace(_actionError))
+        {
+            <MudAlert Severity="Severity.Error" Dense="true">@_actionError</MudAlert>
+        }
+        <MudText>Remove <strong>@_employeeToFire?.DisplayName</strong> from this organization?</MudText>
+        @if (_employeeToFire?.EmployeeType == 1)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mt-3">
+                Firing an agent also permanently removes its conversation history.
+            </MudAlert>
+        }
+        @if (_employeeToFire is not null && SubordinateCount(_employeeToFire) > 0)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mt-3">
+                Their @SubordinateCount(_employeeToFire) direct report(s) will become unassigned.
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseFireDialog" Disabled="@_saving">Cancel</MudButton>
+        <MudButton OnClick="FireAsync" Variant="Variant.Filled" Color="Color.Error" Disabled="@_saving">@(_saving ? "Firing..." : "Fire")</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     [Parameter]
     public Guid OrganizationId { get; set; }
 
@@ -112,6 +403,57 @@
     private IReadOnlyList<WorkerResponse> _workers = [];
     private bool _loading = true;
     private string? _errorMessage;
+    private string? _actionError;
+    private bool _hireDialogOpen;
+    private bool _fireDialogOpen;
+    private bool _saving;
+    private string _hireName = string.Empty;
+    private string? _hireEmail;
+    private int _hireEmployeeType = 1;
+    private string? _hireAgentKey;
+    private IReadOnlyList<AgentCatalogItemResponse> _agentCatalog = [];
+    private IReadOnlyList<AgentInstallationResponse> _agentInstallations = [];
+    private IReadOnlyList<LlmProviderProfileResponse> _providerProfiles = [];
+    private Guid? _hireManagerId;
+    private readonly HashSet<Guid> _managedEmployeeIds = [];
+    private OrganizationUserResponse? _employeeToFire;
+    private OrganizationUserResponse? _configurationEmployee;
+    private AgentConfigurationSchemaResponse? _configurationSchema;
+    private AgentRuntimeReadinessResponse? _configurationRuntime;
+    private readonly Dictionary<Guid, AgentRuntimeReadinessResponse> _runtimeStatuses = [];
+    private readonly Dictionary<string, object?> _configurationValues = new(StringComparer.Ordinal);
+    private readonly CancellationTokenSource _disposeCts = new();
+    private CancellationTokenSource? _configurationCts;
+    private CancellationTokenSource? _runtimeStatusCts;
+    private Guid? _managingRuntimeInstallationId;
+    private bool _runtimeConsoleOpen;
+    private bool _loadingRuntimeConsole;
+    private OrganizationUserResponse? _runtimeConsoleEmployee;
+    private IReadOnlyList<AgentRuntimeRunResponse> _runtimeRuns = [];
+    private string? _runtimeConsoleError;
+    private bool _configurationDialogOpen;
+    private bool _loadingConfiguration;
+    private bool _savingConfiguration;
+    private string? _configurationError;
+    private string? _configurationMessage;
+    private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+    private readonly DialogOptions _runtimeConsoleOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true };
+
+    private string ConfigurationLoadingMessage => _configurationRuntime?.Stage switch
+    {
+        AgentRuntimeReadinessStages.Queued => "Agent runtime queued...",
+        AgentRuntimeReadinessStages.StartingContainer => "Starting agent container...",
+        AgentRuntimeReadinessStages.WaitingForBroker => "Connecting agent to C-Sweet...",
+        AgentRuntimeReadinessStages.Stopping => "Cleaning up the previous runtime...",
+        AgentRuntimeReadinessStages.Ready => "Loading agent configuration...",
+        _ => "Preparing agent runtime..."
+    };
+
+    private IReadOnlyList<AgentChoice> AvailableAgents => _agentInstallations
+        .Where(x => x.IsEnabled)
+        .Select(x => new AgentChoice($"installation:{x.Id}", x.AgentName, x.AgentId, x.Id, x.GrantedCapabilities, true))
+        .OrderBy(x => x.Name)
+        .ToList();
 
     private IReadOnlyList<EmployeeGraphNode> GraphNodes => BuildGraph().Nodes;
 
@@ -139,6 +481,14 @@
             _employees = await Http.GetFromJsonAsync<IReadOnlyList<OrganizationUserResponse>>($"api/core/organizations/{OrganizationId}/users") ?? [];
             _roles = await Http.GetFromJsonAsync<IReadOnlyList<RoleResponse>>($"api/organizations/{OrganizationId}/roles") ?? [];
             _workers = await Http.GetFromJsonAsync<IReadOnlyList<WorkerResponse>>($"api/organizations/{OrganizationId}/workers") ?? [];
+            var catalogTask = AgentApi.ListAsync();
+            var installationsTask = AgentApi.ListInstallationsAsync();
+            var providersTask = LlmProviderApi.ListAsync();
+            await Task.WhenAll(catalogTask, installationsTask, providersTask);
+            _agentCatalog = await catalogTask;
+            _agentInstallations = await installationsTask;
+            _providerProfiles = await providersTask;
+            StartRuntimeStatusRefresh();
         }
         catch (Exception ex)
         {
@@ -229,6 +579,230 @@
         employee.EmployeeType == 1 &&
         !string.Equals(employee.DisplayName, "Self", StringComparison.OrdinalIgnoreCase);
 
+    private string RuntimeStatusLabel(OrganizationUserResponse employee) =>
+        RuntimeStatus(employee)?.Stage switch
+        {
+            AgentRuntimeReadinessStages.Ready => "Online",
+            AgentRuntimeReadinessStages.Queued => "Queued",
+            AgentRuntimeReadinessStages.StartingContainer => "Starting",
+            AgentRuntimeReadinessStages.WaitingForBroker => "Connecting",
+            AgentRuntimeReadinessStages.Stopping => "Stopping",
+            AgentRuntimeReadinessStages.Failed => "Failed",
+            AgentRuntimeReadinessStages.Offline => "Offline",
+            _ => "Checking"
+        };
+
+    private Color RuntimeStatusColor(OrganizationUserResponse employee) =>
+        RuntimeStatus(employee)?.Stage switch
+        {
+            AgentRuntimeReadinessStages.Ready => Color.Success,
+            AgentRuntimeReadinessStages.Queued or
+            AgentRuntimeReadinessStages.StartingContainer or
+            AgentRuntimeReadinessStages.WaitingForBroker or
+            AgentRuntimeReadinessStages.Stopping => Color.Info,
+            AgentRuntimeReadinessStages.Failed => Color.Error,
+            _ => Color.Default
+        };
+
+    private AgentRuntimeReadinessResponse? RuntimeStatus(OrganizationUserResponse employee) =>
+        employee.AgentInstallationId is { } installationId &&
+        _runtimeStatuses.TryGetValue(installationId, out var status)
+            ? status
+            : null;
+
+    private AgentInstallationResponse? Installation(OrganizationUserResponse employee) =>
+        employee.AgentInstallationId is { } installationId
+            ? _agentInstallations.FirstOrDefault(installation => installation.Id == installationId)
+            : null;
+
+    private bool IsManagingRuntime(OrganizationUserResponse employee) =>
+        employee.AgentInstallationId == _managingRuntimeInstallationId;
+
+    private bool CanStopRuntime(OrganizationUserResponse employee) =>
+        Installation(employee)?.IsEnabled == true &&
+        RuntimeStatus(employee)?.Stage is AgentRuntimeReadinessStages.Queued or
+            AgentRuntimeReadinessStages.StartingContainer or
+            AgentRuntimeReadinessStages.WaitingForBroker or
+            AgentRuntimeReadinessStages.Stopping or
+            AgentRuntimeReadinessStages.Ready;
+
+    private bool CanStartRuntime(OrganizationUserResponse employee) =>
+        employee.AgentInstallationId.HasValue &&
+        RuntimeStatus(employee)?.Stage is null or
+             AgentRuntimeReadinessStages.Offline or
+             AgentRuntimeReadinessStages.Failed;
+
+    private string RuntimeActionLabel(OrganizationUserResponse employee) =>
+        RuntimeStatus(employee)?.Stage == AgentRuntimeReadinessStages.Failed
+            ? "Retry"
+            : RuntimeStatus(employee)?.Stage == AgentRuntimeReadinessStages.Ready
+                ? Installation(employee)?.IsEnabled == false ? "Stopping" : "Running"
+                : RuntimeStatus(employee)?.Stage is AgentRuntimeReadinessStages.Queued or
+                    AgentRuntimeReadinessStages.StartingContainer or
+                    AgentRuntimeReadinessStages.WaitingForBroker or
+                    AgentRuntimeReadinessStages.Stopping
+                    ? Installation(employee)?.IsEnabled == false ? "Stopping" : "Starting"
+                    : "Start";
+
+    private string RuntimeActionIcon(OrganizationUserResponse employee) =>
+        RuntimeStatus(employee)?.Stage == AgentRuntimeReadinessStages.Failed
+            ? Icons.Material.Filled.Replay
+            : Icons.Material.Filled.PlayCircle;
+
+    private async Task StartRuntimeAsync(OrganizationUserResponse employee)
+    {
+        if (employee.AgentInstallationId is not Guid installationId)
+        {
+            return;
+        }
+
+        _managingRuntimeInstallationId = installationId;
+        _actionError = null;
+        try
+        {
+            var installation = Installation(employee);
+            if (installation?.IsEnabled == false)
+            {
+                var enabled = await AgentApi.EnableAsync(installationId, _disposeCts.Token);
+                _agentInstallations = _agentInstallations
+                    .Select(item => item.Id == enabled.Id ? enabled : item)
+                    .ToList();
+            }
+
+            _runtimeStatuses[installationId] = await AgentApi.EnsureRuntimeAsync(installationId, _disposeCts.Token);
+            StartRuntimeStatusRefresh();
+        }
+        catch (Exception exception)
+        {
+            _actionError = exception.Message;
+        }
+        finally
+        {
+            _managingRuntimeInstallationId = null;
+        }
+    }
+
+    private async Task StopRuntimeAsync(OrganizationUserResponse employee)
+    {
+        if (employee.AgentInstallationId is not Guid installationId)
+        {
+            return;
+        }
+
+        _managingRuntimeInstallationId = installationId;
+        _actionError = null;
+        try
+        {
+            var disabled = await AgentApi.DisableAsync(installationId, _disposeCts.Token);
+            _agentInstallations = _agentInstallations
+                .Select(item => item.Id == disabled.Id ? disabled : item)
+                .ToList();
+            StartRuntimeStatusRefresh();
+        }
+        catch (Exception exception)
+        {
+            _actionError = exception.Message;
+        }
+        finally
+        {
+            _managingRuntimeInstallationId = null;
+        }
+    }
+
+    private async Task OpenRuntimeConsoleAsync(OrganizationUserResponse employee)
+    {
+        _runtimeConsoleEmployee = employee;
+        _runtimeConsoleOpen = true;
+        await RefreshRuntimeConsoleAsync();
+    }
+
+    private async Task RefreshRuntimeConsoleAsync()
+    {
+        if (_runtimeConsoleEmployee?.AgentInstallationId is not Guid installationId)
+        {
+            return;
+        }
+
+        _loadingRuntimeConsole = true;
+        _runtimeConsoleError = null;
+        try
+        {
+            _runtimeRuns = await AgentApi.ListRunsAsync(installationId, _disposeCts.Token);
+        }
+        catch (Exception exception)
+        {
+            _runtimeConsoleError = exception.Message;
+        }
+        finally
+        {
+            _loadingRuntimeConsole = false;
+        }
+    }
+
+    private void CloseRuntimeConsole() => _runtimeConsoleOpen = false;
+
+    private static Severity RuntimeRunSeverity(string status) => status switch
+    {
+        "Completed" or "Running" => Severity.Success,
+        "Queued" or "Starting" or "WaitingForBrokerRegistration" => Severity.Info,
+        "Cancelled" => Severity.Warning,
+        _ => Severity.Error
+    };
+
+    private static string RuntimeEventLog(AgentRuntimeRunResponse run) =>
+        string.Join(Environment.NewLine, run.Events.Select(runtimeEvent =>
+            $"[{runtimeEvent.OccurredAt.LocalDateTime:yyyy-MM-dd HH:mm:ss}] {runtimeEvent.Status}: {runtimeEvent.Reason}"));
+
+    private void StartRuntimeStatusRefresh()
+    {
+        _runtimeStatusCts?.Cancel();
+        _runtimeStatusCts?.Dispose();
+        _runtimeStatusCts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+        _ = RefreshRuntimeStatusesAsync(_runtimeStatusCts.Token);
+    }
+
+    private async Task RefreshRuntimeStatusesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var installationIds = _employees
+                    .Where(IsChattableAgent)
+                    .Select(employee => employee.AgentInstallationId)
+                    .OfType<Guid>()
+                    .Distinct()
+                    .ToArray();
+                var statusTasks = installationIds.Select(async installationId =>
+                {
+                    try
+                    {
+                        var status = await AgentApi.GetRuntimeStatusAsync(installationId, cancellationToken);
+                        return (installationId, status);
+                    }
+                    catch when (!cancellationToken.IsCancellationRequested)
+                    {
+                        return (installationId, status: (AgentRuntimeReadinessResponse?)null);
+                    }
+                });
+
+                foreach (var (installationId, status) in await Task.WhenAll(statusTasks))
+                {
+                    if (status is not null)
+                    {
+                        _runtimeStatuses[installationId] = status;
+                    }
+                }
+
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
     private void OpenChat(OrganizationUserResponse employee)
     {
         if (IsChattableAgent(employee))
@@ -248,9 +822,370 @@
         };
     }
 
+    private void OpenHireDialog()
+    {
+        _hireName = string.Empty;
+        _hireEmail = null;
+        _hireEmployeeType = 1;
+        _hireAgentKey = null;
+        _hireManagerId = null;
+        _managedEmployeeIds.Clear();
+        _actionError = null;
+        _hireDialogOpen = true;
+    }
+
+    private void CloseHireDialog() => _hireDialogOpen = false;
+
+    private void SetManaged(Guid employeeId, bool value)
+    {
+        if (value)
+        {
+            _managedEmployeeIds.Add(employeeId);
+        }
+        else
+        {
+            _managedEmployeeIds.Remove(employeeId);
+        }
+    }
+
+    private async Task HireAsync()
+    {
+        _actionError = null;
+        if (string.IsNullOrWhiteSpace(_hireName))
+        {
+            _actionError = "Name is required.";
+            return;
+        }
+
+        if (_hireManagerId.HasValue && _managedEmployeeIds.Contains(_hireManagerId.Value))
+        {
+            _actionError = "The new employee cannot both manage and report to the same person.";
+            return;
+        }
+
+        if (_hireEmployeeType == 1 && string.IsNullOrWhiteSpace(_hireAgentKey))
+        {
+            _actionError = "Select an available agent.";
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            Guid? workerId = null;
+            if (_hireEmployeeType == 1)
+            {
+                workerId = await ResolveAgentWorkerAsync();
+                if (!workerId.HasValue)
+                {
+                    return;
+                }
+            }
+
+            var request = new CreateOrganizationUserRequest(
+                _hireName, _hireEmail, PermissionLevel: 0, EmployeeType: _hireEmployeeType,
+                WorkerId: workerId,
+                ReportsToOrganizationUserId: _hireManagerId,
+                ManagedOrganizationUserIds: _managedEmployeeIds.ToArray(),
+                AgentInstallationId: AvailableAgents.First(x => x.Key == _hireAgentKey).InstallationId);
+            var response = await Http.PostAsJsonAsync($"api/core/organizations/{OrganizationId}/users", request);
+            if (!response.IsSuccessStatusCode)
+            {
+                var failure = await response.Content.ReadFromJsonAsync<CoreActionResponse>();
+                _actionError = failure?.Message ?? "The employee could not be hired.";
+                return;
+            }
+
+            _hireDialogOpen = false;
+            await LoadEmployeesAsync();
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void OpenFireDialog(OrganizationUserResponse employee)
+    {
+        if (IsSelf(employee))
+        {
+            return;
+        }
+
+        _employeeToFire = employee;
+        _actionError = null;
+        _fireDialogOpen = true;
+    }
+
+    private void CloseFireDialog() => _fireDialogOpen = false;
+
+    private async Task FireAsync()
+    {
+        if (_employeeToFire is null || IsSelf(_employeeToFire))
+        {
+            return;
+        }
+
+        _saving = true;
+        _actionError = null;
+        try
+        {
+            var response = await Http.DeleteAsync($"api/core/organizations/{OrganizationId}/users/{_employeeToFire.Id}");
+            if (!response.IsSuccessStatusCode)
+            {
+                var failure = await response.Content.ReadFromJsonAsync<CoreActionResponse>();
+                _actionError = failure?.Message ?? "The employee could not be fired.";
+                return;
+            }
+
+            _fireDialogOpen = false;
+            _employeeToFire = null;
+            await LoadEmployeesAsync();
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static bool IsSelf(OrganizationUserResponse employee) =>
+        string.Equals(employee.DisplayName.Trim(), "Self", StringComparison.OrdinalIgnoreCase);
+
+    private async Task LoadEmployeesAsync()
+    {
+        _employees = await Http.GetFromJsonAsync<IReadOnlyList<OrganizationUserResponse>>($"api/core/organizations/{OrganizationId}/users") ?? [];
+        StartRuntimeStatusRefresh();
+    }
+
+    private async Task OpenConfigurationAsync(OrganizationUserResponse employee)
+    {
+        if (employee.AgentInstallationId is not Guid installationId)
+        {
+            _actionError = "This agent employee is not linked to an installation.";
+            return;
+        }
+
+        _configurationEmployee = employee;
+        _configurationDialogOpen = true;
+        _loadingConfiguration = true;
+        _configurationError = null;
+        _configurationMessage = null;
+        _configurationRuntime = null;
+        _configurationValues.Clear();
+        _configurationCts?.Cancel();
+        _configurationCts?.Dispose();
+        _configurationCts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+        _configurationCts.CancelAfter(TimeSpan.FromSeconds(90));
+        var cancellationToken = _configurationCts.Token;
+        try
+        {
+            _configurationRuntime = await AgentApi.EnsureRuntimeAsync(installationId, cancellationToken);
+            while (!_configurationRuntime.IsReady)
+            {
+                if (_configurationRuntime.IsTerminal)
+                {
+                    throw new InvalidOperationException(
+                        _configurationRuntime.Reason ?? "The agent runtime could not be started.");
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                _configurationRuntime = await AgentApi.GetRuntimeStatusAsync(installationId, cancellationToken);
+                StateHasChanged();
+            }
+
+            _configurationSchema = await AgentApi.GetConfigurationAsync(
+                installationId.ToString(),
+                cancellationToken);
+            foreach (var field in _configurationSchema.Fields)
+            {
+                _configurationValues[field.Key] = _configurationSchema.Settings.TryGetValue(field.Key, out var value)
+                    ? field.Type switch
+                    {
+                        AgentConfigurationFieldTypes.Boolean => value.ValueKind == JsonValueKind.True,
+                        AgentConfigurationFieldTypes.Number when value.TryGetDecimal(out var number) => number,
+                        _ => value.ValueKind == JsonValueKind.String ? value.GetString() : null
+                    }
+                    : null;
+            }
+        }
+        catch (OperationCanceledException) when (_configurationCts.IsCancellationRequested)
+        {
+            if (_configurationDialogOpen && !_disposeCts.IsCancellationRequested)
+            {
+                _configurationError = "The agent runtime did not become ready in time. Try again or review its run history.";
+            }
+            _configurationSchema = null;
+        }
+        catch (Exception exception)
+        {
+            _configurationError = exception.Message;
+            _configurationSchema = null;
+        }
+        finally
+        {
+            _loadingConfiguration = false;
+        }
+    }
+
+    private async Task SaveConfigurationAsync()
+    {
+        if (_configurationEmployee?.AgentInstallationId is not Guid installationId || _configurationSchema is null) return;
+        _savingConfiguration = true;
+        _configurationError = null;
+        _configurationMessage = null;
+        try
+        {
+            var settings = _configurationSchema.Fields.ToDictionary(
+                field => field.Key,
+                field => JsonSerializer.SerializeToElement(_configurationValues.GetValueOrDefault(field.Key), SerializerOptions),
+                StringComparer.Ordinal);
+            var result = await AgentApi.UpdateConfigurationAsync(
+                installationId.ToString(),
+                new UpdateAgentConfigurationRequest(settings)
+                {
+                    SchemaVersion = _configurationSchema.SchemaVersion
+                });
+            if (!result.Succeeded) throw new InvalidOperationException(result.Message ?? "The agent rejected its configuration.");
+            _configurationMessage = result.Message ?? "Agent instance configuration saved.";
+        }
+        catch (Exception exception)
+        {
+            _configurationError = exception.Message;
+        }
+        finally
+        {
+            _savingConfiguration = false;
+        }
+    }
+
+    private void CloseConfiguration()
+    {
+        _configurationDialogOpen = false;
+        _configurationCts?.Cancel();
+    }
+    private string ConfigurationString(string key) => _configurationValues.GetValueOrDefault(key)?.ToString() ?? string.Empty;
+    private bool ConfigurationBoolean(string key) => _configurationValues.GetValueOrDefault(key) is true;
+    private decimal? ConfigurationNumber(string key) => _configurationValues.GetValueOrDefault(key) as decimal?;
+    private void SetConfigurationValue(string key, object? value) => _configurationValues[key] = value;
+
+    private void SetProviderValue(string key, string value)
+    {
+        _configurationValues[key] = value;
+        if (_configurationSchema is null)
+        {
+            return;
+        }
+
+        foreach (var modelField in _configurationSchema.Fields.Where(field =>
+            field.Type == AgentConfigurationFieldTypes.LlmModel &&
+            string.Equals(ConfigurationProviderFieldKey(field), key, StringComparison.Ordinal)))
+        {
+            _configurationValues[modelField.Key] = FindProvider(value)?.DefaultChatModel ?? string.Empty;
+        }
+    }
+
+    private LlmProviderProfileResponse? ConfigurationProvider(AgentConfigurationField field) =>
+        FindProvider(ConfigurationString(ConfigurationProviderFieldKey(field)));
+
+    private string ConfigurationProviderFieldKey(AgentConfigurationField modelField) =>
+        !string.IsNullOrWhiteSpace(modelField.DependsOnFieldKey)
+            ? modelField.DependsOnFieldKey
+            : _configurationSchema?.Fields.FirstOrDefault(field =>
+                field.Type == AgentConfigurationFieldTypes.LlmProvider)?.Key ?? string.Empty;
+
+    private LlmProviderProfileResponse? FindProvider(string providerId) =>
+        Guid.TryParse(providerId, out var id)
+            ? _providerProfiles.FirstOrDefault(provider => provider.Id == id && provider.IsEnabled)
+            : null;
+
+    private async Task<Guid?> ResolveAgentWorkerAsync()
+    {
+        var choice = AvailableAgents.FirstOrDefault(x => x.Key == _hireAgentKey);
+        if (choice is null)
+        {
+            _actionError = "The selected agent is no longer available.";
+            return null;
+        }
+
+        var existing = _workers.FirstOrDefault(x =>
+            x.IsEnabled &&
+            (string.Equals(x.Name, choice.Name, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(x.Name, WithoutBrandPrefix(choice.Name), StringComparison.OrdinalIgnoreCase)));
+        if (existing is not null)
+        {
+            return existing.Id;
+        }
+
+        var endpointConfiguration = JsonSerializer.Serialize(new
+        {
+            agentId = choice.AgentId,
+            installationId = choice.InstallationId
+        });
+        var createWorker = new CreateWorkerRequest(
+            choice.Name,
+            $"Employee backed by the installed agent {choice.AgentId}.",
+            choice.IsInstallation ? 1 : 0,
+            choice.IsInstallation ? 1 : 0,
+            JsonSerializer.Serialize(choice.Capabilities),
+            null,
+            endpointConfiguration,
+            true,
+            false);
+        var response = await Http.PostAsJsonAsync($"api/organizations/{OrganizationId}/workers", createWorker);
+        if (!response.IsSuccessStatusCode)
+        {
+            var failure = await response.Content.ReadFromJsonAsync<CoreActionResponse>();
+            _actionError = failure?.Message ?? "The selected agent could not be prepared for hiring.";
+            return null;
+        }
+
+        var worker = await response.Content.ReadFromJsonAsync<WorkerResponse>();
+        if (worker is null)
+        {
+            _actionError = "The selected agent could not be prepared for hiring.";
+            return null;
+        }
+
+        _workers = _workers.Append(worker).ToList();
+        return worker.Id;
+    }
+
+    private static string WithoutBrandPrefix(string name) =>
+        name.StartsWith("C-Sweet ", StringComparison.OrdinalIgnoreCase)
+            ? name[8..]
+            : name.StartsWith("CSweet ", StringComparison.OrdinalIgnoreCase)
+                ? name[7..]
+                : name;
+
     private sealed record EmployeeGraph(IReadOnlyList<EmployeeGraphNode> Nodes, IReadOnlyList<EmployeeGraphEdge> Edges);
 
     private sealed record EmployeeGraphNode(OrganizationUserResponse Employee, int X, int Y);
 
     private sealed record EmployeeGraphEdge(EmployeeGraphNode From, EmployeeGraphNode To);
+
+    private sealed record AgentChoice(
+        string Key,
+        string Name,
+        string AgentId,
+        Guid? InstallationId,
+        IReadOnlyList<string> Capabilities,
+        bool IsInstallation);
+
+    public void Dispose()
+    {
+        _configurationCts?.Cancel();
+        _configurationCts?.Dispose();
+        _runtimeStatusCts?.Cancel();
+        _runtimeStatusCts?.Dispose();
+        _disposeCts.Cancel();
+        _disposeCts.Dispose();
+    }
 }

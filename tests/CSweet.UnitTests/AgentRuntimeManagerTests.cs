@@ -1,4 +1,5 @@
 using CSweet.Application.Setup;
+using CSweet.Contracts.Agents;
 using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Persistence;
 using CSweet.Infrastructure.Setup;
@@ -10,6 +11,91 @@ namespace CSweet.UnitTests;
 
 public sealed class AgentRuntimeManagerTests
 {
+    [Fact]
+    public async Task InteractiveEnsure_ReusesRuntimeAndBecomesReadyAfterBrokerRegistration()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        var containers = new FakeRunner();
+        var manager = CreateManager(db, containers);
+        var interactive = new AgentInteractiveRuntimeService(db, manager);
+
+        var starting = await interactive.EnsureReadyAsync(installation.Id);
+        var reused = await interactive.EnsureReadyAsync(installation.Id);
+
+        Assert.Equal(AgentRuntimeReadinessStages.WaitingForBroker, starting.Stage);
+        Assert.Equal(starting.RuntimeInstanceId, reused.RuntimeInstanceId);
+        Assert.Single(containers.Starts);
+        Assert.Single(await db.AgentRuntimeInstances.ToListAsync());
+
+        var request = Assert.Single(containers.Starts);
+        await new AgentRuntimeSignalService(db).RecordBrokerRegistrationAsync(
+            request.RuntimeInstanceId,
+            request.TickId,
+            request.InstallationId,
+            request.WorkloadToken);
+
+        var ready = await interactive.GetStatusAsync(installation.Id);
+
+        Assert.True(ready.IsReady);
+        Assert.Equal(AgentRuntimeReadinessStages.Ready, ready.Stage);
+
+        var runtime = await db.AgentRuntimeInstances.SingleAsync();
+        runtime.IdleDeadlineAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+        await db.SaveChangesAsync();
+
+        var reusedReady = await interactive.EnsureReadyAsync(installation.Id);
+
+        Assert.True(reusedReady.IsReady);
+        Assert.True(runtime.IdleDeadlineAt > DateTimeOffset.UtcNow);
+    }
+
+    [Fact]
+    public async Task InteractiveEnsure_AfterFailedRuntime_StartsFreshAttempt()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        var failed = new AgentRuntimeInstance
+        {
+            Id = Guid.NewGuid(),
+            TickId = Guid.NewGuid(),
+            AgentInstallationId = installation.Id,
+            QueuedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        };
+        failed.TransitionTo(AgentRuntimeStatus.Failed, DateTimeOffset.UtcNow.AddMinutes(-1), "Missing Docker network.");
+        db.AgentRuntimeInstances.Add(failed);
+        await db.SaveChangesAsync();
+        var containers = new FakeRunner();
+
+        var readiness = await new AgentInteractiveRuntimeService(
+            db,
+            CreateManager(db, containers)).EnsureReadyAsync(installation.Id);
+
+        Assert.Equal(AgentRuntimeReadinessStages.WaitingForBroker, readiness.Stage);
+        Assert.NotEqual(failed.Id, readiness.RuntimeInstanceId);
+        Assert.Single(containers.Starts);
+        Assert.Equal(2, await db.AgentRuntimeInstances.CountAsync());
+    }
+
+    [Fact]
+    public async Task AlwaysOnReconciliation_StartsOneMissingRuntime()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        installation.Schedule!.ActivationMode = ActivationMode.AlwaysOn;
+        installation.Schedule.NextTickAt = null;
+        await db.SaveChangesAsync();
+        var containers = new FakeRunner();
+        var manager = CreateManager(db, containers);
+
+        Assert.Equal(1, await manager.EnsureAlwaysOnRuntimesAsync());
+        Assert.Equal(0, await manager.EnsureAlwaysOnRuntimesAsync());
+        await manager.ReconcileAsync();
+
+        Assert.Single(containers.Starts);
+        Assert.Single(await db.AgentRuntimeInstances.ToListAsync());
+    }
+
     [Fact]
     public async Task DuePeriodicSchedule_StartsOneRuntimeAndSchedulesNextTick()
     {
@@ -58,8 +144,83 @@ public sealed class AgentRuntimeManagerTests
         await manager.ProcessDueSchedulesAsync();
         await manager.ReconcileAsync();
 
-        Assert.Contains(await db.AgentRuntimeInstances.ToListAsync(), x => x.AgentInstallationId == installation.Id && x.Status == AgentRuntimeStatus.Queued);
+        var queued = Assert.Single(
+            await db.AgentRuntimeInstances
+                .Where(x => x.AgentInstallationId == installation.Id && x.Status == AgentRuntimeStatus.Queued)
+                .ToListAsync());
+        Assert.Contains("global 1/1", queued.Reason);
         Assert.Empty(containers.Starts);
+    }
+
+    [Fact]
+    public async Task ApprovedPackageBuild_KeepsRuntimeQueuedUntilBuildSucceeds()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db);
+        var package = installation.PackageVersion!;
+        package.Status = AgentPackageVersionStatus.Approved;
+        package.PackagePath = null;
+        var build = new AgentBuildJob
+        {
+            Id = Guid.NewGuid(),
+            PackageVersionId = package.Id,
+            Attempt = 1,
+            QueuedAt = DateTimeOffset.UtcNow
+        };
+        package.BuildJobs.Add(build);
+        db.AgentBuildJobs.Add(build);
+        await db.SaveChangesAsync();
+        var containers = new FakeRunner();
+        var manager = CreateManager(db, containers);
+
+        await manager.ProcessDueSchedulesAsync();
+        await manager.ReconcileAsync();
+
+        var runtime = await db.AgentRuntimeInstances.SingleAsync();
+        Assert.Equal(AgentRuntimeStatus.Queued, runtime.Status);
+        Assert.Empty(containers.Starts);
+
+        build.TransitionTo(AgentBuildStatus.Cloning, DateTimeOffset.UtcNow);
+        build.TransitionTo(AgentBuildStatus.Building, DateTimeOffset.UtcNow);
+        build.TransitionTo(AgentBuildStatus.Succeeded, DateTimeOffset.UtcNow);
+        package.Status = AgentPackageVersionStatus.Built;
+        package.PackagePath = "C:\\packages\\agent";
+        await db.SaveChangesAsync();
+
+        await manager.ReconcileAsync();
+
+        Assert.Equal(AgentRuntimeStatus.WaitingForBrokerRegistration, runtime.Status);
+        Assert.Single(containers.Starts);
+    }
+
+    [Fact]
+    public async Task FailedPackageBuild_FailsRuntimeInsteadOfReportingPolicyDenied()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db);
+        var package = installation.PackageVersion!;
+        package.Status = AgentPackageVersionStatus.Failed;
+        package.PackagePath = null;
+        var build = new AgentBuildJob
+        {
+            Id = Guid.NewGuid(),
+            PackageVersionId = package.Id,
+            Attempt = 1,
+            QueuedAt = DateTimeOffset.UtcNow,
+            FailureMessage = "Compilation failed."
+        };
+        build.TransitionTo(AgentBuildStatus.Failed, DateTimeOffset.UtcNow);
+        package.BuildJobs.Add(build);
+        db.AgentBuildJobs.Add(build);
+        await db.SaveChangesAsync();
+        var manager = CreateManager(db, new FakeRunner());
+
+        await manager.ProcessDueSchedulesAsync();
+        await manager.ReconcileAsync();
+
+        var runtime = await db.AgentRuntimeInstances.SingleAsync();
+        Assert.Equal(AgentRuntimeStatus.Failed, runtime.Status);
+        Assert.Contains("Compilation failed", runtime.Reason);
     }
 
     [Fact]
@@ -101,6 +262,131 @@ public sealed class AgentRuntimeManagerTests
         Assert.Single(containers.Stops);
     }
 
+    [Fact]
+    public async Task InterruptedStoppingRuntime_IsRecoveredAndReleasesInstallationSlot()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        var stoppedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var runtime = RunningInstance(installation.Id);
+        runtime.ContainerId = "missing-container";
+        runtime.TransitionTo(AgentRuntimeStatus.Stopping, stoppedAt, "Broker registration timed out.");
+        runtime.Events.Add(new AgentRuntimeEvent
+        {
+            Id = Guid.NewGuid(),
+            AgentRuntimeInstanceId = runtime.Id,
+            Status = AgentRuntimeStatus.Stopping,
+            Reason = runtime.Reason,
+            OccurredAt = stoppedAt
+        });
+        db.AgentRuntimeInstances.Add(runtime);
+        await db.SaveChangesAsync();
+        var containers = new FakeRunner { InspectStatus = null };
+        var manager = CreateManager(db, containers);
+
+        await manager.ReconcileAsync();
+
+        Assert.Equal(AgentRuntimeStatus.Failed, runtime.Status);
+        Assert.Null(runtime.ContainerId);
+        Assert.Contains("fresh attempt", runtime.Reason);
+        Assert.True(await manager.EnsureRuntimeQueuedAsync(installation.Id, "Retry chat.", interactive: true));
+    }
+
+    [Fact]
+    public async Task InterruptedStartingRuntimeWithoutContainer_FailsAndReleasesInstallationSlot()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        var startedAt = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var runtime = new AgentRuntimeInstance
+        {
+            Id = Guid.NewGuid(),
+            TickId = Guid.NewGuid(),
+            AgentInstallationId = installation.Id,
+            ContainerName = $"csweet-agent-{Guid.NewGuid():N}",
+            QueuedAt = startedAt
+        };
+        runtime.TransitionTo(AgentRuntimeStatus.Starting, startedAt, "Starting runtime container.");
+        runtime.Events.Add(new AgentRuntimeEvent
+        {
+            Id = Guid.NewGuid(),
+            AgentRuntimeInstanceId = runtime.Id,
+            Status = AgentRuntimeStatus.Starting,
+            Reason = runtime.Reason,
+            OccurredAt = startedAt
+        });
+        db.AgentRuntimeInstances.Add(runtime);
+        await db.SaveChangesAsync();
+        var manager = CreateManager(db, new FakeRunner { InspectStatus = null });
+
+        await manager.ReconcileAsync();
+
+        Assert.Equal(AgentRuntimeStatus.StartFailed, runtime.Status);
+        Assert.Contains("interrupted", runtime.Reason);
+        Assert.True(await manager.EnsureRuntimeQueuedAsync(installation.Id, "Retry chat.", interactive: true));
+    }
+
+    [Fact]
+    public async Task InteractiveRuntime_RefreshesIdleDeadlineAndStopsAfterExpiry()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        var containers = new FakeRunner();
+        var manager = CreateManager(db, containers);
+        await manager.EnsureRuntimeQueuedAsync(installation.Id, "Interactive request.", interactive: true);
+        var runtime = await db.AgentRuntimeInstances.SingleAsync();
+        runtime.IdleDeadlineAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await db.SaveChangesAsync();
+
+        Assert.False(await manager.EnsureRuntimeQueuedAsync(installation.Id, "Interactive reuse.", interactive: true));
+        Assert.True(runtime.IdleDeadlineAt > DateTimeOffset.UtcNow);
+
+        runtime.ContainerId = "container-id";
+        runtime.TransitionTo(AgentRuntimeStatus.Starting, DateTimeOffset.UtcNow);
+        runtime.TransitionTo(AgentRuntimeStatus.WaitingForBrokerRegistration, DateTimeOffset.UtcNow);
+        runtime.TransitionTo(AgentRuntimeStatus.Running, DateTimeOffset.UtcNow);
+        runtime.IdleDeadlineAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+        await db.SaveChangesAsync();
+
+        await manager.ReconcileAsync();
+
+        Assert.Equal(AgentRuntimeStatus.Cancelled, runtime.Status);
+        Assert.Single(containers.Stops);
+    }
+
+    [Fact]
+    public async Task AlwaysOnInteractiveRuntime_HasNoIdleDeadline()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        installation.Schedule!.ActivationMode = ActivationMode.AlwaysOn;
+        await db.SaveChangesAsync();
+
+        await CreateManager(db, new FakeRunner()).EnsureRuntimeQueuedAsync(
+            installation.Id,
+            "Interactive request.",
+            interactive: true);
+
+        var runtime = await db.AgentRuntimeInstances.SingleAsync();
+        Assert.True(runtime.IsInteractive);
+        Assert.NotNull(runtime.LastInteractiveActivityAt);
+        Assert.Null(runtime.IdleDeadlineAt);
+    }
+
+    [Fact]
+    public void RuntimeModel_HasUniqueActiveInstallationIndex()
+    {
+        using var db = CreateDb();
+
+        var index = db.Model.FindEntityType(typeof(AgentRuntimeInstance))!
+            .GetIndexes()
+            .Single(index => index.GetDatabaseName() == "UX_AgentRuntimeInstances_ActiveInstallation");
+
+        Assert.True(index.IsUnique);
+        Assert.Contains("'Queued'", index.GetFilter());
+        Assert.Contains("'Stopping'", index.GetFilter());
+    }
+
     private static AgentRuntimeManager CreateManager(CSweetDbContext db, IAgentContainerRunner runner) =>
         new(db, runner, new TestAuditEventWriter(), Options.Create(new AgentRuntimeManagerOptions { BrokerEndpoint = "http://broker:8080", DockerNetworkName = "broker-only" }), NullLogger<AgentRuntimeManager>.Instance);
 
@@ -131,12 +417,13 @@ public sealed class AgentRuntimeManagerTests
 
     private sealed class FakeRunner : IAgentContainerRunner
     {
+        public AgentContainerStatus? InspectStatus { get; init; } = new("container-id", "agent", AgentContainerState.Running, null, null, null, null);
         public List<AgentContainerStartRequest> Starts { get; } = [];
         public List<string> Stops { get; } = [];
         public List<string> Removes { get; } = [];
         public Task<AgentContainerStatus> StartAsync(AgentContainerStartRequest request, CancellationToken cancellationToken = default) { Starts.Add(request); return Task.FromResult(new AgentContainerStatus("container-id", request.ContainerName, AgentContainerState.Running, null, DateTimeOffset.UtcNow, null, null)); }
         public Task StopAsync(string containerId, TimeSpan gracePeriod, CancellationToken cancellationToken = default) { Stops.Add(containerId); return Task.CompletedTask; }
-        public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default) => Task.FromResult<AgentContainerStatus?>(new AgentContainerStatus(containerId, "agent", AgentContainerState.Running, null, null, null, null));
+        public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default) => Task.FromResult(InspectStatus);
         public Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default) { Removes.Add(containerId); return Task.CompletedTask; }
         public Task<string> GetLogsAsync(string containerId, int maximumBytes, CancellationToken cancellationToken = default) => Task.FromResult(string.Empty);
     }

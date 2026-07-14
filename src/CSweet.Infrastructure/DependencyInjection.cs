@@ -41,15 +41,24 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentRuntimeSettingsService, AgentRuntimeSettingsService>();
         builder.Services.AddScoped<IAgentImportPreviewService, AgentImportPreviewService>();
         builder.Services.AddScoped<IAgentInstallationService, AgentInstallationService>();
+        builder.Services.AddScoped<IAgentInstallationConfigurationService, AgentInstallationConfigurationService>();
         builder.Services.AddScoped<IAgentBuildService, AgentBuildService>();
         builder.Services.AddSingleton<IAgentBuildExecutor, DockerAgentBuildExecutor>();
         builder.Services.AddSingleton<IDockerCommandExecutor, DockerCommandExecutor>();
         builder.Services.AddSingleton<IAgentContainerRunner, DockerAgentContainerRunner>();
         builder.Services.AddScoped<IAgentRuntimeManager, AgentRuntimeManager>();
+        builder.Services.AddScoped<IAgentInteractiveRuntimeService, AgentInteractiveRuntimeService>();
         builder.Services.AddScoped<IAgentRuntimeSignalService, AgentRuntimeSignalService>();
         builder.Services.AddScoped<IAgentRuntimeCleanupService, AgentRuntimeCleanupService>();
         builder.Services.AddOptions<AgentRuntimeManagerOptions>()
-            .Bind(builder.Configuration.GetSection(AgentRuntimeManagerOptions.SectionName));
+            .Bind(builder.Configuration.GetSection(AgentRuntimeManagerOptions.SectionName))
+            .PostConfigure(options =>
+            {
+                options.BrokerEndpoint = AgentRuntimeManagerOptions.ResolveBrokerEndpoint(
+                    options.BrokerEndpoint,
+                    builder.Configuration["services:agenthost:http:0"],
+                    builder.Configuration["services:agenthost:https:0"]);
+            });
         builder.Services.AddHttpClient<IGitHubAgentRepositoryClient, GitHubAgentRepositoryClient>(client =>
         {
             client.BaseAddress = new Uri("https://api.github.com/");

@@ -461,6 +461,18 @@ code {
     margin-top: 0.75rem;
 }
 
+.employee-fire-button {
+    margin-top: 0.75rem;
+}
+
+.employee-management-picker {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: 15rem;
+    overflow-y: auto;
+    padding: 0.25rem 0;
+}
+
 .chat-page {
     max-width: 1040px;
 }
@@ -698,6 +710,157 @@ code {
     padding-top: 0.5rem;
 }
 
+.agent-import-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.agent-import-dialog-content {
+    display: grid;
+    gap: 1rem;
+    min-height: 30rem;
+}
+
+.agent-import-source-card {
+    display: grid;
+    gap: 1rem;
+    width: min(100%, 46rem);
+    margin: 2rem auto;
+    padding: 2rem;
+    border: 1px solid #dce5eb;
+    border-radius: 0.75rem;
+    background: linear-gradient(180deg, #f8fbfc 0%, #fff 45%);
+}
+
+.agent-import-source-icon {
+    padding: 0.65rem;
+    border-radius: 0.65rem;
+    background: #e7f3f5;
+}
+
+.agent-import-hero {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid #dce5eb;
+    border-radius: 0.75rem;
+    background: #f8fbfc;
+}
+
+.agent-import-avatar {
+    display: grid;
+    place-items: center;
+    width: 3rem;
+    height: 3rem;
+    border-radius: 0.75rem;
+    background: #173f46;
+    color: #fff;
+}
+
+.agent-import-identity {
+    min-width: 0;
+}
+
+.agent-import-status-chips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.agent-import-prerequisite {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.8rem 1rem;
+    border: 1px solid #e5b94f;
+    border-radius: 0.65rem;
+    background: #fff9e9;
+}
+
+.agent-import-tabs {
+    min-height: 25rem;
+    border: 1px solid #dce5eb;
+    border-radius: 0.75rem;
+    overflow: hidden;
+}
+
+.agent-import-tab-content {
+    display: grid;
+    gap: 1rem;
+    max-height: 25rem;
+    overflow-y: auto;
+    padding: 1rem;
+}
+
+.agent-import-facts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.agent-import-facts > div {
+    display: grid;
+    gap: 0.15rem;
+    min-width: 0;
+    padding: 0.85rem;
+    border: 1px solid #e2e8ec;
+    border-radius: 0.6rem;
+    background: #fff;
+}
+
+.agent-import-facts span,
+.agent-import-facts small {
+    color: #667681;
+}
+
+.agent-import-technical-details {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0;
+}
+
+.agent-import-technical-details > div {
+    display: grid;
+    grid-template-columns: 9rem minmax(0, 1fr);
+    gap: 1rem;
+}
+
+.agent-import-technical-details dt {
+    color: #667681;
+    font-weight: 600;
+}
+
+.agent-import-technical-details dd {
+    min-width: 0;
+    margin: 0;
+}
+
+.agent-import-access-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+}
+
+.agent-import-access-grid .agent-import-values-section {
+    padding: 0.9rem;
+    border: 1px solid #e2e8ec;
+    border-radius: 0.6rem;
+}
+
+.agent-import-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.agent-import-form-grid-three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .agent-import-values {
     display: flex;
     flex-wrap: wrap;
@@ -748,6 +911,26 @@ code {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
     gap: 0.25rem 1rem;
+}
+
+@media (max-width: 800px) {
+    .agent-import-hero,
+    .agent-import-prerequisite {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .agent-import-status-chips,
+    .agent-import-prerequisite .mud-button-root {
+        grid-column: 1 / -1;
+        justify-self: start;
+    }
+
+    .agent-import-facts,
+    .agent-import-access-grid,
+    .agent-import-form-grid,
+    .agent-import-form-grid-three {
+        grid-template-columns: 1fr;
+    }
 }
 
 .llm-provider-header-actions {

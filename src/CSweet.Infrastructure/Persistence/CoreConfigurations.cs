@@ -49,6 +49,13 @@ internal static class CoreConfigurations
             .WithMany()
             .HasForeignKey(x => x.WorkerId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        entity.HasOne(x => x.AgentInstallation)
+            .WithMany()
+            .HasForeignKey(x => x.AgentInstallationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        entity.HasIndex(x => x.AgentInstallationId);
     }
 
     static void ConfigureCoreOrganization(EntityTypeBuilder<Organization> entity)

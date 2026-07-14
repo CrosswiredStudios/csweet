@@ -35,6 +35,10 @@ public interface IAgentApiClient
         Guid installationId,
         CancellationToken cancellationToken = default);
 
+    Task<RemoveAgentInstallationResponse> RemoveAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<AgentRuntimeRunResponse>> ListRunsAsync(
         Guid installationId,
         CancellationToken cancellationToken = default);
@@ -43,12 +47,20 @@ public interface IAgentApiClient
         Guid installationId,
         CancellationToken cancellationToken = default);
 
+    Task<AgentRuntimeReadinessResponse> EnsureRuntimeAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default);
+
+    Task<AgentRuntimeReadinessResponse> GetRuntimeStatusAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default);
+
     Task<AgentConfigurationSchemaResponse> GetConfigurationAsync(
-        string agentId,
+        string installationId,
         CancellationToken cancellationToken = default);
 
     Task<AgentConfigurationUpdateResponse> UpdateConfigurationAsync(
-        string agentId,
+        string installationId,
         UpdateAgentConfigurationRequest request,
         CancellationToken cancellationToken = default);
 }

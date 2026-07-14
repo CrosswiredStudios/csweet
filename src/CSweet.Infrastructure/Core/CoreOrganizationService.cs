@@ -62,7 +62,7 @@ public sealed class CoreOrganizationService : ICoreOrganizationService
 
         // Seed default roles for new organization
         await _roleService.EnsureDefaultsAsync(org.Id, cancellationToken);
-        await SeedFoundingEmployeesAsync(org.Id, request.ConstraintsJson, cancellationToken);
+        await SeedOwnerAsync(org.Id, cancellationToken);
 
         await _auditEventWriter.WriteAsync(
             "organization.created",
@@ -136,7 +136,7 @@ public sealed class CoreOrganizationService : ICoreOrganizationService
 
     static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private async Task SeedFoundingEmployeesAsync(Guid organizationId, string? assistantContextJson, CancellationToken cancellationToken)
+    private async Task SeedOwnerAsync(Guid organizationId, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var ceoRoleId = await _dbContext.CoreRoles
@@ -155,37 +155,7 @@ public sealed class CoreOrganizationService : ICoreOrganizationService
             CreatedAt = now
         };
 
-        var assistantWorker = new Worker
-        {
-            Id = Guid.NewGuid(),
-            OrganizationId = organizationId,
-            Name = "Personal Assistant",
-            Description = "Dedicated personal assistant agent for the organization's CEO.",
-            WorkerType = WorkerType.LocalAgent,
-            ExecutionMode = WorkerExecutionMode.InProcess,
-            CapabilitiesJson = "[\"personal-assistant\",\"chief-of-staff\",\"coordination\",\"executive-support\"]",
-            EndpointConfigurationJson = TrimOrNull(assistantContextJson),
-            IsEnabled = true,
-            RequiresHumanApproval = true,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-
-        var assistant = new OrganizationUser
-        {
-            Id = Guid.NewGuid(),
-            OrganizationId = organizationId,
-            ReportsToOrganizationUserId = ceo.Id,
-            WorkerId = assistantWorker.Id,
-            DisplayName = "Personal Assistant",
-            EmployeeType = EmployeeType.Agent,
-            PermissionLevel = OrganizationPermissionLevel.Contributor,
-            CreatedAt = now
-        };
-
         _dbContext.CoreOrganizationUsers.Add(ceo);
-        _dbContext.CoreWorkers.Add(assistantWorker);
-        _dbContext.CoreOrganizationUsers.Add(assistant);
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 

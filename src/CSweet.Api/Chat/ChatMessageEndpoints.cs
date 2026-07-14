@@ -3,8 +3,11 @@ using System.Text.Json;
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
 using CSweet.Application.Core;
+using CSweet.Application.Setup;
+using CSweet.Contracts.Agents;
 using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
+using CSweet.Domain.Setup;
 using Google.Protobuf;
 
 namespace CSweet.Api.Chat;
@@ -30,6 +33,8 @@ public static class ChatMessageEndpoints
         HttpContext http,
         IConversationService conversations,
         IAgentBrokerClient broker,
+        IAgentInteractiveRuntimeService interactiveRuntime,
+        IAgentInstallationConfigurationService configurations,
         IChatStreamRouter router,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -60,7 +65,27 @@ public static class ChatMessageEndpoints
             return;
         }
 
-        var providerId = await conversations.GetDefaultProviderProfileIdAsync(cancellationToken);
+        var agentInstallationId = await conversations.GetAgentInstallationIdAsync(conversationId, cancellationToken);
+        if (agentInstallationId is null)
+        {
+            logger.LogWarning(
+                "Rejected chat message for conversation {ConversationId}: the agent employee has no installation.",
+                conversationId);
+            http.Response.StatusCode = StatusCodes.Status409Conflict;
+            await http.Response.WriteAsJsonAsync(
+                new { error = "This agent employee is not linked to an imported agent installation." },
+                cancellationToken);
+            return;
+        }
+
+        var persistedConfiguration = await configurations.GetAsync(
+            agentInstallationId.Value,
+            cancellationToken);
+        var configuredProviderId = GetConfiguredProviderId(persistedConfiguration);
+        var providerId = configuredProviderId.HasValue &&
+            await conversations.IsProviderProfileEnabledAsync(configuredProviderId.Value, cancellationToken)
+                ? configuredProviderId
+                : await conversations.GetDefaultProviderProfileIdAsync(cancellationToken);
         if (providerId is null)
         {
             logger.LogWarning(
@@ -72,6 +97,44 @@ public static class ChatMessageEndpoints
                 new { error = "No enabled LLM provider is configured. Finish setup first." },
                 cancellationToken);
             return;
+        }
+
+        AgentRuntimeReadinessResponse readiness;
+        try
+        {
+            readiness = await interactiveRuntime.EnsureReadyAsync(agentInstallationId.Value, cancellationToken);
+        }
+        catch (AgentInstallationException exception)
+        {
+            http.Response.StatusCode = StatusCodes.Status409Conflict;
+            await http.Response.WriteAsJsonAsync(new { error = exception.Message }, cancellationToken);
+            return;
+        }
+
+        if (!readiness.IsReady)
+        {
+            http.Response.StatusCode = StatusCodes.Status409Conflict;
+            await http.Response.WriteAsJsonAsync(
+                new { error = "The agent runtime is still starting.", runtime = readiness },
+                cancellationToken);
+            return;
+        }
+
+        if (persistedConfiguration is not null)
+        {
+            var hydration = await InvokeConfigurationUpdateAsync(
+                broker,
+                agentInstallationId.Value,
+                persistedConfiguration,
+                cancellationToken);
+            if (!hydration.Succeeded)
+            {
+                http.Response.StatusCode = StatusCodes.Status409Conflict;
+                await http.Response.WriteAsJsonAsync(
+                    new { error = hydration.Error ?? "The saved agent configuration could not be applied." },
+                    cancellationToken);
+                return;
+            }
         }
 
         logger.LogInformation(
@@ -104,16 +167,16 @@ public static class ChatMessageEndpoints
         // Store or route by the concrete target agent id before adding a second chat-capable agent.
         logger.LogInformation(
             "Publishing user message event {EventType} for conversation {ConversationId} with correlation {CorrelationId}.",
-            PersonalAssistantChatEvents.UserMessageReceivedEvent,
+            AgentChatEvents.UserMessageReceivedEvent,
             conversationId,
             conversationId);
 
         await broker.PublishEventAsync(
             new PublishEvent
             {
-                EventType = PersonalAssistantChatEvents.UserMessageReceivedEvent,
+                EventType = AgentChatEvents.UserMessageReceivedEvent,
                 SchemaVersion = "1",
-                Subject = $"conversation/{conversationId}",
+                Subject = $"agent-installation/{agentInstallationId}/conversation/{conversationId}",
                 ContentType = "application/json",
                 Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(payload, SerializerOptions))
             },
@@ -230,5 +293,41 @@ public static class ChatMessageEndpoints
 
         await http.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
         await http.Response.Body.FlushAsync(cancellationToken);
+    }
+
+    private static Guid? GetConfiguredProviderId(
+        AgentInstallationConfigurationSnapshot? configuration)
+    {
+        if (configuration?.Settings.TryGetValue("llmProviderId", out var value) != true ||
+            value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return Guid.TryParse(value.GetString(), out var providerId) ? providerId : null;
+    }
+
+    private static async Task<CapabilityResult> InvokeConfigurationUpdateAsync(
+        IAgentBrokerClient broker,
+        Guid installationId,
+        AgentInstallationConfigurationSnapshot configuration,
+        CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        var request = new CSweet.Contracts.Agents.UpdateAgentConfigurationRequest(configuration.Settings)
+        {
+            SchemaVersion = configuration.SchemaVersion
+        };
+        return await broker.InvokeCapabilityAsync(
+            new RequestCapability
+            {
+                Capability = CSweet.Contracts.Agents.AgentConfigurationCapabilities.Update,
+                TargetAgentId = $"installation:{installationId}",
+                ContentType = "application/json",
+                Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(request, SerializerOptions))
+            },
+            Guid.NewGuid().ToString("N"),
+            timeout.Token);
     }
 }

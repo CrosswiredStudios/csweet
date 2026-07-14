@@ -1,6 +1,4 @@
 @page "/organizations"
-@using System.Text.Json
-@using System.Text.Json.Nodes
 @using CSweet.Contracts.Core
 @using Microsoft.JSInterop
 @inject IOrganizationApiClient OrganizationApi
@@ -101,72 +99,15 @@
                         </div>
                     </div>
                 </MudStep>
-                <MudStep Title="Personal Assistant" SecondaryText="Avatar and demeanor" Completed="@IsAssistantComplete">
-                    <div class="business-wizard-panel">
-                        <MudText Typo="Typo.h6">Personal assistant</MudText>
-                        <MudText Typo="Typo.body2" Color="Color.Secondary">Choose the assistant presence people will meet first in this business workspace.</MudText>
-
-                        <div class="assistant-selection-section">
-                            <MudText Typo="Typo.subtitle2">Assistant avatar</MudText>
-                            <MudRadioGroup T="string" @bind-Value="_assistantAvatar" Class="assistant-option-grid">
-                                @foreach (var avatar in AssistantAvatars)
-                                {
-                                    <MudRadio T="string" Value="@avatar.Value" Color="Color.Primary" Class="assistant-option-card">
-                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                                            <MudAvatar Color="@avatar.Color" Variant="Variant.Filled" Size="Size.Large">
-                                                <MudIcon Icon="@avatar.Icon" />
-                                            </MudAvatar>
-                                            <div>
-                                                <MudText Typo="Typo.subtitle2">@avatar.Name</MudText>
-                                                <MudText Typo="Typo.caption" Color="Color.Secondary">@avatar.Description</MudText>
-                                            </div>
-                                        </MudStack>
-                                    </MudRadio>
-                                }
-                            </MudRadioGroup>
-                        </div>
-
-                        <div class="assistant-selection-section">
-                            <MudText Typo="Typo.subtitle2">Behavioral demeanor</MudText>
-                            <MudRadioGroup T="string" @bind-Value="_assistantDemeanor" Class="assistant-option-grid assistant-demeanor-grid">
-                                @foreach (var demeanor in AssistantDemeanors)
-                                {
-                                    <MudRadio T="string" Value="@demeanor.Value" Color="Color.Primary" Class="assistant-option-card">
-                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                                            <MudIcon Icon="@demeanor.Icon" Color="@demeanor.Color" />
-                                            <div>
-                                                <MudText Typo="Typo.subtitle2">@demeanor.Name</MudText>
-                                                <MudText Typo="Typo.caption" Color="Color.Secondary">@demeanor.Description</MudText>
-                                            </div>
-                                        </MudStack>
-                                    </MudRadio>
-                                }
-                            </MudRadioGroup>
-                        </div>
-                    </div>
-                </MudStep>
             </ChildContent>
             <ActionContent></ActionContent>
         </MudStepper>
     </DialogContent>
     <DialogActions>
         <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="HideForm">Cancel</MudButton>
-        @if (_wizardStep > 0)
-        {
-            <MudButton Variant="Variant.Text" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="PreviousWizardStep">Back</MudButton>
-        }
-        @if (_wizardStep == 0)
-        {
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" EndIcon="@Icons.Material.Filled.ArrowForward" OnClick="NextWizardStep" Disabled="@(!IsBasicInfoComplete)">
-                Continue
-            </MudButton>
-        }
-        else
-        {
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" Disabled="@(_saving || !IsBasicInfoComplete || !IsAssistantComplete)">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" Disabled="@(_saving || !IsBasicInfoComplete)">
             @(_saving ? "Saving..." : "Save")
         </MudButton>
-        }
     </DialogActions>
 </MudDialog>
 
@@ -177,7 +118,6 @@
     private bool _saving = false;
     private int _wizardStep;
     private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private static readonly string[] OrganizationStages =
     [
@@ -189,21 +129,6 @@
         "Mature"
     ];
 
-    private static readonly AssistantAvatarOption[] AssistantAvatars =
-    [
-        new("strategist", "Strategist", "Calm planning partner for prioritization and tradeoffs.", Icons.Material.Filled.Psychology, Color.Primary),
-        new("operator", "Operator", "Execution-minded assistant for cadence, owners, and follow-through.", Icons.Material.Filled.AccountTree, Color.Secondary),
-        new("builder", "Builder", "Hands-on partner for shaping offers, workflows, and deliverables.", Icons.Material.Filled.Construction, Color.Tertiary),
-        new("advisor", "Advisor", "Direct counsel for decisions, risks, and leadership judgment.", Icons.Material.Filled.RecordVoiceOver, Color.Info)
-    ];
-
-    private static readonly AssistantDemeanorOption[] AssistantDemeanors =
-    [
-        new("Careful and precise", "Careful and precise", "Deliberate, evidence-oriented, and slow to overreach.", Icons.Material.Filled.FactCheck, Color.Success),
-        new("Balanced and practical", "Balanced and practical", "Plainspoken, pragmatic, and comfortable making tradeoffs.", Icons.Material.Filled.Balance, Color.Primary),
-        new("Bold and direct", "Bold and direct", "Concise, decisive, and biased toward visible momentum.", Icons.Material.Filled.Bolt, Color.Warning),
-        new("Creative and experimental", "Creative and experimental", "Exploratory, option-rich, and willing to test unusual angles.", Icons.Material.Filled.AutoAwesome, Color.Secondary)
-    ];
 
     private OrganizationResponse? _editingOrg;
     private string _formName = string.Empty;
@@ -212,14 +137,8 @@
     private string _formStage = string.Empty;
     private string _formPrimaryGoal = string.Empty;
     private string _formConstraintsJson = string.Empty;
-    private string _assistantAvatar = AssistantAvatars[0].Value;
-    private string _assistantDemeanor = AssistantDemeanors[1].Value;
 
     private bool IsBasicInfoComplete => !string.IsNullOrWhiteSpace(_formName);
-
-    private bool IsAssistantComplete =>
-        !string.IsNullOrWhiteSpace(_assistantAvatar) &&
-        !string.IsNullOrWhiteSpace(_assistantDemeanor);
 
     protected override async Task OnInitializedAsync()
     {
@@ -253,8 +172,6 @@
         _formStage = string.Empty;
         _formPrimaryGoal = string.Empty;
         _formConstraintsJson = string.Empty;
-        _assistantAvatar = AssistantAvatars[0].Value;
-        _assistantDemeanor = AssistantDemeanors[1].Value;
         _showForm = true;
     }
 
@@ -268,24 +185,10 @@
         _formStage = org.Stage ?? string.Empty;
         _formPrimaryGoal = org.PrimaryGoal ?? string.Empty;
         _formConstraintsJson = org.ConstraintsJson ?? string.Empty;
-        LoadAssistantSelection(_formConstraintsJson);
         _showForm = true;
     }
 
     void HideForm() => _showForm = false;
-
-    void NextWizardStep()
-    {
-        if (IsBasicInfoComplete)
-        {
-            _wizardStep = Math.Min(_wizardStep + 1, 1);
-        }
-    }
-
-    void PreviousWizardStep()
-    {
-        _wizardStep = Math.Max(_wizardStep - 1, 0);
-    }
 
     async Task Save()
     {
@@ -302,7 +205,7 @@
                     _formMission,
                     _formStage,
                     _formPrimaryGoal,
-                    BuildAssistantContextJson());
+                    string.IsNullOrWhiteSpace(_formConstraintsJson) ? null : _formConstraintsJson);
                 await OrganizationApi.CreateAsync(request);
             }
             else
@@ -313,7 +216,7 @@
                     _formMission,
                     _formStage,
                     _formPrimaryGoal,
-                    BuildAssistantContextJson());
+                    string.IsNullOrWhiteSpace(_formConstraintsJson) ? null : _formConstraintsJson);
                 await OrganizationApi.UpdateAsync(_editingOrg.Id, request);
             }
 
@@ -348,77 +251,6 @@
 
     void NavigateToCommandCenter(Guid orgId) => Navigation.NavigateTo($"/organizations/{orgId}/command-center");
 
-    private void LoadAssistantSelection(string? constraintsJson)
-    {
-        _assistantAvatar = AssistantAvatars[0].Value;
-        _assistantDemeanor = AssistantDemeanors[1].Value;
-
-        if (string.IsNullOrWhiteSpace(constraintsJson))
-        {
-            return;
-        }
-
-        try
-        {
-            if (JsonNode.Parse(constraintsJson) is not JsonObject context)
-            {
-                return;
-            }
-
-            SetAssistantDemeanor(context["preferredOperatingStyle"]?.GetValue<string>());
-
-            if (context["personalAssistant"] is JsonObject assistant)
-            {
-                SetAssistantAvatar(assistant["avatar"]?.GetValue<string>());
-                SetAssistantDemeanor(assistant["demeanor"]?.GetValue<string>());
-            }
-        }
-        catch (JsonException)
-        {
-            // Older rows may contain plain text. Keep defaults and preserve the original value on save.
-        }
-    }
-
-    private string? BuildAssistantContextJson()
-    {
-        var assistantProfile = new PersonalAssistantSelection(_assistantAvatar, _assistantDemeanor);
-
-        if (string.IsNullOrWhiteSpace(_formConstraintsJson))
-        {
-            return JsonSerializer.Serialize(new { personalAssistant = assistantProfile }, JsonOptions);
-        }
-
-        try
-        {
-            if (JsonNode.Parse(_formConstraintsJson) is JsonObject context)
-            {
-                context["personalAssistant"] = JsonSerializer.SerializeToNode(assistantProfile, JsonOptions);
-                return context.ToJsonString(JsonOptions);
-            }
-        }
-        catch (JsonException)
-        {
-            return _formConstraintsJson;
-        }
-
-        return _formConstraintsJson;
-    }
-
-    private void SetAssistantAvatar(string? value)
-    {
-        if (!string.IsNullOrWhiteSpace(value) && AssistantAvatars.Any(x => string.Equals(x.Value, value, StringComparison.OrdinalIgnoreCase)))
-        {
-            _assistantAvatar = value;
-        }
-    }
-
-    private void SetAssistantDemeanor(string? value)
-    {
-        if (!string.IsNullOrWhiteSpace(value) && AssistantDemeanors.Any(x => string.Equals(x.Value, value, StringComparison.OrdinalIgnoreCase)))
-        {
-            _assistantDemeanor = value;
-        }
-    }
 
     static string Truncate(string? value, int maxLength)
     {
@@ -426,9 +258,4 @@
         return value.Length <= maxLength ? value : value[..maxLength] + "...";
     }
 
-    private sealed record AssistantAvatarOption(string Value, string Name, string Description, string Icon, Color Color);
-
-    private sealed record AssistantDemeanorOption(string Value, string Name, string Description, string Icon, Color Color);
-
-    private sealed record PersonalAssistantSelection(string Avatar, string Demeanor);
 }

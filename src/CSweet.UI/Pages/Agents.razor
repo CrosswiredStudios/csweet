@@ -14,7 +14,7 @@
         <div>
             <MudText Typo="Typo.overline" Color="Color.Primary">Agent management</MudText>
             <MudText Typo="Typo.h3">Agents</MudText>
-            <MudText Color="Color.Secondary">Review installed agents and edit only the settings exposed by each running agent.</MudText>
+            <MudText Color="Color.Secondary">Manage imported agent plugins that businesses can use to create agent employees.</MudText>
         </div>
         <MudStack Row="true" Spacing="2">
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="OpenImportDialog" StartIcon="@Icons.Material.Filled.Add">
@@ -53,13 +53,13 @@
     }
     else
     {
-        <section class="agent-installations-section" aria-label="Unified agent fleet">
+        <section class="agent-installations-section" aria-label="Imported agent plugins">
             <div class="configuration-section-header">
                 <div>
-                    <MudText Typo="Typo.h6">Agent Fleet</MudText>
-                    <MudText Color="Color.Secondary">First-party agents and imported installations in one operational view.</MudText>
+                    <MudText Typo="Typo.h6">Imported Agents</MudText>
+                    <MudText Color="Color.Secondary">Agent plugins available for businesses to instantiate and hire.</MudText>
                 </div>
-                <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@(_installations.Count + _agents.Count)</MudChip>
+                <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@_agents.Count</MudChip>
             </div>
 
             @if (!string.IsNullOrWhiteSpace(_installationActionMessage))
@@ -69,7 +69,7 @@
                 </MudAlert>
             }
 
-            @if (_installations.Count == 0 && _agents.Count == 0)
+            @if (_agents.Count == 0)
             {
                 <MudText Color="Color.Secondary">No agents have been installed.</MudText>
             }
@@ -86,19 +86,18 @@
                                 </div>
                                 <MudStack Row="true" Spacing="1">
                                     <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Installed</MudChip>
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">First-party</MudChip>
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">Plugin</MudChip>
                                 </MudStack>
                             </div>
                             <dl class="configuration-details agents-details">
                                 <div><dt>Version</dt><dd>@agent.Version</dd></div>
                                 <div><dt>Runtime</dt><dd>@agent.RuntimeType</dd></div>
                                 <div><dt>Capabilities</dt><dd>@agent.Capabilities.Count</dd></div>
-                                <div><dt>Configuration</dt><dd>Broker-managed</dd></div>
+                                <div><dt>Instances</dt><dd>Created per business</dd></div>
                             </dl>
-                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Settings" OnClick="@(() => SelectAgentAsync(agent))">Configure</MudButton>
                         </MudPaper>
                     }
-                    @foreach (var installation in _installations)
+                    @foreach (var installation in Array.Empty<AgentInstallationResponse>())
                     {
                         <MudPaper Elevation="1" Class="agent-installation-card">
                             <div class="configuration-section-header">
@@ -136,6 +135,9 @@
                                 <div><dt>CPU</dt><dd>@installation.CpuPercent%</dd></div>
                             </dl>
                             <MudStack Row="true" Class="setup-actions">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Settings" Disabled="@_isBusy" OnClick="@(() => SelectAgentAsync(installation))">
+                                    Configure
+                                </MudButton>
                                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.EditCalendar" Disabled="@_isManagingInstallation" OnClick="@(() => OpenScheduleDialog(installation))">
                                     Edit Schedule
                                 </MudButton>
@@ -152,6 +154,7 @@
                                 {
                                     <MudButton Variant="Variant.Text" Color="Color.Success" StartIcon="@Icons.Material.Filled.CheckCircle" Disabled="@_isManagingInstallation" OnClick="@(() => EnableInstallationAsync(installation))">Enable</MudButton>
                                 }
+                                <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@_isManagingInstallation" OnClick="@(() => OpenRemoveDialog(installation))">Remove</MudButton>
                             </MudStack>
                         </MudPaper>
                     }
@@ -159,44 +162,11 @@
             }
         </section>
 
-        <section class="agents-grid">
-            <MudPaper Elevation="1" Class="surface-panel agents-list-panel">
-                <div class="configuration-section-header">
-                    <div>
-                        <MudText Typo="Typo.h6">First-party Configuration</MudText>
-                        <MudText Color="Color.Secondary">Select a first-party agent to edit its exposed configuration schema.</MudText>
-                    </div>
-                    <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@_agents.Count</MudChip>
-                </div>
-
-                @if (_agents.Count == 0)
-                {
-                    <MudText Color="Color.Secondary">No installed agent manifests were found.</MudText>
-                }
-                else
-                {
-                    <div class="agents-list">
-                        @foreach (var agent in _agents)
-                        {
-                            <MudButton Class="@AgentButtonClass(agent)"
-                                       Variant="Variant.Text"
-                                       Disabled="@_isBusy"
-                                       OnClick="@(() => SelectAgentAsync(agent))">
-                                <div class="agent-list-item-content">
-                                    <div>
-                                        <MudText Typo="Typo.subtitle1">@agent.Name</MudText>
-                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@agent.PublisherName</MudText>
-                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatUsageCaption(AgentUsage(agent.Id)?.Usage)</MudText>
-                                    </div>
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@($"v{agent.Version}")</MudChip>
-                                </div>
-                            </MudButton>
-                        }
-                    </div>
-                }
-            </MudPaper>
-
-            <MudPaper Elevation="1" Class="surface-panel agents-editor-panel">
+        <MudDialog @bind-Visible="_configurationDialogOpen" Options="_configurationDialogOptions">
+            <TitleContent>
+                <MudText Typo="Typo.h6">Configure agent</MudText>
+            </TitleContent>
+            <DialogContent>
                 @if (_selectedAgent is null)
                 {
                     <div class="agents-empty-editor">
@@ -387,95 +357,154 @@
                         </MudStack>
                     }
                 }
-            </MudPaper>
-        </section>
+            </DialogContent>
+            <DialogActions>
+                <MudButton Variant="Variant.Text" Disabled="@_isBusy" OnClick="CloseConfigurationDialog">Close</MudButton>
+            </DialogActions>
+        </MudDialog>
     }
 </div>
 
 <MudDialog @bind-Visible="_importDialogOpen" Options="_importDialogOptions">
     <TitleContent>
-        <MudText Typo="Typo.h6">Import Agent</MudText>
+        <div class="agent-import-title">
+            <MudIcon Icon="@Icons.Material.Filled.AddToQueue" Color="Color.Primary" />
+            <div>
+                <MudText Typo="Typo.h6">Import agent</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    @(_importPreview is null ? "Connect a public GitHub repository" : "Review identity, access, and deployment")
+                </MudText>
+            </div>
+        </div>
     </TitleContent>
     <DialogContent>
-        <MudStack Spacing="3">
-            <MudTextField Label="Public GitHub repository URL"
-                          @bind-Value="_importRepositoryUrl"
-                          Placeholder="https://github.com/owner/repository"
-                          Variant="Variant.Outlined"
-                          Disabled="@(_isPreviewingImport || _isInstallingImport || _importPreview is not null)"
-                          Immediate="true" />
-            <MudTextField Label="Branch, tag, or commit (optional)"
-                          @bind-Value="_importRef"
-                          Placeholder="Default branch"
-                          Variant="Variant.Outlined"
-                          Disabled="@(_isPreviewingImport || _isInstallingImport || _importPreview is not null)" />
-
+        <div class="agent-import-dialog-content">
             @if (!string.IsNullOrWhiteSpace(_importError))
             {
-                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_importError</MudAlert>
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true">@_importError</MudAlert>
             }
 
-            @if (_importPreview is not null)
+            @if (_importPreview is null)
             {
-                <div class="agent-import-summary">
-                    <dl class="configuration-details agents-details">
-                        <div><dt>Name</dt><dd>@_importPreview.AgentName</dd></div>
-                        <div><dt>Agent ID</dt><dd>@_importPreview.AgentId</dd></div>
-                        <div><dt>Version</dt><dd>@_importPreview.AgentVersion</dd></div>
-                        <div><dt>Publisher</dt><dd>@_importPreview.PublisherName (@_importPreview.PublisherId)</dd></div>
-                        <div><dt>Runtime</dt><dd>@_importPreview.RuntimeType</dd></div>
-                        <div><dt>Project</dt><dd>@DisplayImportValue(_importPreview.ProjectPath)</dd></div>
-                        <div><dt>Framework</dt><dd>@DisplayImportValue(_importPreview.TargetFramework)</dd></div>
-                        <div><dt>Activation</dt><dd>@DisplayImportValue(_importPreview.DefaultActivationMode)</dd></div>
-                        <div><dt>Commit</dt><dd class="agent-import-hash">@_importPreview.CommitSha</dd></div>
-                        <div><dt>Manifest digest</dt><dd class="agent-import-hash">@_importPreview.ManifestDigest</dd></div>
-                    </dl>
-
-                    @ImportValueSection("Capabilities", _importPreview.Capabilities)
-                    @ImportValueSection("Subscriptions", _importPreview.RequestedSubscriptions)
-                    @ImportValueSection("Publications", _importPreview.RequestedPublications)
-                    @ImportValueSection("Requested permissions", _importPreview.RequestedPermissions)
-                    @ImportValueSection("Requested network access", _importPreview.RequestedNetworkAccess)
-
-                    @if (_importPreview.Warnings.Count > 0)
-                    {
-                        <MudStack Spacing="1">
-                            <MudText Typo="Typo.subtitle2">Warnings</MudText>
-                            @foreach (var warning in _importPreview.Warnings)
-                            {
-                                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">@warning.Message</MudAlert>
-                            }
-                        </MudStack>
-                    }
-
-                    <MudDivider />
-                    <MudText Typo="Typo.subtitle1">Approval and Schedule</MudText>
-                    <div class="setup-form-grid">
-                        <MudTextField Label="Business ID" @bind-Value="_installBusinessId" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
-                        <MudSelect T="string" Label="Activation mode" @bind-Value="_installActivationMode" Variant="Variant.Outlined" Disabled="@_isInstallingImport">
-                            <MudSelectItem T="string" Value="@("AlwaysOn")">Always On</MudSelectItem>
-                            <MudSelectItem T="string" Value="@("Periodic")">Periodic</MudSelectItem>
-                            <MudSelectItem T="string" Value="@("Manual")">Manual</MudSelectItem>
-                        </MudSelect>
-                        <MudNumericField T="int" Label="Tick frequency (seconds)" @bind-Value="_installTickFrequencySeconds" Min="@(_runtimeSettings?.MinimumTickFrequencySeconds ?? 60)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
-                        <MudSelect T="string" Label="Overlap policy" @bind-Value="_installOverlapPolicy" Variant="Variant.Outlined" Disabled="@_isInstallingImport">
-                            <MudSelectItem T="string" Value="@("Skip")">Skip</MudSelectItem>
-                            <MudSelectItem T="string" Value="@("Queue")">Queue</MudSelectItem>
-                            <MudSelectItem T="string" Value="@("CancelPrevious")">Cancel Previous</MudSelectItem>
-                        </MudSelect>
-                        <MudNumericField T="int" Label="Max runtime (seconds)" @bind-Value="_installMaxRuntimeSeconds" Min="1" Max="@(_runtimeSettings?.DefaultMaxRuntimeSeconds ?? int.MaxValue)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
-                        <MudNumericField T="int" Label="Memory (MB)" @bind-Value="_installMemoryMb" Min="1" Max="@(_runtimeSettings?.MaximumContainerMemoryMb ?? int.MaxValue)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
-                        <MudNumericField T="int" Label="CPU (%)" @bind-Value="_installCpuPercent" Min="1" Max="@(_runtimeSettings?.MaximumContainerCpuPercent ?? int.MaxValue)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
-                    </div>
-
-                    @ApprovalSection("Capabilities", _importPreview.Capabilities, _approvedCapabilities)
-                    @ApprovalSection("Subscriptions", _importPreview.RequestedSubscriptions, _approvedSubscriptions)
-                    @ApprovalSection("Publications", _importPreview.RequestedPublications, _approvedPublications)
-                    @ApprovalSection("Permissions", _importPreview.RequestedPermissions, _approvedPermissions)
-                    @ApprovalSection("Network access", _importPreview.RequestedNetworkAccess, _approvedNetworkAccess)
+                <div class="agent-import-source-card">
+                    <MudIcon Icon="@Icons.Material.Filled.Code" Color="Color.Primary" Class="agent-import-source-icon" />
+                    <MudText Typo="Typo.h6">Connect a repository</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                        C-Sweet reads the root manifest first. Repository code is not executed during preview.
+                    </MudText>
+                    <MudTextField Label="Public GitHub repository URL"
+                                  @bind-Value="_importRepositoryUrl"
+                                  Placeholder="https://github.com/owner/repository"
+                                  Variant="Variant.Outlined"
+                                  Disabled="@_isPreviewingImport"
+                                  Immediate="true"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Link" />
+                    <MudTextField Label="Branch, tag, or commit"
+                                  @bind-Value="_importRef"
+                                  Placeholder="Optional — uses the default branch"
+                                  Variant="Variant.Outlined"
+                                  Disabled="@_isPreviewingImport" />
                 </div>
             }
-        </MudStack>
+            else
+            {
+                <div class="agent-import-hero">
+                    <div class="agent-import-avatar"><MudIcon Icon="@Icons.Material.Filled.SmartToy" /></div>
+                    <div class="agent-import-identity">
+                        <MudText Typo="Typo.h5">@_importPreview.AgentName</MudText>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">@_importPreview.AgentId · v@_importPreview.AgentVersion</MudText>
+                    </div>
+                    <div class="agent-import-status-chips">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_importPreview.RuntimeType</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@DisplayImportValue(_importPreview.DefaultActivationMode)</MudChip>
+                    </div>
+                </div>
+
+                @if (IsImportInstallBlocked)
+                {
+                    <div class="agent-import-prerequisite">
+                        <MudIcon Icon="@Icons.Material.Filled.AdminPanelSettings" Color="Color.Warning" />
+                        <div>
+                            <MudText Typo="Typo.subtitle2">Runtime approval required</MudText>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">@ImportBlockerMessage</MudText>
+                        </div>
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Warning"
+                                   Size="Size.Small"
+                                   Disabled="@_isEnablingImport"
+                                   OnClick="EnableImportPrerequisitesAsync">
+                            @(_isEnablingImport ? "Enabling…" : "Enable required settings")
+                        </MudButton>
+                    </div>
+                }
+
+                <MudTabs Rounded="true" ApplyEffectsToContainer="true" Class="agent-import-tabs">
+                    <MudTabPanel Text="Overview" Icon="@Icons.Material.Filled.Badge">
+                        <div class="agent-import-tab-content">
+                            <div class="agent-import-facts">
+                                <div><span>Publisher</span><strong>@_importPreview.PublisherName</strong><small>@_importPreview.PublisherId</small></div>
+                                <div><span>Framework</span><strong>@DisplayImportValue(_importPreview.TargetFramework)</strong><small>@_importPreview.RuntimeType</small></div>
+                                <div><span>Capabilities</span><strong>@_importPreview.Capabilities.Count</strong><small>declared services</small></div>
+                                <div><span>Access requests</span><strong>@ImportAccessRequestCount</strong><small>review before install</small></div>
+                            </div>
+
+                            @if (_importPreview.Warnings.Count > 0)
+                            {
+                                @foreach (var warning in _importPreview.Warnings)
+                                {
+                                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">@warning.Message</MudAlert>
+                                }
+                            }
+
+                            <MudExpansionPanels>
+                                <MudExpansionPanel Text="Technical details">
+                                    <dl class="agent-import-technical-details">
+                                        <div><dt>Project</dt><dd>@DisplayImportValue(_importPreview.ProjectPath)</dd></div>
+                                        <div><dt>Commit</dt><dd class="agent-import-hash">@_importPreview.CommitSha</dd></div>
+                                        <div><dt>Manifest digest</dt><dd class="agent-import-hash">@_importPreview.ManifestDigest</dd></div>
+                                    </dl>
+                                </MudExpansionPanel>
+                            </MudExpansionPanels>
+                        </div>
+                    </MudTabPanel>
+                    <MudTabPanel Text="Access review" Icon="@Icons.Material.Filled.Security">
+                        <div class="agent-import-tab-content agent-import-access-grid">
+                            @ApprovalSection("Capabilities", _importPreview.Capabilities, _approvedCapabilities)
+                            @ApprovalSection("Subscriptions", _importPreview.RequestedSubscriptions, _approvedSubscriptions)
+                            @ApprovalSection("Publications", _importPreview.RequestedPublications, _approvedPublications)
+                            @ApprovalSection("Permissions", _importPreview.RequestedPermissions, _approvedPermissions)
+                            @ApprovalSection("Network access", _importPreview.RequestedNetworkAccess, _approvedNetworkAccess)
+                        </div>
+                    </MudTabPanel>
+                    <MudTabPanel Text="Deployment" Icon="@Icons.Material.Filled.Tune">
+                        <div class="agent-import-tab-content">
+                            <MudText Typo="Typo.subtitle2">Schedule</MudText>
+                            <div class="agent-import-form-grid">
+                                <MudTextField Label="Business ID" @bind-Value="_installBusinessId" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
+                                <MudSelect T="string" Label="Activation mode" @bind-Value="_installActivationMode" Variant="Variant.Outlined" Disabled="@_isInstallingImport">
+                                    <MudSelectItem T="string" Value="@("AlwaysOn")">Always On</MudSelectItem>
+                                    <MudSelectItem T="string" Value="@("Periodic")">Periodic</MudSelectItem>
+                                    <MudSelectItem T="string" Value="@("Manual")">Manual</MudSelectItem>
+                                </MudSelect>
+                                <MudNumericField T="int" Label="Tick frequency (seconds)" @bind-Value="_installTickFrequencySeconds" Min="@(_runtimeSettings?.MinimumTickFrequencySeconds ?? 60)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
+                                <MudSelect T="string" Label="Overlap policy" @bind-Value="_installOverlapPolicy" Variant="Variant.Outlined" Disabled="@_isInstallingImport">
+                                    <MudSelectItem T="string" Value="@("Skip")">Skip</MudSelectItem>
+                                    <MudSelectItem T="string" Value="@("Queue")">Queue</MudSelectItem>
+                                    <MudSelectItem T="string" Value="@("CancelPrevious")">Cancel previous</MudSelectItem>
+                                </MudSelect>
+                            </div>
+                            <MudText Typo="Typo.subtitle2" Class="mt-3">Resource limits</MudText>
+                            <div class="agent-import-form-grid agent-import-form-grid-three">
+                                <MudNumericField T="int" Label="Max runtime (seconds)" @bind-Value="_installMaxRuntimeSeconds" Min="1" Max="@(_runtimeSettings?.DefaultMaxRuntimeSeconds ?? int.MaxValue)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
+                                <MudNumericField T="int" Label="Memory (MB)" @bind-Value="_installMemoryMb" Min="1" Max="@(_runtimeSettings?.MaximumContainerMemoryMb ?? int.MaxValue)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
+                                <MudNumericField T="int" Label="CPU (%)" @bind-Value="_installCpuPercent" Min="1" Max="@(_runtimeSettings?.MaximumContainerCpuPercent ?? int.MaxValue)" Variant="Variant.Outlined" Disabled="@_isInstallingImport" />
+                            </div>
+                        </div>
+                    </MudTabPanel>
+                </MudTabs>
+            }
+        </div>
     </DialogContent>
     <DialogActions>
         <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@(_isPreviewingImport || _isInstallingImport)" OnClick="CloseImportDialog">
@@ -495,7 +524,7 @@
             <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@_isInstallingImport" OnClick="ResetImportPreview">
                 Back
             </MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isInstallingImport" OnClick="InstallImportAsync" StartIcon="@Icons.Material.Filled.VerifiedUser">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_isInstallingImport || IsImportInstallBlocked)" OnClick="InstallImportAsync" StartIcon="@Icons.Material.Filled.VerifiedUser">
                 @(_isInstallingImport ? "Installing..." : "Approve and Install")
             </MudButton>
         }
@@ -600,6 +629,36 @@
     <DialogActions><MudButton Variant="Variant.Text" OnClick="CloseBuildLogDialog">Close</MudButton></DialogActions>
 </MudDialog>
 
+<MudDialog @bind-Visible="_removeDialogOpen" Options="_removeDialogOptions">
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Color="Color.Error" />
+            <MudText Typo="Typo.h6">Remove imported agent?</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText>
+                This permanently removes <strong>@_removeInstallation?.AgentName</strong> from
+                <strong>@_removeInstallation?.BusinessId</strong>.
+            </MudText>
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                Grants, schedule, run history, containers, and cached build artifacts that are not shared by another installation will be deleted. You will need to import and approve the agent again.
+            </MudAlert>
+            @if (!string.IsNullOrWhiteSpace(_removeError))
+            {
+                <MudAlert Severity="Severity.Error">@_removeError</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Disabled="@_isManagingInstallation" OnClick="CloseRemoveDialog">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@_isManagingInstallation" OnClick="RemoveInstallationAsync">
+            @(_isManagingInstallation ? "Removing…" : "Remove agent")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
@@ -622,9 +681,12 @@
     private string? _actionMessage;
     private bool? _actionSucceeded;
     private readonly DialogOptions _importDialogOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
+    private readonly DialogOptions _configurationDialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+    private bool _configurationDialogOpen;
     private bool _importDialogOpen;
     private bool _isPreviewingImport;
     private bool _isInstallingImport;
+    private bool _isEnablingImport;
     private string _importRepositoryUrl = string.Empty;
     private string _importRef = string.Empty;
     private string? _importError;
@@ -659,10 +721,33 @@
     private AgentBuildLogResponse? _buildLog;
     private bool _isLoadingManagementDetail;
     private string? _managementDetailError;
+    private readonly DialogOptions _removeDialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = false };
+    private bool _removeDialogOpen;
+    private AgentInstallationResponse? _removeInstallation;
+    private string? _removeError;
 
     private string SchemaChipLabel => _schema is null ? "Offline" : "Configurable";
     private Color SchemaChipColor => _schema is null ? Color.Warning : Color.Success;
     private Severity ActionMessageSeverity => _actionSucceeded == false ? Severity.Error : Severity.Success;
+    private bool RequiresAlwaysOnCommunityApproval =>
+        string.Equals(_installActivationMode, "AlwaysOn", StringComparison.Ordinal) &&
+        _runtimeSettings?.AllowAlwaysOnCommunityAgents != true;
+    private bool IsImportInstallBlocked =>
+        _importPreview is not null &&
+        (_runtimeSettings?.EnableImportedAgents != true || RequiresAlwaysOnCommunityApproval);
+    private string ImportBlockerMessage => _runtimeSettings is null
+        ? "Runtime settings are unavailable. Refresh the page before installing."
+        : _runtimeSettings.EnableImportedAgents
+            ? "Always-on community agents are disabled. Enable the policy or choose Periodic or Manual deployment."
+            : RequiresAlwaysOnCommunityApproval
+                ? "Imported agents and always-on community agents are disabled in global runtime settings."
+                : "Imported agents are disabled in global runtime settings.";
+    private int ImportAccessRequestCount => _importPreview is null
+        ? 0
+        : _importPreview.RequestedSubscriptions.Count +
+          _importPreview.RequestedPublications.Count +
+          _importPreview.RequestedPermissions.Count +
+          _importPreview.RequestedNetworkAccess.Count;
     private AgentTokenUsageResponse? SelectedAgentUsage =>
         _selectedAgent is null ? null : AgentUsage(_selectedAgent.Id);
 
@@ -709,7 +794,24 @@
     private async Task SelectAgentAsync(AgentCatalogItemResponse agent)
     {
         _selectedAgent = agent;
+        _configurationDialogOpen = true;
         await LoadConfigurationAsync(agent);
+    }
+
+    private Task SelectAgentAsync(AgentInstallationResponse installation) =>
+        SelectAgentAsync(new AgentCatalogItemResponse(
+            installation.AgentId,
+            installation.AgentName,
+            installation.AgentVersion,
+            string.Empty,
+            installation.PublisherName,
+            "dotnet-project",
+            installation.GrantedCapabilities,
+            installation.GrantedPermissions));
+
+    private void CloseConfigurationDialog()
+    {
+        _configurationDialogOpen = false;
     }
 
     private void OpenImportDialog()
@@ -813,6 +915,34 @@
         }
     }
 
+    private async Task EnableImportPrerequisitesAsync()
+    {
+        _isEnablingImport = true;
+        _importError = null;
+
+        try
+        {
+            var result = await AgentRuntimeSettingsApi.UpdateAsync(
+                new UpdateAgentRuntimeSettingsRequest(
+                    EnableImportedAgents: true,
+                    AllowAlwaysOnCommunityAgents: RequiresAlwaysOnCommunityApproval ? true : null));
+            if (!result.Succeeded)
+            {
+                throw new InvalidOperationException(result.Message ?? "Unable to enable imported agents.");
+            }
+
+            _runtimeSettings = result.Settings ?? await AgentRuntimeSettingsApi.GetAsync();
+        }
+        catch (Exception exception)
+        {
+            _importError = exception.Message;
+        }
+        finally
+        {
+            _isEnablingImport = false;
+        }
+    }
+
     private void ClearImportApproval()
     {
         _approvedCapabilities.Clear();
@@ -909,6 +1039,48 @@
         await ExecuteInstallationActionAsync(
             () => AgentApi.EnableAsync(installation.Id),
             "Agent installation enabled.");
+    }
+
+    private void OpenRemoveDialog(AgentInstallationResponse installation)
+    {
+        _removeInstallation = installation;
+        _removeError = null;
+        _removeDialogOpen = true;
+    }
+
+    private void CloseRemoveDialog()
+    {
+        if (_isManagingInstallation) return;
+        _removeDialogOpen = false;
+        _removeInstallation = null;
+        _removeError = null;
+    }
+
+    private async Task RemoveInstallationAsync()
+    {
+        if (_removeInstallation is null) return;
+        _isManagingInstallation = true;
+        _removeError = null;
+        try
+        {
+            var result = await AgentApi.RemoveAsync(_removeInstallation.Id);
+            _installations = _installations.Where(x => x.Id != result.InstallationId).ToList();
+            _removeDialogOpen = false;
+            _removeInstallation = null;
+            SetInstallationMessage(
+                result.CleanupWarnings == 0
+                    ? "Imported agent removed. You can now import it again from scratch."
+                    : $"Imported agent removed, but {result.CleanupWarnings} cached artifact(s) could not be deleted. See application logs for details.",
+                true);
+        }
+        catch (Exception exception)
+        {
+            _removeError = exception.Message;
+        }
+        finally
+        {
+            _isManagingInstallation = false;
+        }
     }
 
     private async Task OpenRunsDialogAsync(AgentInstallationResponse installation)
@@ -1015,7 +1187,10 @@
 
             var result = await AgentApi.UpdateConfigurationAsync(
                 _selectedAgent.Id,
-                new UpdateAgentConfigurationRequest(settings));
+                new UpdateAgentConfigurationRequest(settings)
+                {
+                    SchemaVersion = _schema.SchemaVersion
+                });
 
             _actionSucceeded = result.Succeeded;
             _actionMessage = result.Message ?? "Agent settings saved.";

@@ -17,6 +17,9 @@ public sealed class AgentRuntimeInstance
     public DateTimeOffset? CompletionReportedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
     public DateTimeOffset? RuntimeDeadlineAt { get; set; }
+    public DateTimeOffset? LastInteractiveActivityAt { get; set; }
+    public DateTimeOffset? IdleDeadlineAt { get; set; }
+    public bool IsInteractive { get; set; }
 
     public AgentInstallation? AgentInstallation { get; set; }
     public ICollection<AgentRuntimeEvent> Events { get; set; } = [];
@@ -44,7 +47,7 @@ public sealed class AgentRuntimeInstance
     private static bool CanTransition(AgentRuntimeStatus current, AgentRuntimeStatus next) =>
         current == next || (current, next) switch
         {
-            (AgentRuntimeStatus.Queued, AgentRuntimeStatus.Starting or AgentRuntimeStatus.Stopping or AgentRuntimeStatus.PolicyDenied or AgentRuntimeStatus.Skipped or AgentRuntimeStatus.Cancelled) => true,
+            (AgentRuntimeStatus.Queued, AgentRuntimeStatus.Starting or AgentRuntimeStatus.Stopping or AgentRuntimeStatus.Failed or AgentRuntimeStatus.PolicyDenied or AgentRuntimeStatus.Skipped or AgentRuntimeStatus.Cancelled) => true,
             (AgentRuntimeStatus.Starting, AgentRuntimeStatus.WaitingForBrokerRegistration or AgentRuntimeStatus.Stopping or AgentRuntimeStatus.StartFailed or AgentRuntimeStatus.Cancelled) => true,
             (AgentRuntimeStatus.WaitingForBrokerRegistration, AgentRuntimeStatus.Running or AgentRuntimeStatus.Stopping or AgentRuntimeStatus.BrokerRegistrationTimedOut or AgentRuntimeStatus.StartFailed or AgentRuntimeStatus.Cancelled) => true,
             (AgentRuntimeStatus.Running, AgentRuntimeStatus.CompletionReported or AgentRuntimeStatus.Stopping or AgentRuntimeStatus.RuntimeTimedOut or AgentRuntimeStatus.ExitedWithoutCompletion or AgentRuntimeStatus.Failed or AgentRuntimeStatus.Cancelled) => true,

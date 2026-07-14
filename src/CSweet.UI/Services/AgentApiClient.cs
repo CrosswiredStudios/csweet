@@ -88,6 +88,15 @@ public sealed class AgentApiClient : IAgentApiClient
         CancellationToken cancellationToken = default) =>
         SendAsync<AgentInstallationResponse>(HttpMethod.Post, $"api/agents/installations/{installationId}/enable", null, cancellationToken);
 
+    public Task<RemoveAgentInstallationResponse> RemoveAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default) =>
+        SendAsync<RemoveAgentInstallationResponse>(
+            HttpMethod.Delete,
+            $"api/agents/installations/{installationId}",
+            null,
+            cancellationToken);
+
     public async Task<IReadOnlyList<AgentRuntimeRunResponse>> ListRunsAsync(
         Guid installationId,
         CancellationToken cancellationToken = default) =>
@@ -105,12 +114,30 @@ public sealed class AgentApiClient : IAgentApiClient
         throw new ApiClientException(response.StatusCode, "No build log is available for this installation.");
     }
 
+    public Task<AgentRuntimeReadinessResponse> EnsureRuntimeAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default) =>
+        SendAsync<AgentRuntimeReadinessResponse>(
+            HttpMethod.Post,
+            $"api/agents/installations/{installationId}/runtime/ensure",
+            null,
+            cancellationToken);
+
+    public Task<AgentRuntimeReadinessResponse> GetRuntimeStatusAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default) =>
+        SendAsync<AgentRuntimeReadinessResponse>(
+            HttpMethod.Get,
+            $"api/agents/installations/{installationId}/runtime/status",
+            null,
+            cancellationToken);
+
     public async Task<AgentConfigurationSchemaResponse> GetConfigurationAsync(
-        string agentId,
+        string installationId,
         CancellationToken cancellationToken = default)
     {
         var response = await _httpClient.GetAsync(
-            $"api/agents/{Uri.EscapeDataString(agentId)}/configuration",
+            $"api/agents/installations/{Uri.EscapeDataString(installationId)}/configuration",
             cancellationToken);
 
         if (response.IsSuccessStatusCode)
@@ -124,12 +151,12 @@ public sealed class AgentApiClient : IAgentApiClient
     }
 
     public async Task<AgentConfigurationUpdateResponse> UpdateConfigurationAsync(
-        string agentId,
+        string installationId,
         UpdateAgentConfigurationRequest request,
         CancellationToken cancellationToken = default)
     {
         var response = await _httpClient.PostAsJsonAsync(
-            $"api/agents/{Uri.EscapeDataString(agentId)}/configuration",
+            $"api/agents/installations/{Uri.EscapeDataString(installationId)}/configuration",
             request,
             cancellationToken);
 

@@ -1,9 +1,11 @@
 @page "/organizations/{OrganizationId:guid}/chat/{AgentUserId:guid}"
 @layout CommandCenterLayout
+@using CSweet.Contracts.Agents
 @using CSweet.Contracts.Core
 @implements IDisposable
 @inject HttpClient Http
 @inject IChatApiClient ChatApi
+@inject IAgentApiClient AgentApi
 
 <PageTitle>Chat - C-Sweet</PageTitle>
 
@@ -26,7 +28,15 @@
     {
         <MudPaper Elevation="1" Class="surface-panel chat-loading-panel">
             <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
-            <MudText Color="Color.Secondary">Opening conversation...</MudText>
+            <MudText Color="Color.Secondary" role="status" aria-live="polite">@LoadingMessage</MudText>
+            @if (_runtimeReadiness is not null)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@LoadingDetail</MudText>
+                @if (!string.IsNullOrWhiteSpace(_runtimeReadiness.Reason))
+                {
+                    <MudText Typo="Typo.caption">@_runtimeReadiness.Reason</MudText>
+                }
+            }
         </MudPaper>
     }
     else
@@ -34,6 +44,17 @@
         @if (!string.IsNullOrWhiteSpace(_errorMessage))
         {
             <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="chat-alert">@_errorMessage</MudAlert>
+            @if (_conversation is null)
+            {
+                <MudStack Row="true" Spacing="2" Class="mb-4">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="RetryStartupAsync" StartIcon="@Icons.Material.Filled.Refresh">
+                        Retry startup
+                    </MudButton>
+                    <MudButton Href="@($"/organizations/{OrganizationId}/employees")" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Terminal">
+                        Employee console
+                    </MudButton>
+                </MudStack>
+            }
         }
 
         <MudPaper Elevation="1" Class="surface-panel chat-transcript" role="log" aria-live="polite">
@@ -107,16 +128,46 @@
     private readonly CancellationTokenSource _disposeCts = new();
     private OrganizationUserResponse? _agent;
     private ConversationResponse? _conversation;
+    private AgentRuntimeReadinessResponse? _runtimeReadiness;
     private string _draft = string.Empty;
     private string _streamingText = string.Empty;
     private bool _loading = true;
     private bool _streaming;
     private string? _errorMessage;
 
+    private string LoadingMessage => _runtimeReadiness?.Stage switch
+    {
+        AgentRuntimeReadinessStages.Queued => "Agent runtime queued...",
+        AgentRuntimeReadinessStages.StartingContainer => "Starting agent container...",
+        AgentRuntimeReadinessStages.WaitingForBroker => "Connecting agent to C-Sweet...",
+        AgentRuntimeReadinessStages.Stopping => "Cleaning up the previous runtime...",
+        AgentRuntimeReadinessStages.Ready => "Opening conversation...",
+        _ => "Preparing your employee..."
+    };
+
+    private string LoadingDetail
+    {
+        get
+        {
+            if (_runtimeReadiness is null)
+            {
+                return string.Empty;
+            }
+
+            var beganAt = _runtimeReadiness.StartedAt ?? _runtimeReadiness.QueuedAt;
+            var elapsed = beganAt is null
+                ? string.Empty
+                : $" · {Math.Max(0, (int)(DateTimeOffset.UtcNow - beganAt.Value).TotalSeconds)}s elapsed";
+            var runtimeId = _runtimeReadiness.RuntimeInstanceId?.ToString("N")[..8] ?? "pending";
+            return $"Status: {_runtimeReadiness.RuntimeStatus ?? _runtimeReadiness.Stage} · Runtime {runtimeId}{elapsed}";
+        }
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
         _errorMessage = null;
+        _runtimeReadiness = null;
         _messages.Clear();
 
         try
@@ -124,6 +175,27 @@
             _agent = await Http.GetFromJsonAsync<OrganizationUserResponse>(
                 $"api/core/organizations/{OrganizationId}/users/{AgentUserId}",
                 _disposeCts.Token);
+
+            if (_agent?.AgentInstallationId is not Guid installationId)
+            {
+                throw new InvalidOperationException("This agent employee is not linked to an installation.");
+            }
+
+            using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+            startupCts.CancelAfter(TimeSpan.FromSeconds(90));
+            _runtimeReadiness = await AgentApi.EnsureRuntimeAsync(installationId, startupCts.Token);
+            while (!_runtimeReadiness.IsReady)
+            {
+                if (_runtimeReadiness.IsTerminal)
+                {
+                    throw new InvalidOperationException(
+                        _runtimeReadiness.Reason ?? "The agent runtime could not be started.");
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(1), startupCts.Token);
+                _runtimeReadiness = await AgentApi.GetRuntimeStatusAsync(installationId, startupCts.Token);
+                StateHasChanged();
+            }
 
             _conversation = await ChatApi.StartConversationAsync(
                 OrganizationId,
@@ -140,6 +212,10 @@
         catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
         {
         }
+        catch (OperationCanceledException)
+        {
+            _errorMessage = "The agent runtime did not become ready in time. Return to Employees and review its status before retrying.";
+        }
         catch (Exception ex)
         {
             _errorMessage = ex.Message;
@@ -149,6 +225,8 @@
             _loading = false;
         }
     }
+
+    private Task RetryStartupAsync() => OnParametersSetAsync();
 
     private async Task OnKeyDownAsync(KeyboardEventArgs args)
     {

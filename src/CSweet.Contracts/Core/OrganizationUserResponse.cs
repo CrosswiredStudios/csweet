@@ -10,4 +10,8 @@ public sealed record OrganizationUserResponse(
     string? Email,
     int EmployeeType,
     int PermissionLevel,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt)
+{
+    public Guid? AgentInstallationId { get; init; }
+    public bool SupportsAgentConfiguration { get; init; }
+}
