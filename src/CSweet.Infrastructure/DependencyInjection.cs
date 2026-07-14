@@ -38,6 +38,14 @@ public static class DependencyInjection
 
         builder.Services.AddScoped<ISetupService, SetupService>();
         builder.Services.AddScoped<IAuditEventWriter, AuditEventWriter>();
+        builder.Services.AddScoped<IAgentRuntimeSettingsService, AgentRuntimeSettingsService>();
+        builder.Services.AddScoped<IAgentImportPreviewService, AgentImportPreviewService>();
+        builder.Services.AddHttpClient<IGitHubAgentRepositoryClient, GitHubAgentRepositoryClient>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.github.com/");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("CSweet-Agent-Importer/1.0");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
         builder.Services.AddSingleton<ILlmProviderSecretStore>(_ =>
         {
             if (builder.Environment.IsEnvironment("Testing"))

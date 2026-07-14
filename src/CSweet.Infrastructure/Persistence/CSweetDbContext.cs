@@ -19,6 +19,9 @@ public sealed class CSweetDbContext : DbContext
     public DbSet<OnboardingStep> OnboardingSteps => Set<OnboardingStep>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<AgentRunLog> AgentRunLogs => Set<AgentRunLog>();
+    public DbSet<AgentRuntimeGlobalSettings> AgentRuntimeGlobalSettings => Set<AgentRuntimeGlobalSettings>();
+    public DbSet<AgentPackageSource> AgentPackageSources => Set<AgentPackageSource>();
+    public DbSet<AgentPackageVersion> AgentPackageVersions => Set<AgentPackageVersion>();
 
     // Planning entities
     public DbSet<PlanningTask> PlanningTasks => Set<PlanningTask>();
@@ -96,6 +99,56 @@ public sealed class CSweetDbContext : DbContext
             entity.Property(x => x.Status).HasMaxLength(80).IsRequired();
             entity.Property(x => x.PromptHash).HasMaxLength(512).IsRequired();
             entity.Property(x => x.FailureMessage).HasMaxLength(2048);
+        });
+
+        modelBuilder.Entity<AgentRuntimeGlobalSettings>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.DefaultActivationMode).HasConversion<string>().HasMaxLength(20).IsRequired();
+            entity.Property(x => x.DefaultOverlapPolicy).HasConversion<string>().HasMaxLength(20).IsRequired();
+            entity.Property(x => x.DefaultRestartPolicy).HasConversion<string>().HasMaxLength(20).IsRequired();
+            entity.Property(x => x.DefaultNetworkPolicy).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.AllowedPackageFeedHosts).HasMaxLength(2048);
+            entity.Property(x => x.BlockedNetworkCidrs).HasMaxLength(2048);
+            entity.Property(x => x.AgentSourceRootPath).HasMaxLength(1024);
+            entity.Property(x => x.AgentPackageCachePath).HasMaxLength(1024);
+            entity.Property(x => x.DotNetBuilderImage).HasMaxLength(256).IsRequired();
+            entity.Property(x => x.DotNetRuntimeBaseImage).HasMaxLength(256).IsRequired();
+        });
+
+        modelBuilder.Entity<AgentPackageSource>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.RepositoryUrl).HasMaxLength(2048).IsRequired();
+            entity.Property(x => x.Host).HasMaxLength(253).IsRequired();
+            entity.Property(x => x.RepositoryOwner).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.RepositoryName).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.DefaultBranch).HasMaxLength(255).IsRequired();
+            entity.HasIndex(x => x.RepositoryUrl).IsUnique();
+        });
+
+        modelBuilder.Entity<AgentPackageVersion>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.CommitSha).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.ManifestDigest).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.ManifestJson).HasColumnType("text").IsRequired();
+            entity.Property(x => x.AgentId).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.AgentName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Version).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.PublisherId).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.PublisherName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.RuntimeType).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.ProjectPath).HasMaxLength(1024);
+            entity.Property(x => x.TargetFramework).HasMaxLength(64);
+            entity.Property(x => x.DefaultActivationMode).HasMaxLength(32);
+            entity.Property(x => x.WarningsJson).HasColumnType("text").IsRequired();
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.HasIndex(x => new { x.PackageSourceId, x.CommitSha, x.ManifestDigest }).IsUnique();
+            entity.HasOne(x => x.PackageSource)
+                .WithMany()
+                .HasForeignKey(x => x.PackageSourceId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

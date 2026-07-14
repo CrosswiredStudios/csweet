@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
+using CSweet.Application.Setup;
 using CSweet.Contracts.Agents;
 using Google.Protobuf;
 
@@ -29,6 +30,22 @@ public static class AgentManagementEndpoints
             CancellationToken cancellationToken) =>
         {
             return Results.Ok(await catalog.ListAsync(cancellationToken));
+        });
+
+        group.MapPost("/imports/preview", async (
+            PreviewAgentImportRequest request,
+            IAgentImportPreviewService importPreviewService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var preview = await importPreviewService.PreviewAsync(request, cancellationToken);
+                return Results.Ok(preview);
+            }
+            catch (AgentImportPreviewException exception)
+            {
+                return Results.BadRequest(new { error = exception.Message });
+            }
         });
 
         group.MapGet("/{agentId}/configuration", async (

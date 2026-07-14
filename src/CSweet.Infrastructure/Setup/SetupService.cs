@@ -73,6 +73,54 @@ public sealed class SetupService : ISetupService
             obsoleteStep.UpdatedAt = now;
         }
 
+        if (!await _dbContext.AgentRuntimeGlobalSettings.AnyAsync(cancellationToken))
+        {
+            _dbContext.AgentRuntimeGlobalSettings.Add(new AgentRuntimeGlobalSettings
+            {
+                Id = Guid.NewGuid(),
+                EnableImportedAgents = false,
+                DefaultActivationMode = ActivationMode.Periodic,
+                DefaultTickFrequencySeconds = 3600,
+                MinimumTickFrequencySeconds = 300,
+                DefaultMaxRuntimeSeconds = 600,
+                DefaultOverlapPolicy = OverlapPolicy.Skip,
+                AllowAlwaysOnCommunityAgents = false,
+                DefaultRestartPolicy = RestartPolicy.Never,
+                GlobalMaxActiveContainers = 10,
+                PerBusinessMaxActiveContainers = 5,
+                PerInstallationMaxActiveContainers = 1,
+                DefaultContainerMemoryMb = 512,
+                MaximumContainerMemoryMb = 2048,
+                DefaultContainerCpuPercent = 50,
+                MaximumContainerCpuPercent = 200,
+                DefaultContainerPidsLimit = 100,
+                DefaultContainerLogLimitMb = 10,
+                ContainerStartTimeoutSeconds = 60,
+                BrokerRegistrationTimeoutSeconds = 30,
+                ContainerStopGraceSeconds = 15,
+                DefaultNetworkPolicy = "BrokerOnly",
+                AllowPublicInternetByDefault = false,
+                AllowedPackageFeedHosts = string.Empty,
+                BlockedNetworkCidrs = string.Empty,
+                AgentSourceRootPath = string.Empty,
+                AgentPackageCachePath = string.Empty,
+                DotNetBuilderImage = "mcr.microsoft.com/dotnet/sdk:9.0",
+                DotNetRuntimeBaseImage = "mcr.microsoft.com/dotnet/runtime:9.0",
+                BuildTimeoutSeconds = 600,
+                BuildMemoryMb = 2048,
+                BuildCpuPercent = 200,
+                MaximumRepositorySizeMb = 500,
+                MaximumBuildLogMb = 10,
+                KeepFailedBuildWorkspaces = false,
+                CompletedRuntimeRetentionDays = 14,
+                FailedRuntimeRetentionDays = 30,
+                BuildLogRetentionDays = 30,
+                RemoveContainersAfterCompletion = true,
+                RemoveWorkspacesAfterCompletion = true,
+                UpdatedAt = now
+            });
+        }
+
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 

@@ -52,6 +52,7 @@ app.MapHealthChecks("/health");
 
 app.MapLlmProviderProfileEndpoints();
 app.MapSetupEndpoints();
+app.MapAgentRuntimeSettingsEndpoints();
 app.MapPlanningRunEndpoints();
 app.MapPlanningDocumentEndpoints();
 app.MapPlanningWorkflowEndpoints();

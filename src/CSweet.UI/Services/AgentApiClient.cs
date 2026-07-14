@@ -20,6 +20,25 @@ public sealed class AgentApiClient : IAgentApiClient
             ?? [];
     }
 
+    public async Task<AgentImportPreviewResponse> PreviewImportAsync(
+        PreviewAgentImportRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsJsonAsync(
+            "api/agents/imports/preview",
+            request,
+            cancellationToken);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return await response.Content.ReadFromJsonAsync<AgentImportPreviewResponse>(cancellationToken)
+                ?? throw new ApiClientException(response.StatusCode, "Agent import preview response was empty.");
+        }
+
+        var error = await response.Content.ReadFromJsonAsync<AgentApiErrorResponse>(cancellationToken);
+        throw new ApiClientException(response.StatusCode, error?.Error ?? "Agent import could not be previewed.");
+    }
+
     public async Task<AgentConfigurationSchemaResponse> GetConfigurationAsync(
         string agentId,
         CancellationToken cancellationToken = default)

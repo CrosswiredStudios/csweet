@@ -6,6 +6,10 @@ public interface IAgentApiClient
 {
     Task<IReadOnlyList<AgentCatalogItemResponse>> ListAsync(CancellationToken cancellationToken = default);
 
+    Task<AgentImportPreviewResponse> PreviewImportAsync(
+        PreviewAgentImportRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<AgentConfigurationSchemaResponse> GetConfigurationAsync(
         string agentId,
         CancellationToken cancellationToken = default);

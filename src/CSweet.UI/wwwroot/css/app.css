@@ -688,6 +688,27 @@ code {
     grid-column: 1 / -1;
 }
 
+.agent-import-summary,
+.agent-import-values-section {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.agent-import-summary {
+    padding-top: 0.5rem;
+}
+
+.agent-import-values {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.agent-import-hash {
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .llm-provider-header-actions {
     margin-top: 0;
 }

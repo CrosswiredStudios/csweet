@@ -1,0 +1,130 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text.Json;
+using CSweet.Application.Setup;
+
+namespace CSweet.Infrastructure.Setup;
+
+public sealed class GitHubAgentRepositoryClient : IGitHubAgentRepositoryClient
+{
+    private const int MaximumManifestBytes = 1024 * 1024;
+    private readonly HttpClient _httpClient;
+
+    public GitHubAgentRepositoryClient(HttpClient httpClient)
+    {
+        _httpClient = httpClient;
+    }
+
+    public async Task<string> GetDefaultBranchAsync(
+        string repositoryOwner,
+        string repositoryName,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync(
+            $"repos/{Escape(repositoryOwner)}/{Escape(repositoryName)}",
+            cancellationToken);
+        await EnsureSuccessAsync(response, "Repository was not found or is not public.", cancellationToken);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (!document.RootElement.TryGetProperty("default_branch", out var branchElement) ||
+            string.IsNullOrWhiteSpace(branchElement.GetString()))
+        {
+            throw new AgentImportPreviewException("GitHub did not return a default branch.");
+        }
+
+        return branchElement.GetString()!;
+    }
+
+    public async Task<string> ResolveCommitShaAsync(
+        string repositoryOwner,
+        string repositoryName,
+        string reference,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync(
+            $"repos/{Escape(repositoryOwner)}/{Escape(repositoryName)}/commits/{Escape(reference)}",
+            cancellationToken);
+        await EnsureSuccessAsync(response, "The requested Git reference could not be resolved.", cancellationToken);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (!document.RootElement.TryGetProperty("sha", out var shaElement) ||
+            shaElement.GetString() is not { Length: 40 } commitSha ||
+            !commitSha.All(Uri.IsHexDigit))
+        {
+            throw new AgentImportPreviewException("GitHub returned an invalid commit SHA.");
+        }
+
+        return commitSha.ToLowerInvariant();
+    }
+
+    public async Task<byte[]> GetRootManifestAsync(
+        string repositoryOwner,
+        string repositoryName,
+        string commitSha,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"repos/{Escape(repositoryOwner)}/{Escape(repositoryName)}/contents/csweet-agent.json?ref={Escape(commitSha)}");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github.raw+json"));
+
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        await EnsureSuccessAsync(
+            response,
+            "The repository does not contain a root csweet-agent.json at the resolved commit.",
+            cancellationToken);
+
+        if (response.Content.Headers.ContentLength > MaximumManifestBytes)
+        {
+            throw new AgentImportPreviewException("Agent manifest exceeds the 1 MB preview limit.");
+        }
+
+        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            var count = await input.ReadAsync(buffer, cancellationToken);
+            if (count == 0)
+            {
+                break;
+            }
+
+            if (output.Length + count > MaximumManifestBytes)
+            {
+                throw new AgentImportPreviewException("Agent manifest exceeds the 1 MB preview limit.");
+            }
+
+            await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+        }
+
+        return output.ToArray();
+    }
+
+    private static string Escape(string value) => Uri.EscapeDataString(value);
+
+    private static async Task EnsureSuccessAsync(
+        HttpResponseMessage response,
+        string notFoundMessage,
+        CancellationToken cancellationToken)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            throw new AgentImportPreviewException(notFoundMessage);
+        }
+
+        var detail = await response.Content.ReadAsStringAsync(cancellationToken);
+        throw new AgentImportPreviewException(
+            $"GitHub request failed with status {(int)response.StatusCode}: {detail}");
+    }
+}

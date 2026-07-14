@@ -14,9 +14,14 @@
             <MudText Typo="Typo.h3">Agents</MudText>
             <MudText Color="Color.Secondary">Review installed agents and edit only the settings exposed by each running agent.</MudText>
         </div>
-        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Disabled="@_isBusy" OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
-            Refresh
-        </MudButton>
+        <MudStack Row="true" Spacing="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="OpenImportDialog" StartIcon="@Icons.Material.Filled.Add">
+                Import Agent
+            </MudButton>
+            <MudTooltip Text="Refresh agents">
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Secondary" Disabled="@_isBusy" OnClick="LoadAsync" />
+            </MudTooltip>
+        </MudStack>
     </MudPaper>
 
     @if (_usageSummary is not null)
@@ -75,7 +80,7 @@
                                         <MudText Typo="Typo.caption" Color="Color.Secondary">@agent.PublisherName</MudText>
                                         <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatUsageCaption(AgentUsage(agent.Id)?.Usage)</MudText>
                                     </div>
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">v@agent.Version</MudChip>
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@($"v{agent.Version}")</MudChip>
                                 </div>
                             </MudButton>
                         }
@@ -279,6 +284,78 @@
     }
 </div>
 
+<MudDialog @bind-Visible="_importDialogOpen" Options="_importDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Import Agent</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudTextField Label="Public GitHub repository URL"
+                          @bind-Value="_importRepositoryUrl"
+                          Placeholder="https://github.com/owner/repository"
+                          Variant="Variant.Outlined"
+                          Disabled="@_isPreviewingImport"
+                          Immediate="true" />
+            <MudTextField Label="Branch, tag, or commit (optional)"
+                          @bind-Value="_importRef"
+                          Placeholder="Default branch"
+                          Variant="Variant.Outlined"
+                          Disabled="@_isPreviewingImport" />
+
+            @if (!string.IsNullOrWhiteSpace(_importError))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_importError</MudAlert>
+            }
+
+            @if (_importPreview is not null)
+            {
+                <div class="agent-import-summary">
+                    <dl class="configuration-details agents-details">
+                        <div><dt>Name</dt><dd>@_importPreview.AgentName</dd></div>
+                        <div><dt>Agent ID</dt><dd>@_importPreview.AgentId</dd></div>
+                        <div><dt>Version</dt><dd>@_importPreview.AgentVersion</dd></div>
+                        <div><dt>Publisher</dt><dd>@_importPreview.PublisherName (@_importPreview.PublisherId)</dd></div>
+                        <div><dt>Runtime</dt><dd>@_importPreview.RuntimeType</dd></div>
+                        <div><dt>Project</dt><dd>@DisplayImportValue(_importPreview.ProjectPath)</dd></div>
+                        <div><dt>Framework</dt><dd>@DisplayImportValue(_importPreview.TargetFramework)</dd></div>
+                        <div><dt>Activation</dt><dd>@DisplayImportValue(_importPreview.DefaultActivationMode)</dd></div>
+                        <div><dt>Commit</dt><dd class="agent-import-hash">@_importPreview.CommitSha</dd></div>
+                        <div><dt>Manifest digest</dt><dd class="agent-import-hash">@_importPreview.ManifestDigest</dd></div>
+                    </dl>
+
+                    @ImportValueSection("Capabilities", _importPreview.Capabilities)
+                    @ImportValueSection("Subscriptions", _importPreview.RequestedSubscriptions)
+                    @ImportValueSection("Publications", _importPreview.RequestedPublications)
+                    @ImportValueSection("Requested permissions", _importPreview.RequestedPermissions)
+                    @ImportValueSection("Requested network access", _importPreview.RequestedNetworkAccess)
+
+                    @if (_importPreview.Warnings.Count > 0)
+                    {
+                        <MudStack Spacing="1">
+                            <MudText Typo="Typo.subtitle2">Warnings</MudText>
+                            @foreach (var warning in _importPreview.Warnings)
+                            {
+                                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">@warning.Message</MudAlert>
+                            }
+                        </MudStack>
+                    }
+                </div>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@_isPreviewingImport" OnClick="CloseImportDialog">
+            Close
+        </MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Disabled="@(_isPreviewingImport || string.IsNullOrWhiteSpace(_importRepositoryUrl))"
+                   OnClick="PreviewImportAsync">
+            @(_isPreviewingImport ? "Previewing..." : "Preview Manifest")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
@@ -295,6 +372,13 @@
     private string? _configurationError;
     private string? _actionMessage;
     private bool? _actionSucceeded;
+    private readonly DialogOptions _importDialogOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
+    private bool _importDialogOpen;
+    private bool _isPreviewingImport;
+    private string _importRepositoryUrl = string.Empty;
+    private string _importRef = string.Empty;
+    private string? _importError;
+    private AgentImportPreviewResponse? _importPreview;
 
     private string SchemaChipLabel => _schema is null ? "Offline" : "Configurable";
     private Color SchemaChipColor => _schema is null ? Color.Warning : Color.Success;
@@ -342,6 +426,42 @@
     {
         _selectedAgent = agent;
         await LoadConfigurationAsync(agent);
+    }
+
+    private void OpenImportDialog()
+    {
+        _importRepositoryUrl = string.Empty;
+        _importRef = string.Empty;
+        _importError = null;
+        _importPreview = null;
+        _importDialogOpen = true;
+    }
+
+    private void CloseImportDialog()
+    {
+        _importDialogOpen = false;
+    }
+
+    private async Task PreviewImportAsync()
+    {
+        _isPreviewingImport = true;
+        _importError = null;
+        _importPreview = null;
+
+        try
+        {
+            _importPreview = await AgentApi.PreviewImportAsync(new PreviewAgentImportRequest(
+                _importRepositoryUrl.Trim(),
+                string.IsNullOrWhiteSpace(_importRef) ? null : _importRef.Trim()));
+        }
+        catch (Exception exception)
+        {
+            _importError = exception.Message;
+        }
+        finally
+        {
+            _isPreviewingImport = false;
+        }
     }
 
     private async Task LoadConfigurationAsync(AgentCatalogItemResponse agent)
@@ -539,4 +659,24 @@
         usage is null
             ? "In 0 / Out 0 / 30d"
             : $"In {FormatTokens(usage.InputTokens)} / Out {FormatTokens(usage.OutputTokens)} / 30d";
+
+    private static string DisplayImportValue(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "Not specified" : value;
+
+    private static RenderFragment ImportValueSection(string title, IReadOnlyList<string> values) => @<div class="agent-import-values-section">
+        <MudText Typo="Typo.subtitle2">@title</MudText>
+        @if (values.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">None requested</MudText>
+        }
+        else
+        {
+            <div class="agent-import-values">
+                @foreach (var value in values)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@value</MudChip>
+                }
+            </div>
+        }
+    </div>;
 }

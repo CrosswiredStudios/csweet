@@ -3,6 +3,7 @@ using System;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CSweet.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CSweetDbContext))]
-    partial class CSweetDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260714003708_AddAgentRuntimeGlobalSettings")]
+    partial class AddAgentRuntimeGlobalSettings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -711,136 +714,6 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.ToTable("PlanningWorkflows");
                 });
 
-            modelBuilder.Entity("CSweet.Domain.Setup.AgentPackageSource", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DefaultBranch")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("Host")
-                        .IsRequired()
-                        .HasMaxLength(253)
-                        .HasColumnType("character varying(253)");
-
-                    b.Property<string>("RepositoryName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("RepositoryOwner")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("RepositoryUrl")
-                        .IsRequired()
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RepositoryUrl")
-                        .IsUnique();
-
-                    b.ToTable("AgentPackageSources");
-                });
-
-            modelBuilder.Entity("CSweet.Domain.Setup.AgentPackageVersion", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("AgentId")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("AgentName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("CommitSha")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<string>("DefaultActivationMode")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<DateTimeOffset>("ImportedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ManifestDigest")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("ManifestJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("PackageSourceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ProjectPath")
-                        .HasMaxLength(1024)
-                        .HasColumnType("character varying(1024)");
-
-                    b.Property<string>("PublisherId")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("PublisherName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("RuntimeType")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<string>("TargetFramework")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Version")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("WarningsJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PackageSourceId", "CommitSha", "ManifestDigest")
-                        .IsUnique();
-
-                    b.ToTable("AgentPackageVersions");
-                });
-
             modelBuilder.Entity("CSweet.Domain.Setup.AgentRunLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1459,17 +1332,6 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Organization");
-                });
-
-            modelBuilder.Entity("CSweet.Domain.Setup.AgentPackageVersion", b =>
-                {
-                    b.HasOne("CSweet.Domain.Setup.AgentPackageSource", "PackageSource")
-                        .WithMany()
-                        .HasForeignKey("PackageSourceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("PackageSource");
                 });
 
             modelBuilder.Entity("CSweet.Domain.Setup.ModelCapabilityTest", b =>

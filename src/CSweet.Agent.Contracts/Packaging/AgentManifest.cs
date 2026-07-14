@@ -35,6 +35,12 @@ public sealed class AgentRuntimeManifest
 {
     public string Type { get; init; } = "executable";
 
+    public string? ProjectPath { get; init; }
+
+    public string? TargetFramework { get; init; }
+
+    public string? DefaultActivationMode { get; init; }
+
     public IReadOnlyDictionary<string, string> Entrypoints { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
