@@ -162,6 +162,18 @@
                                 </MudButton>
                             </span>
                         }
+                        else
+                        {
+                            <span @onclick:stopPropagation="true">
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Primary"
+                                           Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Badge"
+                                           OnClick="@(() => OpenRoleDialog(employee))">
+                                    Change role
+                                </MudButton>
+                            </span>
+                        }
                     </MudCardContent>
                 </MudCard>
             }
@@ -365,6 +377,29 @@
     </DialogActions>
 </MudDialog>
 
+<MudDialog @bind-Visible="_roleDialogOpen" Options="_dialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Change company role</MudText></TitleContent>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Color="Color.Secondary">This changes the administrator’s position in this company. System administrator and Owner access remain unchanged.</MudText>
+            <MudSelect T="Guid?" Label="Company role" @bind-Value="_selectedRoleId" Clearable="true" Variant="Variant.Outlined" Disabled="_saving">
+                @foreach (var role in _roles)
+                {
+                    <MudSelectItem T="Guid?" Value="@((Guid?)role.Id)">@role.Name</MudSelectItem>
+                }
+            </MudSelect>
+            @if (!string.IsNullOrWhiteSpace(_actionError))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_actionError</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseRoleDialog" Disabled="_saving">Cancel</MudButton>
+        <MudButton OnClick="SaveRoleAsync" Variant="Variant.Filled" Color="Color.Primary" Disabled="_saving">@(_saving ? "Saving..." : "Save role")</MudButton>
+    </DialogActions>
+</MudDialog>
+
 <MudDialog @bind-Visible="_fireDialogOpen" Options="_dialogOptions">
     <TitleContent><MudText Typo="Typo.h6">Fire employee?</MudText></TitleContent>
     <DialogContent>
@@ -406,6 +441,7 @@
     private string? _actionError;
     private bool _hireDialogOpen;
     private bool _fireDialogOpen;
+    private bool _roleDialogOpen;
     private bool _saving;
     private string _hireName = string.Empty;
     private string? _hireEmail;
@@ -417,6 +453,8 @@
     private Guid? _hireManagerId;
     private readonly HashSet<Guid> _managedEmployeeIds = [];
     private OrganizationUserResponse? _employeeToFire;
+    private OrganizationUserResponse? _roleEmployee;
+    private Guid? _selectedRoleId;
     private OrganizationUserResponse? _configurationEmployee;
     private AgentConfigurationSchemaResponse? _configurationSchema;
     private AgentRuntimeReadinessResponse? _configurationRuntime;
@@ -923,6 +961,41 @@
 
     private void CloseFireDialog() => _fireDialogOpen = false;
 
+    private void OpenRoleDialog(OrganizationUserResponse employee)
+    {
+        _roleEmployee = employee;
+        _selectedRoleId = employee.RoleId;
+        _actionError = null;
+        _roleDialogOpen = true;
+    }
+
+    private void CloseRoleDialog() => _roleDialogOpen = false;
+
+    private async Task SaveRoleAsync()
+    {
+        if (_roleEmployee is null) return;
+        _saving = true;
+        _actionError = null;
+        try
+        {
+            var response = await Http.PutAsJsonAsync(
+                $"api/core/organizations/{OrganizationId}/users/{_roleEmployee.Id}/role",
+                new UpdateOrganizationUserRoleRequest(_selectedRoleId));
+            if (!response.IsSuccessStatusCode)
+            {
+                var failure = await response.Content.ReadFromJsonAsync<CoreActionResponse>();
+                _actionError = failure?.Message ?? "The company role could not be changed.";
+                return;
+            }
+            _roleDialogOpen = false;
+            await LoadEmployeesAsync();
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
     private async Task FireAsync()
     {
         if (_employeeToFire is null || IsSelf(_employeeToFire))
@@ -957,6 +1030,7 @@
     }
 
     private static bool IsSelf(OrganizationUserResponse employee) =>
+        employee.ApplicationUserId.HasValue ||
         string.Equals(employee.DisplayName.Trim(), "Self", StringComparison.OrdinalIgnoreCase);
 
     private async Task LoadEmployeesAsync()

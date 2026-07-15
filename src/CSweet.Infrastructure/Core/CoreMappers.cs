@@ -39,6 +39,7 @@ internal static class CoreMappers
             (int)user.PermissionLevel,
             user.CreatedAt)
         {
+            ApplicationUserId = user.ApplicationUserId,
             AgentInstallationId = user.AgentInstallationId,
             SupportsAgentConfiguration = user.AgentInstallation?.Grant?.CapabilitiesJson.Contains(
                 "\"agent.configuration.describe.v1\"",

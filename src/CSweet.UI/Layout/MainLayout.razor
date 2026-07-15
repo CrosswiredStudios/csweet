@@ -1,4 +1,7 @@
 @inherits LayoutComponentBase
+@inject IAuthenticationApiClient AuthenticationApi
+@inject AuthSessionStore AuthSession
+@inject NavigationManager Navigation
 
 <MudThemeProvider Theme="_theme" />
 <MudPopoverProvider />
@@ -13,6 +16,8 @@
         <div class="app-bar-actions">
             <BusinessSwitcher />
             <MudButton Href="/setup" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Tune">Setup</MudButton>
+            <MudText Typo="Typo.caption">@AuthSession.Current?.Email</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="LogoutAsync" StartIcon="@Icons.Material.Filled.Logout">Sign out</MudButton>
         </div>
     </MudAppBar>
 
@@ -63,5 +68,11 @@
     private void ToggleDrawer()
     {
         _drawerOpen = !_drawerOpen;
+    }
+
+    private async Task LogoutAsync()
+    {
+        await AuthenticationApi.LogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true);
     }
 }

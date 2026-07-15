@@ -1,7 +1,9 @@
 using CSweet.Application.Core;
 using CSweet.Contracts.BusinessOnboarding;
+using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
 using CSweet.Infrastructure.BusinessOnboarding;
+using CSweet.Infrastructure.Auth;
 using CSweet.Infrastructure.Core;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +29,19 @@ public class BusinessOnboardingServiceTests
             taskService,
             workerService,
             auditWriter);
+        var applicationUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "admin@example.com",
+            NormalizedUserName = "ADMIN@EXAMPLE.COM",
+            Email = "admin@example.com",
+            NormalizedEmail = "ADMIN@EXAMPLE.COM",
+            EmailConfirmed = true,
+            IsInitialAdministrator = true,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.Users.Add(applicationUser);
+        await dbContext.SaveChangesAsync();
 
         var result = await service.CompleteAsync(new CompleteBusinessOnboardingRequest(
             "Example Co",
@@ -34,7 +49,7 @@ public class BusinessOnboardingServiceTests
             "Idea",
             "Launch a paid MVP in 30 days",
             ["solo founder", "limited budget"],
-            "Balanced and practical"));
+            "Balanced and practical"), applicationUserId: applicationUser.Id);
 
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Onboarding);
@@ -58,7 +73,11 @@ public class BusinessOnboardingServiceTests
         Assert.Contains(roles, x => x.Name == "CEO" && x.AuthorityLevel == AuthorityLevel.ExecutionWithApproval);
         var self = Assert.Single(employees);
         Assert.Equal("Self", self.DisplayName);
+        Assert.Equal(applicationUser.Id, self.ApplicationUserId);
+        Assert.Equal("admin@example.com", self.Email);
         Assert.Equal(EmployeeType.Human, self.EmployeeType);
+        Assert.Equal(OrganizationPermissionLevel.Owner, self.PermissionLevel);
+        Assert.Equal("CEO", roles.Single(x => x.Id == self.RoleId).Name);
         Assert.Contains(roles, x => x.Name == "Marketing" && x.ResponsibilitiesJson.Contains("Define target customer"));
         Assert.Equal(ObjectiveStatus.Active, objective.Status);
         Assert.Equal("Launch a paid MVP in 30 days", objective.Title);
@@ -67,6 +86,17 @@ public class BusinessOnboardingServiceTests
         Assert.Equal("Local Strategy Agent", worker.Name);
         Assert.Equal(WorkerType.LocalAgent, worker.WorkerType);
         Assert.True(worker.RequiresHumanApproval);
+
+        var operationsRole = roles.Single(x => x.Name == "Operations");
+        var userService = new OrganizationUserService(dbContext, auditWriter);
+        var roleUpdate = await userService.UpdateRoleAsync(
+            organizationId,
+            self.Id,
+            new UpdateOrganizationUserRoleRequest(operationsRole.Id));
+        Assert.True(roleUpdate.Succeeded);
+        var updatedSelf = await dbContext.CoreOrganizationUsers.SingleAsync(x => x.Id == self.Id);
+        Assert.Equal(operationsRole.Id, updatedSelf.RoleId);
+        Assert.Equal(OrganizationPermissionLevel.Owner, updatedSelf.PermissionLevel);
     }
 
     [Fact]

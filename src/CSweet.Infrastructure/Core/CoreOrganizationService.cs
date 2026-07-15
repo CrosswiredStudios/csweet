@@ -36,7 +36,7 @@ public sealed class CoreOrganizationService : ICoreOrganizationService
         return org?.ToResponse();
     }
 
-    public async Task<CoreActionResponse> CreateAsync(CreateOrganizationRequest request, CancellationToken cancellationToken = default)
+    public async Task<CoreActionResponse> CreateAsync(CreateOrganizationRequest request, CancellationToken cancellationToken = default, Guid? applicationUserId = null)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
         {
@@ -62,7 +62,7 @@ public sealed class CoreOrganizationService : ICoreOrganizationService
 
         // Seed default roles for new organization
         await _roleService.EnsureDefaultsAsync(org.Id, cancellationToken);
-        await SeedOwnerAsync(org.Id, cancellationToken);
+        await SeedOwnerAsync(org.Id, applicationUserId, cancellationToken);
 
         await _auditEventWriter.WriteAsync(
             "organization.created",
@@ -136,7 +136,7 @@ public sealed class CoreOrganizationService : ICoreOrganizationService
 
     static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private async Task SeedOwnerAsync(Guid organizationId, CancellationToken cancellationToken)
+    private async Task SeedOwnerAsync(Guid organizationId, Guid? applicationUserId, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var ceoRoleId = await _dbContext.CoreRoles
@@ -148,12 +148,21 @@ public sealed class CoreOrganizationService : ICoreOrganizationService
         {
             Id = Guid.NewGuid(),
             OrganizationId = organizationId,
+            ApplicationUserId = applicationUserId,
             RoleId = ceoRoleId,
             DisplayName = "Self",
             EmployeeType = EmployeeType.Human,
             PermissionLevel = OrganizationPermissionLevel.Owner,
             CreatedAt = now
         };
+
+        if (applicationUserId.HasValue)
+        {
+            ceo.Email = await _dbContext.Users
+                .Where(x => x.Id == applicationUserId.Value)
+                .Select(x => x.Email)
+                .SingleOrDefaultAsync(cancellationToken);
+        }
 
         _dbContext.CoreOrganizationUsers.Add(ceo);
         await _dbContext.SaveChangesAsync(cancellationToken);

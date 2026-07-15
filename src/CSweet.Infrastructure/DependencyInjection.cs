@@ -1,4 +1,5 @@
 using CSweet.Application.Core;
+using CSweet.Application.Auth;
 using CSweet.Application.BusinessOnboarding;
 using CSweet.Application.Llm;
 using CSweet.Application.Planning;
@@ -6,12 +7,15 @@ using CSweet.Application.Setup;
 using CSweet.AI.AgentFramework;
 using CSweet.AI.Providers;
 using CSweet.Infrastructure.BusinessOnboarding;
+using CSweet.Infrastructure.Auth;
 using CSweet.Infrastructure.Core;
 using CSweet.Infrastructure.Llm;
 using CSweet.Infrastructure.Persistence;
 using CSweet.Infrastructure.Planning;
 using CSweet.Infrastructure.Setup;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -35,6 +39,36 @@ public static class DependencyInjection
 
             throw new InvalidOperationException("ConnectionStrings:Postgres or ConnectionStrings:csweet must be configured.");
         });
+
+        builder.Services.AddDataProtection()
+            .SetApplicationName("CSweet")
+            .PersistKeysToDbContext<CSweetDbContext>();
+
+        // Identity's SignInManager depends on the authentication scheme provider even in
+        // non-web hosts such as CSweet.Migrator. The API adds the cookie schemes separately.
+        builder.Services.AddAuthentication();
+
+        builder.Services
+            .AddIdentityCore<ApplicationUser>(options =>
+            {
+                options.SignIn.RequireConfirmedAccount = true;
+                options.User.RequireUniqueEmail = true;
+                options.Lockout.AllowedForNewUsers = true;
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(5);
+            })
+            .AddRoles<IdentityRole<Guid>>()
+            .AddSignInManager()
+            .AddEntityFrameworkStores<CSweetDbContext>()
+            .AddDefaultTokenProviders();
+
+        builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOptions.SectionName));
+        builder.Services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.Zero);
+        builder.Services.AddScoped<IUserConfirmation<ApplicationUser>, RootUserConfirmation>();
+        builder.Services.AddScoped<IEmailDeliveryConfigurationProvider, EmailDeliveryConfigurationProvider>();
+        builder.Services.AddScoped<IAccountEmailSender, SmtpAccountEmailSender>();
+        builder.Services.AddScoped<IEmailDeliverySettingsService, EmailDeliverySettingsService>();
+        builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 
         builder.Services.AddScoped<ISetupService, SetupService>();
         builder.Services.AddScoped<IAuditEventWriter, AuditEventWriter>();
@@ -79,7 +113,10 @@ public static class DependencyInjection
         });
         builder.Services.AddScoped(_ => new OpenAiCompatibleProviderClient(new HttpClient
         {
-            Timeout = TimeSpan.FromSeconds(60)
+            // Local models may need substantial time for a cold load before the first
+            // chat token, especially large BF16 models. Optional probes have their own
+            // shorter cancellation windows in LlmConnectionTester.
+            Timeout = TimeSpan.FromMinutes(3)
         }));
         builder.Services.AddScoped<ILlmProviderFactory, OpenAiCompatibleLlmProviderFactory>();
         builder.Services.AddScoped<ILlmConnectionTester, LlmConnectionTester>();

@@ -17,7 +17,13 @@ public static class MauiProgram
             });
 
         builder.Services.AddMauiBlazorWebView();
-        builder.Services.AddScoped(_ => new HttpClient { BaseAddress = new Uri(ApiBaseUrl) });
+        builder.Services.AddScoped<AntiforgeryHandler>();
+        builder.Services.AddScoped(sp =>
+        {
+            var handler = sp.GetRequiredService<AntiforgeryHandler>();
+            handler.InnerHandler = new HttpClientHandler { UseCookies = true };
+            return new HttpClient(handler) { BaseAddress = new Uri(ApiBaseUrl) };
+        });
         builder.Services.AddCSweetApiClients();
         builder.Services.AddMudServices();
 

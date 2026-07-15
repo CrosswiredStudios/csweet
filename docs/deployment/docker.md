@@ -6,6 +6,16 @@ Docker Compose should be the default self-hosted distribution path for C-Sweet.
 
 The goal is that a user can clone the repository, copy the example environment file, start the Compose stack, and complete first-run setup in the browser.
 
+## Administrator email configuration
+
+Do not expose a fresh installation to an untrusted network. The first visitor can claim the root administrator account, so complete registration and onboarding on a trusted network first.
+
+The first browser visit opens `/register`. Registration does not require SMTP or email confirmation: it signs the root administrator in immediately and displays ten one-time offline recovery codes. Save those codes before continuing. Direct registration closes permanently after the first administrator is created.
+
+Email delivery is an optional, skippable technical-setup step. You can enter SMTP settings in the setup wizard, save them, and send a test message to the root administrator. After a successful test, C-Sweet can send root email verification and email password recovery; future invitations will also depend on this tested-sender state. Until then, offline root recovery codes remain available.
+
+The `CSWEET_SMTP__*` values in `.env.example` are optional initial defaults. `CSWEET_SMTP__PUBLICAPPURL` must be the browser-visible root URL (for example, `http://localhost:8080`) so confirmation and reset links return to the app. When settings are saved through setup, the SMTP password is encrypted with the instance's persisted ASP.NET data-protection keys and is never returned to the browser.
+
 ```bash
 cp .env.example .env
 docker compose up -d

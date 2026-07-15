@@ -2,6 +2,9 @@
 
 CSweet is an open-source, self-hostable operating environment for **agent-first companies**.
 
+> [!WARNING]
+> A fresh instance trusts its first visitor to claim the root administrator account. Register the root user and complete onboarding on a trusted network before exposing C-Sweet publicly. SMTP is optional; save the ten offline recovery codes shown during registration.
+
 A user acts as the CEO. The CEO communicates primarily with a Personal Assistant / Chief of Staff, who translates executive intent into projects, staffing decisions, delegated work, approvals, and results.
 
 Work can be performed by:

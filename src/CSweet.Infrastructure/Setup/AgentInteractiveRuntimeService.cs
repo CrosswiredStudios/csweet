@@ -70,11 +70,25 @@ public sealed class AgentInteractiveRuntimeService(
             throw new AgentInstallationException("The agent installation was not found.");
         }
 
-        var runtime = await dbContext.AgentRuntimeInstances
+        var runtimes = dbContext.AgentRuntimeInstances
             .AsNoTracking()
-            .Where(x => x.AgentInstallationId == installationId)
+            .Where(x => x.AgentInstallationId == installationId);
+        var activeStatuses = new[]
+        {
+            AgentRuntimeStatus.Queued,
+            AgentRuntimeStatus.Starting,
+            AgentRuntimeStatus.WaitingForBrokerRegistration,
+            AgentRuntimeStatus.Running,
+            AgentRuntimeStatus.CompletionReported,
+            AgentRuntimeStatus.Stopping
+        };
+        var runtime = await runtimes
+            .Where(x => activeStatuses.Contains(x.Status))
             .OrderByDescending(x => x.QueuedAt)
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? await runtimes
+                .OrderByDescending(x => x.QueuedAt)
+                .FirstOrDefaultAsync(cancellationToken);
         if (runtime is null)
         {
             return new AgentRuntimeReadinessResponse(
@@ -88,7 +102,10 @@ public sealed class AgentInteractiveRuntimeService(
             AgentRuntimeStatus.Starting => AgentRuntimeReadinessStages.StartingContainer,
             AgentRuntimeStatus.WaitingForBrokerRegistration => AgentRuntimeReadinessStages.WaitingForBroker,
             AgentRuntimeStatus.Running => AgentRuntimeReadinessStages.Ready,
+            AgentRuntimeStatus.CompletionReported => AgentRuntimeReadinessStages.Stopping,
             AgentRuntimeStatus.Stopping => AgentRuntimeReadinessStages.Stopping,
+            AgentRuntimeStatus.Completed or AgentRuntimeStatus.Cancelled or AgentRuntimeStatus.Skipped =>
+                AgentRuntimeReadinessStages.Offline,
             _ when AgentRuntimeInstance.IsTerminal(runtime.Status) => AgentRuntimeReadinessStages.Failed,
             _ => AgentRuntimeReadinessStages.StartingContainer
         };

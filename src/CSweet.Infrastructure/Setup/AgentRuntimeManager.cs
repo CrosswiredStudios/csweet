@@ -358,7 +358,13 @@ public sealed class AgentRuntimeManager(
         if (active.Count > 0 && schedule.OverlapPolicy == OverlapPolicy.Skip)
         {
             tickOutcome = "skipped";
-            AddTerminalInstance(schedule.AgentInstallationId, AgentRuntimeStatus.Skipped, now, "Skipped because a prior runtime is active.");
+            // Always-on reconciliation may queue the runtime immediately before its initial
+            // schedule tick is claimed. That is startup coordination, not a failed run worth
+            // surfacing in runtime history. Periodic overlap skips remain recorded.
+            if (schedule.ActivationMode != ActivationMode.AlwaysOn)
+            {
+                AddTerminalInstance(schedule.AgentInstallationId, AgentRuntimeStatus.Skipped, now, "Skipped because a prior runtime is active.");
+            }
         }
         else
         {

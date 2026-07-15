@@ -1,9 +1,11 @@
 @using System.Net.Http.Json
 @using CSweet.Contracts.Setup
+@using CSweet.Contracts.Core
 @inject HttpClient Http
+@inject IAuthenticationApiClient AuthenticationApi
 @inject NavigationManager Navigation
 
-<Router AppAssembly="@SharedUiAssembly.Value" NotFoundPage="typeof(Pages.NotFound)" OnNavigateAsync="GuardFirstRunAsync">
+<Router AppAssembly="@SharedUiAssembly.Value" NotFoundPage="typeof(Pages.NotFound)" OnNavigateAsync="GuardNavigationAsync">
     <Found Context="routeData">
         <RouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)" />
         <FocusOnNavigate RouteData="@routeData" Selector="h1" />
@@ -11,26 +13,65 @@
 </Router>
 
 @code {
-    private async Task GuardFirstRunAsync(Microsoft.AspNetCore.Components.Routing.NavigationContext context)
-    {
-        if (context.Path.StartsWith("setup", StringComparison.OrdinalIgnoreCase) ||
-            context.Path.StartsWith("configuration", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
+    private static readonly string[] PublicAccountRoutes =
+    [
+        "login", "confirm-email", "forgot-password", "reset-password", "recover-root"
+    ];
 
+    private async Task GuardNavigationAsync(Microsoft.AspNetCore.Components.Routing.NavigationContext context)
+    {
         try
         {
+            var path = context.Path.Trim('/');
+            var auth = await AuthenticationApi.GetStatusAsync(context.CancellationToken);
+
+            if (auth.RegistrationOpen)
+            {
+                RedirectUnless(path, "register", "/register");
+                return;
+            }
+
+            if (!auth.IsAuthenticated)
+            {
+                if (!PublicAccountRoutes.Any(x => path.StartsWith(x, StringComparison.OrdinalIgnoreCase)))
+                {
+                    Navigation.NavigateTo("/login");
+                }
+                return;
+            }
+
             var status = await Http.GetFromJsonAsync<SetupStatusResponse>("api/setup/status", context.CancellationToken);
 
             if (status is { IsFirstRunComplete: false })
             {
-                Navigation.NavigateTo("/setup");
+                RedirectUnless(path, "setup", "/setup");
+                return;
+            }
+
+            var organizations = await Http.GetFromJsonAsync<IReadOnlyList<OrganizationResponse>>("api/organizations", context.CancellationToken) ?? [];
+            if (organizations.Count == 0)
+            {
+                RedirectUnless(path, "business-onboarding", "/business-onboarding");
+                return;
+            }
+
+            if (path.Equals("register", StringComparison.OrdinalIgnoreCase) ||
+                PublicAccountRoutes.Any(x => path.StartsWith(x, StringComparison.OrdinalIgnoreCase)))
+            {
+                Navigation.NavigateTo($"/organizations/{organizations[0].Id}/command-center");
             }
         }
         catch
         {
             // Keep rendering the current route if the API is unavailable; pages can show connectivity state.
+        }
+    }
+
+    private void RedirectUnless(string path, string allowedPrefix, string destination)
+    {
+        if (!path.StartsWith(allowedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            Navigation.NavigateTo(destination);
         }
     }
 }

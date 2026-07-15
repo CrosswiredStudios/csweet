@@ -12,6 +12,7 @@ public sealed record OrganizationUserResponse(
     int PermissionLevel,
     DateTimeOffset CreatedAt)
 {
+    public Guid? ApplicationUserId { get; init; }
     public Guid? AgentInstallationId { get; init; }
     public bool SupportsAgentConfiguration { get; init; }
 }

@@ -15,7 +15,7 @@ public sealed class SetupService : ISetupService
         ("model-capability-test", "Model Capability Test", true),
         ("storage", "Storage", true),
         ("worker-runtime", "Worker Runtime", true),
-        ("admin-user", "Admin User", true),
+        ("email-delivery", "Email Delivery", false),
         ("finish", "Finish", true)
     ];
 
@@ -216,14 +216,6 @@ public sealed class SetupService : ISetupService
         if (!hasSuccessfulChatTest)
         {
             return await FailureAsync("successful_chat_test_required", "A successful chat capability test is required.", cancellationToken);
-        }
-
-        var adminStepComplete = await _dbContext.OnboardingSteps
-            .AnyAsync(x => x.Key == "admin-user" && x.IsComplete, cancellationToken);
-
-        if (!adminStepComplete)
-        {
-            return await FailureAsync("admin_setup_required", "Admin setup must be completed before first-run setup can finish.", cancellationToken);
         }
 
         if (!await ArePriorRequiredStepsCompleteAsync(cancellationToken))

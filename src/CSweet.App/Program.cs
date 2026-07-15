@@ -18,7 +18,13 @@ if (!httpBaseAddress.EndsWith('/'))
     httpBaseAddress += "/";
 }
 
-builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(httpBaseAddress) });
+builder.Services.AddScoped<CookieAndAntiforgeryHandler>();
+builder.Services.AddScoped(sp =>
+{
+    var handler = sp.GetRequiredService<CookieAndAntiforgeryHandler>();
+    handler.InnerHandler = new HttpClientHandler();
+    return new HttpClient(handler) { BaseAddress = new Uri(httpBaseAddress) };
+});
 builder.Services.AddCSweetApiClients();
 builder.Services.AddMudServices();
 

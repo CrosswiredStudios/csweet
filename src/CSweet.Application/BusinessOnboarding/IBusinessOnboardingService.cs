@@ -6,5 +6,6 @@ public interface IBusinessOnboardingService
 {
     Task<BusinessOnboardingActionResponse> CompleteAsync(
         CompleteBusinessOnboardingRequest request,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Guid? applicationUserId = null);
 }

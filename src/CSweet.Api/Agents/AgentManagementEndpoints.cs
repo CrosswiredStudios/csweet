@@ -11,6 +11,8 @@ public static class AgentManagementEndpoints
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan CapabilityTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ProviderRegistrationGracePeriod = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ProviderRegistrationRetryDelay = TimeSpan.FromMilliseconds(100);
 
     public static IServiceCollection AddAgentManagement(this IServiceCollection services, IConfiguration configuration)
     {
@@ -285,18 +287,35 @@ public static class AgentManagementEndpoints
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(CapabilityTimeout);
+        var registrationDeadline = DateTimeOffset.UtcNow.Add(ProviderRegistrationGracePeriod);
 
-        return await broker.InvokeCapabilityAsync(
-            new RequestCapability
+        while (true)
+        {
+            var result = await broker.InvokeCapabilityAsync(
+                new RequestCapability
+                {
+                    Capability = capability,
+                    TargetAgentId = agentId,
+                    ContentType = "application/json",
+                    Payload = ByteString.CopyFrom(payload)
+                },
+                correlationId: Guid.NewGuid().ToString("N"),
+                timeout.Token);
+
+            if (result.Succeeded ||
+                !IsProviderRegistrationPending(result) ||
+                DateTimeOffset.UtcNow >= registrationDeadline)
             {
-                Capability = capability,
-                TargetAgentId = agentId,
-                ContentType = "application/json",
-                Payload = ByteString.CopyFrom(payload)
-            },
-            correlationId: Guid.NewGuid().ToString("N"),
-            timeout.Token);
+                return result;
+            }
+
+            await Task.Delay(ProviderRegistrationRetryDelay, timeout.Token);
+        }
     }
+
+    private static bool IsProviderRegistrationPending(CapabilityResult result) =>
+        !result.Succeeded &&
+        result.Error.StartsWith("No authorized agent", StringComparison.Ordinal);
 
     private static bool TryGetFailure(CapabilityResult result, out IResult failure)
     {

@@ -6,6 +6,7 @@ public sealed class OrganizationUser
 {
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
+    public Guid? ApplicationUserId { get; set; }
     public Guid? ReportsToOrganizationUserId { get; set; }
     public Guid? RoleId { get; set; }
     public Guid? WorkerId { get; set; }

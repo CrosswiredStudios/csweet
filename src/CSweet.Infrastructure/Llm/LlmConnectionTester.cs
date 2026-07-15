@@ -55,10 +55,14 @@ public sealed class LlmConnectionTester : ILlmConnectionTester
             return unsupportedResult;
         }
 
+        var connectionSucceeded = false;
+        var chatStarted = false;
+
         try
         {
             var apiKey = await ResolveApiKeyAsync(profile, cancellationToken);
             var models = await _providerClient.ListModelsAsync(profile, apiKey, cancellationToken);
+            connectionSucceeded = true;
 
             if (models.Count > 0 &&
                 !models.Any(x => string.Equals(x.Id, profile.DefaultChatModel, StringComparison.OrdinalIgnoreCase)))
@@ -68,6 +72,7 @@ public sealed class LlmConnectionTester : ILlmConnectionTester
                 return modelMissingResult;
             }
 
+            chatStarted = true;
             var chatResponse = await _providerClient.CompleteChatAsync(profile, apiKey, ReadyPrompt, cancellationToken);
             var chatSucceeded = string.Equals(chatResponse.Trim(), "READY", StringComparison.OrdinalIgnoreCase);
 
@@ -127,7 +132,14 @@ public sealed class LlmConnectionTester : ILlmConnectionTester
         }
         catch (OperationCanceledException)
         {
-            var timeoutResult = new ModelCapabilityTestResult(profile.Id, false, false, false, false, false, "Timeout.");
+            var timeoutResult = new ModelCapabilityTestResult(
+                profile.Id,
+                connectionSucceeded,
+                false,
+                false,
+                false,
+                false,
+                chatStarted ? "Chat completion timed out." : "Timeout.");
             await PersistAsync(profile, timeoutResult, rawResult: null, CancellationToken.None);
             return timeoutResult;
         }

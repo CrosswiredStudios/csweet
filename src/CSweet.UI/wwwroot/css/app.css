@@ -4,6 +4,56 @@ body {
     font-family: Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+.auth-shell {
+    display: grid;
+    grid-template-columns: minmax(18rem, 36%) minmax(0, 1fr);
+    min-height: 100vh;
+    background: #fbf8f3;
+}
+
+.auth-brand-panel {
+    display: flex;
+    min-height: 100%;
+    padding: clamp(2rem, 6vw, 5rem);
+    flex-direction: column;
+    justify-content: center;
+    gap: 2rem;
+    background: linear-gradient(145deg, #0b2e53, #061b34);
+    color: #fff;
+}
+
+.auth-brand-panel .mud-typography { color: inherit; }
+.auth-mark {
+    display: grid;
+    width: 5rem;
+    height: 5rem;
+    place-items: center;
+    border: 0.65rem solid #fff;
+    border-right-color: #ff5c5c;
+    border-radius: 999px;
+    font-size: 2rem;
+    font-weight: 800;
+}
+
+.auth-content {
+    display: grid;
+    padding: 2rem;
+    place-items: center;
+}
+
+.auth-card {
+    display: grid;
+    width: min(30rem, 100%);
+    gap: 0.65rem;
+    padding: clamp(1.5rem, 4vw, 2.5rem);
+    border: 1px solid #e2ddd5;
+    border-radius: 0.85rem;
+    box-shadow: 0 1rem 3rem rgba(11, 46, 83, 0.08);
+}
+
+.auth-card-centered { place-items: center; text-align: center; }
+.auth-form { display: grid; gap: 1rem; margin-top: 1rem; }
+
 h1:focus {
     outline: none;
 }
@@ -1067,6 +1117,9 @@ code {
 }
 
 @media (max-width: 860px) {
+    .auth-shell { grid-template-columns: 1fr; }
+    .auth-brand-panel { min-height: auto; padding: 1.5rem; }
+    .auth-mark { width: 3.5rem; height: 3.5rem; border-width: 0.45rem; }
     .page-header,
     .setup-grid {
         display: block;
@@ -1112,4 +1165,21 @@ code {
     .setup-check-row small {
         grid-column: 2;
     }
+}
+.recovery-code-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: .65rem;
+    margin-top: 1rem;
+}
+
+.recovery-code-grid code {
+    display: block;
+    padding: .75rem;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: .5rem;
+    background: var(--mud-palette-background-gray);
+    text-align: center;
+    font-size: 1rem;
+    letter-spacing: .08em;
 }

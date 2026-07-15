@@ -1,6 +1,9 @@
 using CSweet.Application.Setup;
 using CSweet.AI.Providers;
 using CSweet.Contracts.Llm;
+using CSweet.Contracts.Setup;
+using CSweet.Api.Auth;
+using System.Security.Claims;
 
 namespace CSweet.Api.Setup;
 
@@ -27,6 +30,31 @@ public static class SetupEndpoints
             return result.Succeeded
                 ? Results.Ok(result)
                 : Results.BadRequest(result);
+        });
+
+        group.MapGet("/email-delivery", async (
+            IEmailDeliverySettingsService service,
+            CancellationToken cancellationToken) =>
+            Results.Ok(await service.GetAsync(cancellationToken)));
+
+        group.MapPut("/email-delivery", async (
+            UpdateEmailDeliverySettingsRequest request,
+            IEmailDeliverySettingsService service,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await service.UpdateAsync(request, cancellationToken);
+            return result.Succeeded ? Results.Ok(result) : Results.BadRequest(result);
+        });
+
+        group.MapPost("/email-delivery/test", async (
+            ClaimsPrincipal principal,
+            IEmailDeliverySettingsService service,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = principal.GetApplicationUserId();
+            if (!userId.HasValue) return Results.Unauthorized();
+            var result = await service.TestAsync(userId.Value, cancellationToken);
+            return result.Succeeded ? Results.Ok(result) : Results.BadRequest(result);
         });
 
         group.MapPost("/default-chat-provider", async (

@@ -78,6 +78,58 @@ public sealed class AgentRuntimeManagerTests
     }
 
     [Fact]
+    public async Task InteractiveStatus_PrefersActiveRuntimeOverNewerSkippedTick()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        var running = RunningInstance(installation.Id);
+        var skipped = new AgentRuntimeInstance
+        {
+            Id = Guid.NewGuid(),
+            TickId = Guid.NewGuid(),
+            AgentInstallationId = installation.Id,
+            QueuedAt = running.QueuedAt.AddSeconds(1)
+        };
+        skipped.TransitionTo(AgentRuntimeStatus.Skipped, skipped.QueuedAt, "Skipped because a prior runtime is active.");
+        db.AgentRuntimeInstances.AddRange(running, skipped);
+        await db.SaveChangesAsync();
+
+        var readiness = await new AgentInteractiveRuntimeService(
+            db,
+            CreateManager(db, new FakeRunner())).GetStatusAsync(installation.Id);
+
+        Assert.Equal(running.Id, readiness.RuntimeInstanceId);
+        Assert.Equal(AgentRuntimeReadinessStages.Ready, readiness.Stage);
+        Assert.True(readiness.IsReady);
+        Assert.False(readiness.IsTerminal);
+    }
+
+    [Fact]
+    public async Task InteractiveStatus_TreatsBenignTerminalRuntimeAsOffline()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        var skipped = new AgentRuntimeInstance
+        {
+            Id = Guid.NewGuid(),
+            TickId = Guid.NewGuid(),
+            AgentInstallationId = installation.Id,
+            QueuedAt = DateTimeOffset.UtcNow
+        };
+        skipped.TransitionTo(AgentRuntimeStatus.Skipped, skipped.QueuedAt, "Skipped because a prior runtime is active.");
+        db.AgentRuntimeInstances.Add(skipped);
+        await db.SaveChangesAsync();
+
+        var readiness = await new AgentInteractiveRuntimeService(
+            db,
+            CreateManager(db, new FakeRunner())).GetStatusAsync(installation.Id);
+
+        Assert.Equal(AgentRuntimeReadinessStages.Offline, readiness.Stage);
+        Assert.False(readiness.IsReady);
+        Assert.True(readiness.IsTerminal);
+    }
+
+    [Fact]
     public async Task AlwaysOnReconciliation_StartsOneMissingRuntime()
     {
         await using var db = CreateDb();
@@ -128,6 +180,23 @@ public sealed class AgentRuntimeManagerTests
 
         Assert.Contains(await db.AgentRuntimeInstances.ToListAsync(), x => x.Status == AgentRuntimeStatus.Skipped);
         Assert.Empty(containers.Starts);
+    }
+
+    [Fact]
+    public async Task AlwaysOnInitialTick_DoesNotRecordSkippedRuntimeWhenReconciliationAlreadyQueuedOne()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db);
+        installation.Schedule!.ActivationMode = ActivationMode.AlwaysOn;
+        db.AgentRuntimeInstances.Add(RunningInstance(installation.Id));
+        await db.SaveChangesAsync();
+        var manager = CreateManager(db, new FakeRunner());
+
+        await manager.ProcessDueSchedulesAsync();
+
+        var runtime = Assert.Single(await db.AgentRuntimeInstances.ToListAsync());
+        Assert.Equal(AgentRuntimeStatus.Running, runtime.Status);
+        Assert.Null(installation.Schedule.NextTickAt);
     }
 
     [Fact]

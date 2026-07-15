@@ -1,5 +1,7 @@
 using CSweet.Application.Core;
 using CSweet.Contracts.Core;
+using CSweet.Api.Auth;
+using System.Security.Claims;
 
 namespace CSweet.Api.Core;
 
@@ -26,16 +28,16 @@ public static class CoreOrganizationEndpoints
             return org is null ? Results.NotFound() : Results.Ok(org);
         });
 
-        group.MapPost("", async (CreateOrganizationRequest request, ICoreOrganizationService service, CancellationToken cancellationToken) =>
+        group.MapPost("", async (CreateOrganizationRequest request, ClaimsPrincipal principal, ICoreOrganizationService service, CancellationToken cancellationToken) =>
         {
-            var result = await service.CreateAsync(request, cancellationToken);
+            var result = await service.CreateAsync(request, cancellationToken, principal.GetApplicationUserId());
             return result.Succeeded
                 ? Results.Created($"/api/core/organizations/{result.Organization!.Id}", result.Organization)
                 : Results.BadRequest(result);
         });
-        phaseGroup.MapPost("", async (CreateOrganizationRequest request, ICoreOrganizationService service, CancellationToken cancellationToken) =>
+        phaseGroup.MapPost("", async (CreateOrganizationRequest request, ClaimsPrincipal principal, ICoreOrganizationService service, CancellationToken cancellationToken) =>
         {
-            var result = await service.CreateAsync(request, cancellationToken);
+            var result = await service.CreateAsync(request, cancellationToken, principal.GetApplicationUserId());
             return result.Succeeded
                 ? Results.Created($"/api/organizations/{result.Organization!.Id}", result.Organization)
                 : Results.BadRequest(result);

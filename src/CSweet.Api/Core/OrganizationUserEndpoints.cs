@@ -34,6 +34,14 @@ public static class OrganizationUserEndpoints
                 : Results.BadRequest(result);
         });
 
+        group.MapPut("/{id:guid}/role", async (Guid organizationId, Guid id, UpdateOrganizationUserRoleRequest request, IOrganizationUserService service, CancellationToken cancellationToken) =>
+        {
+            var result = await service.UpdateRoleAsync(organizationId, id, request, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result.OrganizationUser)
+                : Results.BadRequest(result);
+        });
+
         return endpoints;
     }
 }

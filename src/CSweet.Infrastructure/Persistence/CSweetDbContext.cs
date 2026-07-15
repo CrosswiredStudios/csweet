@@ -1,11 +1,15 @@
 using CSweet.Domain.Core;
 using CSweet.Domain.Planning;
 using CSweet.Domain.Setup;
+using CSweet.Infrastructure.Auth;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace CSweet.Infrastructure.Persistence;
 
-public sealed class CSweetDbContext : DbContext
+public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>, IDataProtectionKeyContext
 {
     public CSweetDbContext(DbContextOptions<CSweetDbContext> options)
         : base(options)
@@ -49,9 +53,45 @@ public sealed class CSweetDbContext : DbContext
     // Conversation entities
     public DbSet<Conversation> CoreConversations => Set<Conversation>();
     public DbSet<ConversationMessage> CoreConversationMessages => Set<ConversationMessage>();
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+    public DbSet<RootRecoveryCode> RootRecoveryCodes => Set<RootRecoveryCode>();
+    public DbSet<EmailDeliveryConfiguration> EmailDeliveryConfigurations => Set<EmailDeliveryConfiguration>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<ApplicationUser>(entity =>
+        {
+            entity.Property(x => x.CreatedAt).IsRequired();
+            entity.HasIndex(x => x.IsInitialAdministrator)
+                .IsUnique()
+                .HasFilter("\"IsInitialAdministrator\" = TRUE");
+        });
+
+        modelBuilder.Entity<RootRecoveryCode>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.CodeHash).HasMaxLength(1024).IsRequired();
+            entity.Property(x => x.ConcurrencyStamp).HasMaxLength(64).IsConcurrencyToken();
+            entity.HasOne<ApplicationUser>()
+                .WithMany()
+                .HasForeignKey(x => x.ApplicationUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => new { x.ApplicationUserId, x.UsedAt });
+        });
+
+        modelBuilder.Entity<EmailDeliveryConfiguration>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Host).HasMaxLength(253).IsRequired();
+            entity.Property(x => x.UserName).HasMaxLength(320);
+            entity.Property(x => x.EncryptedPassword).HasMaxLength(4096);
+            entity.Property(x => x.FromAddress).HasMaxLength(320).IsRequired();
+            entity.Property(x => x.FromName).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.PublicAppUrl).HasMaxLength(2048).IsRequired();
+        });
+
         // Apply planning entity configurations
         PlanningConfigurations.Apply(modelBuilder);
         

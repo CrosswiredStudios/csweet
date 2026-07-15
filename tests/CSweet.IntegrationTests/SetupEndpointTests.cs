@@ -34,7 +34,8 @@ public class SetupEndpointTests
 
         Assert.NotNull(status);
         Assert.False(status.IsFirstRunComplete);
-        Assert.Contains(status.Steps, x => x.Key == "admin-user");
+        Assert.Contains(status.Steps, x => x.Key == "email-delivery" && !x.IsRequired);
+        Assert.DoesNotContain(status.Steps, x => x.Key == "admin-user");
     }
 
     [Fact]

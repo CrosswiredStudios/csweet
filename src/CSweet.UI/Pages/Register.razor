@@ -1,0 +1,95 @@
+@page "/register"
+@layout AnonymousLayout
+@using System.ComponentModel.DataAnnotations
+@using CSweet.Contracts.Auth
+@inject IAuthenticationApiClient AuthenticationApi
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Create administrator - C-Sweet</PageTitle>
+
+<MudPaper Elevation="0" Class="auth-card">
+    <MudText Typo="Typo.overline" Color="Color.Secondary">Initial onboarding</MudText>
+    <MudText Typo="Typo.h4">Create the root administrator</MudText>
+    @if (_recoveryCodes.Count == 0)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mt-4">Complete onboarding before exposing this instance to an untrusted network. The first visitor can claim a fresh installation.</MudAlert>
+        <EditForm Model="_model" OnValidSubmit="RegisterAsync" Class="auth-form">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <MudTextField Label="Email" InputType="InputType.Email" @bind-Value="_model.Email" For="@(() => _model.Email)" Variant="Variant.Outlined" Required="true" />
+            <MudTextField Label="Password" InputType="InputType.Password" @bind-Value="_model.Password" For="@(() => _model.Password)" Variant="Variant.Outlined" Required="true" />
+            <MudTextField Label="Confirm password" InputType="InputType.Password" @bind-Value="_model.ConfirmPassword" For="@(() => _model.ConfirmPassword)" Variant="Variant.Outlined" Required="true" />
+            @if (_errors.Count > 0)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@string.Join(" ", _errors)</MudAlert>
+            }
+            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Disabled="_saving">
+                @(_saving ? "Creating account..." : "Create administrator")
+            </MudButton>
+        </EditForm>
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mt-4">These recovery codes are shown only once. Each code can reset the root password one time without email.</MudAlert>
+        <div class="recovery-code-grid">
+            @foreach (var recoveryCode in _recoveryCodes)
+            {
+                <code>@recoveryCode</code>
+            }
+        </div>
+        <MudStack Row="true" Class="mt-4">
+            <MudButton Variant="Variant.Outlined" OnClick="CopyCodesAsync">Copy</MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="DownloadCodesAsync">Download</MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="PrintCodesAsync">Print</MudButton>
+        </MudStack>
+        <MudCheckBox T="bool" @bind-Value="_codesSaved" Label="I saved these recovery codes in a secure place." Class="mt-4" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Disabled="@(!_codesSaved)" OnClick="ContinueToSetup">Continue to setup</MudButton>
+    }
+</MudPaper>
+
+@code {
+    private readonly RegisterModel _model = new();
+    private readonly List<string> _errors = [];
+    private bool _saving;
+    private IReadOnlyList<string> _recoveryCodes = [];
+    private bool _codesSaved;
+    private IJSObjectReference? _module;
+
+    private async Task RegisterAsync()
+    {
+        _saving = true;
+        _errors.Clear();
+        var result = await AuthenticationApi.RegisterAsync(new RegisterAdminRequest(_model.Email, _model.Password, _model.ConfirmPassword));
+        if (result.Succeeded)
+        {
+            _recoveryCodes = result.RecoveryCodes ?? [];
+        }
+        else
+        {
+            _errors.AddRange(result.ValidationErrors?.SelectMany(x => x.Value) ?? [result.Message]);
+            if (result.ErrorCode == "registration_closed") Navigation.NavigateTo("/login");
+        }
+        _saving = false;
+    }
+
+    private string RecoveryText => $"C-Sweet root recovery codes{Environment.NewLine}{Environment.NewLine}{string.Join(Environment.NewLine, _recoveryCodes)}";
+    private async Task<IJSObjectReference> ModuleAsync() => _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/CSweet.UI/js/auth-security.js");
+    private async Task CopyCodesAsync() => await (await ModuleAsync()).InvokeVoidAsync("copyText", RecoveryText);
+    private async Task DownloadCodesAsync() => await (await ModuleAsync()).InvokeVoidAsync("downloadText", "csweet-root-recovery-codes.txt", RecoveryText);
+    private async Task PrintCodesAsync() => await (await ModuleAsync()).InvokeVoidAsync("printText", "C-Sweet root recovery codes", RecoveryText);
+    private void ContinueToSetup() => Navigation.NavigateTo("/setup", forceLoad: true);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null) await _module.DisposeAsync();
+    }
+
+    private sealed class RegisterModel
+    {
+        [Required, EmailAddress] public string Email { get; set; } = string.Empty;
+        [Required] public string Password { get; set; } = string.Empty;
+        [Required] public string ConfirmPassword { get; set; } = string.Empty;
+    }
+}

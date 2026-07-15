@@ -1,0 +1,36 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<main class="auth-shell">
+    <section class="auth-brand-panel">
+        <div class="auth-mark">C</div>
+        <div>
+            <MudText Typo="Typo.h3">C-Sweet</MudText>
+            <MudText>Build and operate your company with an agent-first workforce.</MudText>
+        </div>
+    </section>
+    <section class="auth-content">
+        @Body
+    </section>
+</main>
+
+@code {
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#0B2E53",
+            Secondary = "#FF5C5C",
+            Background = "#FBF8F3",
+            Surface = "#FFFFFF",
+            TextPrimary = "#0B2E53",
+            TextSecondary = "#52606D",
+            Error = "#B3261E",
+            Success = "#23845C"
+        }
+    };
+}

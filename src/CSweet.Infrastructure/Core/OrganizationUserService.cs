@@ -176,9 +176,9 @@ public sealed class OrganizationUserService : IOrganizationUserService
             return Failure("not_found", "User was not found.");
         }
 
-        if (string.Equals(user.DisplayName.Trim(), "Self", StringComparison.OrdinalIgnoreCase))
+        if (user.ApplicationUserId.HasValue || string.Equals(user.DisplayName.Trim(), "Self", StringComparison.OrdinalIgnoreCase))
         {
-            return Failure("cannot_delete_self", "Self cannot be fired.");
+            return Failure("cannot_delete_self", "The administrator membership cannot be removed.");
         }
 
         var name = user.DisplayName;
@@ -208,6 +208,38 @@ public sealed class OrganizationUserService : IOrganizationUserService
             cancellationToken: cancellationToken);
 
         return new CoreActionResponse(true, null, "User removed successfully.");
+    }
+
+    public async Task<CoreActionResponse> UpdateRoleAsync(
+        Guid organizationId,
+        Guid id,
+        UpdateOrganizationUserRoleRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await _dbContext.CoreOrganizationUsers
+            .SingleOrDefaultAsync(x => x.Id == id && x.OrganizationId == organizationId, cancellationToken);
+        if (user is null)
+        {
+            return Failure("not_found", "User was not found.");
+        }
+
+        if (request.RoleId.HasValue && !await _dbContext.CoreRoles.AnyAsync(
+                x => x.Id == request.RoleId.Value && x.OrganizationId == organizationId,
+                cancellationToken))
+        {
+            return Failure("invalid_role", "Role must belong to the same organization.");
+        }
+
+        user.RoleId = request.RoleId;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await _auditEventWriter.WriteAsync(
+            "organization_user.role_updated",
+            "OrganizationUser",
+            user.Id,
+            $"User '{user.DisplayName}' changed company role.",
+            cancellationToken: cancellationToken);
+
+        return new CoreActionResponse(true, null, "Role updated successfully.", OrganizationUser: user.ToResponse());
     }
 
     static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

@@ -1,0 +1,69 @@
+@page "/login"
+@layout AnonymousLayout
+@using System.ComponentModel.DataAnnotations
+@using CSweet.Contracts.Auth
+@inject IAuthenticationApiClient AuthenticationApi
+@inject NavigationManager Navigation
+
+<PageTitle>Sign in - C-Sweet</PageTitle>
+
+<MudPaper Elevation="0" Class="auth-card">
+    <MudText Typo="Typo.h4">Welcome back</MudText>
+    <MudText Color="Color.Secondary">Sign in to your C-Sweet command center.</MudText>
+    <EditForm Model="_model" OnValidSubmit="LoginAsync" Class="auth-form">
+        <DataAnnotationsValidator />
+        <MudTextField Label="Email" InputType="InputType.Email" @bind-Value="_model.Email" For="@(() => _model.Email)" Variant="Variant.Outlined" Required="true" />
+        <MudTextField Label="Password" InputType="InputType.Password" @bind-Value="_model.Password" For="@(() => _model.Password)" Variant="Variant.Outlined" Required="true" />
+        <MudCheckBox T="bool" @bind-Value="_model.RememberMe" Label="Remember me for 30 days" />
+        @if (!string.IsNullOrWhiteSpace(_message))
+        {
+            <MudAlert Severity="@(_success ? Severity.Success : Severity.Error)" Variant="Variant.Outlined">@_message</MudAlert>
+        }
+        <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Disabled="_saving">@(_saving ? "Signing in..." : "Sign in")</MudButton>
+        @if (_needsConfirmation)
+        {
+            <MudButton Variant="Variant.Text" Color="Color.Primary" FullWidth="true" OnClick="ResendAsync">Resend confirmation email</MudButton>
+        }
+        <MudButton Href="/forgot-password" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">Forgot password?</MudButton>
+        <MudButton Href="/recover-root" Variant="Variant.Text" Color="Color.Secondary" FullWidth="true">Use a root recovery code</MudButton>
+    </EditForm>
+</MudPaper>
+
+@code {
+    private readonly LoginModel _model = new();
+    private bool _saving;
+    private bool _needsConfirmation;
+    private bool _success;
+    private string? _message;
+
+    private async Task LoginAsync()
+    {
+        _saving = true;
+        _needsConfirmation = false;
+        var result = await AuthenticationApi.LoginAsync(new LoginRequest(_model.Email, _model.Password, _model.RememberMe));
+        if (result.Succeeded)
+        {
+            Navigation.NavigateTo("/", forceLoad: true);
+        }
+        else
+        {
+            _message = result.Message;
+            _needsConfirmation = result.ErrorCode == "email_not_confirmed";
+        }
+        _saving = false;
+    }
+
+    private async Task ResendAsync()
+    {
+        var result = await AuthenticationApi.ResendConfirmationAsync(_model.Email);
+        _success = result.Succeeded;
+        _message = result.Message;
+    }
+
+    private sealed class LoginModel
+    {
+        [Required, EmailAddress] public string Email { get; set; } = string.Empty;
+        [Required] public string Password { get; set; } = string.Empty;
+        public bool RememberMe { get; set; }
+    }
+}

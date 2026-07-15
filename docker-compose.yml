@@ -54,6 +54,14 @@ services:
       DOTNET_ENVIRONMENT: ${DOTNET_ENVIRONMENT:-Production}
       ConnectionStrings__Postgres: ${CSWEET_CONNECTIONSTRINGS__POSTGRES:-Host=postgres;Port=5432;Database=csweet;Username=csweet;Password=change-me-in-production}
       CSWEET_SETUP__ALLOW_FIRST_RUN: ${CSWEET_SETUP__ALLOW_FIRST_RUN:-true}
+      CSweet__Smtp__Host: ${CSWEET_SMTP__HOST:-}
+      CSweet__Smtp__Port: ${CSWEET_SMTP__PORT:-587}
+      CSweet__Smtp__EnableSsl: ${CSWEET_SMTP__ENABLESSL:-true}
+      CSweet__Smtp__UserName: ${CSWEET_SMTP__USERNAME:-}
+      CSweet__Smtp__Password: ${CSWEET_SMTP__PASSWORD:-}
+      CSweet__Smtp__FromAddress: ${CSWEET_SMTP__FROMADDRESS:-}
+      CSweet__Smtp__FromName: ${CSWEET_SMTP__FROMNAME:-C-Sweet}
+      CSweet__Smtp__PublicAppUrl: ${CSWEET_SMTP__PUBLICAPPURL:-http://localhost:8080}
       CSWEET_LLM__DEFAULT_PROVIDER_TYPE: ${CSWEET_LLM__DEFAULT_PROVIDER_TYPE:-LMStudio}
       CSWEET_LLM__DEFAULT_BASE_URL: ${CSWEET_LLM__DEFAULT_BASE_URL:-http://host.docker.internal:1234/v1}
       CSWEET_LLM__DEFAULT_API_KEY: ${CSWEET_LLM__DEFAULT_API_KEY:-lm-studio}

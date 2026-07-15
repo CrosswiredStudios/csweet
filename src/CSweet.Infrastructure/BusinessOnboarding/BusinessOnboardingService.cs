@@ -37,7 +37,8 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
 
     public async Task<BusinessOnboardingActionResponse> CompleteAsync(
         CompleteBusinessOnboardingRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? applicationUserId = null)
     {
         if (string.IsNullOrWhiteSpace(request.BusinessName))
         {
@@ -64,7 +65,8 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
                 TrimOrNull(request.Stage),
                 request.PrimaryGoal.Trim(),
                 contextJson),
-            cancellationToken);
+            cancellationToken,
+            applicationUserId);
 
         if (!organizationResult.Succeeded || organizationResult.Organization is null)
         {

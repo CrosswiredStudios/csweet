@@ -41,7 +41,7 @@ var api = builder.AddProject<Projects.CSweet_Api>("api")
     .WaitFor(agentHost)
     .WaitForCompletion(migrator);
 
-builder.AddProject<Projects.CSweet_App>("app")
+builder.AddProject<Projects.CSweet_App>("app", launchProfileName: "http")
     .WithReference(api)
     .WaitFor(api);
 

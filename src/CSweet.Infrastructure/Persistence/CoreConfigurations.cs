@@ -1,4 +1,5 @@
 using CSweet.Domain.Core;
+using CSweet.Infrastructure.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -29,6 +30,11 @@ internal static class CoreConfigurations
         entity.Property(x => x.EmployeeType).HasConversion<string>().HasMaxLength(16).IsRequired();
         entity.Property(x => x.PermissionLevel).HasConversion<string>().HasMaxLength(16).IsRequired();
 
+        entity.HasOne<ApplicationUser>()
+            .WithMany()
+            .HasForeignKey(x => x.ApplicationUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         entity.HasOne(x => x.Organization)
             .WithMany()
             .HasForeignKey(x => x.OrganizationId)
@@ -56,6 +62,9 @@ internal static class CoreConfigurations
             .OnDelete(DeleteBehavior.Restrict);
 
         entity.HasIndex(x => x.AgentInstallationId);
+        entity.HasIndex(x => new { x.OrganizationId, x.ApplicationUserId })
+            .IsUnique()
+            .HasFilter("\"ApplicationUserId\" IS NOT NULL");
     }
 
     static void ConfigureCoreOrganization(EntityTypeBuilder<Organization> entity)
