@@ -149,6 +149,71 @@ public sealed class AgentRuntimeManagerTests
     }
 
     [Fact]
+    public async Task AlwaysOnReconciliation_StopsAfterThreeStartupFailuresAndRetainsDetails()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        installation.Schedule!.ActivationMode = ActivationMode.AlwaysOn;
+        installation.Schedule.NextTickAt = null;
+        await db.SaveChangesAsync();
+        var containers = new FakeRunner
+        {
+            InspectStatus = new AgentContainerStatus(
+                "container-id",
+                "agent",
+                AgentContainerState.Exited,
+                1,
+                null,
+                null,
+                "The agent process exited during startup."),
+            Logs = "Fatal: manifest version does not match the implementation version."
+        };
+        var manager = CreateManager(db, containers);
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            Assert.Equal(1, await manager.EnsureAlwaysOnRuntimesAsync());
+            Assert.Equal(1, await manager.ReconcileAsync());
+            Assert.Equal(1, await manager.ReconcileAsync());
+            Assert.Equal(attempt, installation.Schedule.ConsecutiveStartupFailures);
+        }
+
+        Assert.NotNull(installation.Schedule.AutomaticStartSuppressedAt);
+        Assert.Null(installation.Schedule.NextTickAt);
+        Assert.Equal(0, await manager.EnsureAlwaysOnRuntimesAsync());
+        Assert.Equal(3, containers.Starts.Count);
+        var latest = await db.AgentRuntimeInstances.OrderByDescending(x => x.QueuedAt).FirstAsync();
+        Assert.Equal(AgentRuntimeStatus.Failed, latest.Status);
+        Assert.Contains("exited during startup", latest.Reason);
+        Assert.Contains("manifest version", latest.LogExcerpt);
+    }
+
+    [Fact]
+    public async Task BrokerRegistration_ResetsAlwaysOnStartupFailures()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        installation.Schedule!.ActivationMode = ActivationMode.AlwaysOn;
+        installation.Schedule.NextTickAt = null;
+        installation.Schedule.ConsecutiveStartupFailures = 2;
+        await db.SaveChangesAsync();
+        var containers = new FakeRunner();
+        var manager = CreateManager(db, containers);
+
+        await manager.EnsureAlwaysOnRuntimesAsync();
+        await manager.ReconcileAsync();
+        var request = Assert.Single(containers.Starts);
+        await new AgentRuntimeSignalService(db).RecordBrokerRegistrationAsync(
+            request.RuntimeInstanceId,
+            request.TickId,
+            request.InstallationId,
+            request.WorkloadToken);
+
+        Assert.Equal(0, installation.Schedule.ConsecutiveStartupFailures);
+        Assert.Null(installation.Schedule.AutomaticStartSuppressedAt);
+    }
+
+    [Fact]
     public async Task DuePeriodicSchedule_StartsOneRuntimeAndSchedulesNextTick()
     {
         await using var db = CreateDb();
@@ -487,6 +552,7 @@ public sealed class AgentRuntimeManagerTests
     private sealed class FakeRunner : IAgentContainerRunner
     {
         public AgentContainerStatus? InspectStatus { get; init; } = new("container-id", "agent", AgentContainerState.Running, null, null, null, null);
+        public string Logs { get; init; } = string.Empty;
         public List<AgentContainerStartRequest> Starts { get; } = [];
         public List<string> Stops { get; } = [];
         public List<string> Removes { get; } = [];
@@ -494,6 +560,6 @@ public sealed class AgentRuntimeManagerTests
         public Task StopAsync(string containerId, TimeSpan gracePeriod, CancellationToken cancellationToken = default) { Stops.Add(containerId); return Task.CompletedTask; }
         public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default) => Task.FromResult(InspectStatus);
         public Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default) { Removes.Add(containerId); return Task.CompletedTask; }
-        public Task<string> GetLogsAsync(string containerId, int maximumBytes, CancellationToken cancellationToken = default) => Task.FromResult(string.Empty);
+        public Task<string> GetLogsAsync(string containerId, int maximumBytes, CancellationToken cancellationToken = default) => Task.FromResult(Logs);
     }
 }

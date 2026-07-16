@@ -11,7 +11,9 @@ public sealed class AgentRuntimeSignalService(CSweetDbContext dbContext) : IAgen
 {
     public async Task RecordBrokerRegistrationAsync(Guid runtimeInstanceId, Guid tickId, Guid installationId, string workloadToken, CancellationToken cancellationToken = default)
     {
-        var instance = await dbContext.AgentRuntimeInstances.SingleOrDefaultAsync(x => x.Id == runtimeInstanceId, cancellationToken)
+        var instance = await dbContext.AgentRuntimeInstances
+            .Include(x => x.AgentInstallation)!.ThenInclude(x => x!.Schedule)
+            .SingleOrDefaultAsync(x => x.Id == runtimeInstanceId, cancellationToken)
             ?? throw new InvalidOperationException("The runtime instance was not found.");
         ValidateIdentity(instance, tickId, installationId);
         var presentedHash = SHA256.HashData(Encoding.UTF8.GetBytes(workloadToken));
@@ -20,6 +22,11 @@ public sealed class AgentRuntimeSignalService(CSweetDbContext dbContext) : IAgen
             throw new InvalidOperationException("The runtime workload token is invalid.");
         if (instance.Status != AgentRuntimeStatus.WaitingForBrokerRegistration)
             throw new InvalidOperationException("The runtime instance is not awaiting broker registration.");
+        if (instance.AgentInstallation?.Schedule is { } schedule)
+        {
+            schedule.ConsecutiveStartupFailures = 0;
+            schedule.AutomaticStartSuppressedAt = null;
+        }
         AddTransition(instance, AgentRuntimeStatus.Running, DateTimeOffset.UtcNow, "Broker registration accepted.");
         await dbContext.SaveChangesAsync(cancellationToken);
     }

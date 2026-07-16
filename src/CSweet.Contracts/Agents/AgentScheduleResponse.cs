@@ -10,5 +10,7 @@ public sealed record AgentScheduleResponse(
     DateTimeOffset? RunRequestedAt,
     int MaxRuntimeSeconds,
     int MaxRetriesPerTick,
+    int ConsecutiveStartupFailures,
+    DateTimeOffset? AutomaticStartSuppressedAt,
     string OverlapPolicy,
     bool IsEnabled);

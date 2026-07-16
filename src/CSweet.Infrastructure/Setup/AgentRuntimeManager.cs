@@ -17,6 +17,7 @@ public sealed class AgentRuntimeManager(
     IOptions<AgentRuntimeManagerOptions> options,
     ILogger<AgentRuntimeManager> logger) : IAgentRuntimeManager
 {
+    private const int MaximumAlwaysOnStartupAttempts = 3;
     private static readonly AgentRuntimeStatus[] ContainerActiveStatuses =
     [AgentRuntimeStatus.Starting, AgentRuntimeStatus.WaitingForBrokerRegistration, AgentRuntimeStatus.Running, AgentRuntimeStatus.CompletionReported, AgentRuntimeStatus.Stopping];
 
@@ -127,6 +128,7 @@ public sealed class AgentRuntimeManager(
                 x.Schedule != null &&
                 x.Schedule.IsEnabled &&
                 x.Schedule.ActivationMode == ActivationMode.AlwaysOn &&
+                x.Schedule.AutomaticStartSuppressedAt == null &&
                 !x.RuntimeInstances.Any(runtime =>
                     runtime.Status == AgentRuntimeStatus.Queued ||
                     ContainerActiveStatuses.Contains(runtime.Status)))
@@ -288,7 +290,7 @@ public sealed class AgentRuntimeManager(
 
         const string recoveryReason = "Recovered a runtime interrupted while stopping; a fresh attempt can now start.";
         Transition(instance, AgentRuntimeStatus.Failed, now, recoveryReason);
-        ScheduleAlwaysOnRestart(instance, AgentRuntimeStatus.Failed, settings);
+        HandleAlwaysOnTermination(instance, AgentRuntimeStatus.Failed, now, settings);
         await dbContext.SaveChangesAsync(cancellationToken);
         await AuditOutcomeAsync(instance, AgentRuntimeStatus.Failed, cancellationToken);
     }
@@ -332,7 +334,7 @@ public sealed class AgentRuntimeManager(
 
         const string recoveryReason = "Container startup was interrupted before completion; retry to start a fresh runtime.";
         Transition(instance, AgentRuntimeStatus.StartFailed, now, recoveryReason);
-        ScheduleAlwaysOnRestart(instance, AgentRuntimeStatus.StartFailed, settings);
+        HandleAlwaysOnTermination(instance, AgentRuntimeStatus.StartFailed, now, settings);
         await dbContext.SaveChangesAsync(cancellationToken);
         await AuditOutcomeAsync(instance, AgentRuntimeStatus.StartFailed, cancellationToken);
     }
@@ -504,6 +506,8 @@ public sealed class AgentRuntimeManager(
                 $"Container launch failed. Image: {settings.DotNetRuntimeBaseImage}; network: {options.Value.DockerNetworkName}; broker: {options.Value.BrokerEndpoint}.{Environment.NewLine}{exception.Message}";
             Transition(instance, AgentRuntimeStatus.StartFailed, DateTimeOffset.UtcNow, exception.Message);
         }
+        if (instance.Status == AgentRuntimeStatus.StartFailed)
+            HandleAlwaysOnTermination(instance, AgentRuntimeStatus.StartFailed, DateTimeOffset.UtcNow, settings);
         await dbContext.SaveChangesAsync(cancellationToken);
         if (instance.Status == AgentRuntimeStatus.WaitingForBrokerRegistration)
             await auditWriter.WriteAsync("agent-runtime.container.started", nameof(AgentRuntimeInstance), instance.Id,
@@ -520,6 +524,7 @@ public sealed class AgentRuntimeManager(
         CancellationToken cancellationToken)
     {
         Transition(instance, AgentRuntimeStatus.Failed, occurredAt, reason);
+        HandleAlwaysOnTermination(instance, AgentRuntimeStatus.Failed, occurredAt, await SettingsAsync(cancellationToken));
         await dbContext.SaveChangesAsync(cancellationToken);
         await AuditOutcomeAsync(instance, AgentRuntimeStatus.Failed, cancellationToken);
     }
@@ -564,7 +569,7 @@ public sealed class AgentRuntimeManager(
         Transition(instance, terminal, DateTimeOffset.UtcNow, reason);
         if (terminal == AgentRuntimeStatus.Completed && instance.AgentInstallation?.Schedule is { } schedule)
             schedule.LastCompletedAt = DateTimeOffset.UtcNow;
-        ScheduleAlwaysOnRestart(instance, terminal, settings);
+        HandleAlwaysOnTermination(instance, terminal, DateTimeOffset.UtcNow, settings);
         await dbContext.SaveChangesAsync(cancellationToken);
         await AuditOutcomeAsync(instance, terminal, cancellationToken);
     }
@@ -601,11 +606,35 @@ public sealed class AgentRuntimeManager(
             $"Runtime ended as {status}: {instance.Reason}", cancellationToken: cancellationToken);
     }
 
-    private static void ScheduleAlwaysOnRestart(AgentRuntimeInstance instance, AgentRuntimeStatus terminal, AgentRuntimeGlobalSettings settings)
+    private static void HandleAlwaysOnTermination(
+        AgentRuntimeInstance instance,
+        AgentRuntimeStatus terminal,
+        DateTimeOffset occurredAt,
+        AgentRuntimeGlobalSettings settings)
     {
         var schedule = instance.AgentInstallation?.Schedule;
         if (schedule?.ActivationMode != ActivationMode.AlwaysOn || !schedule.IsEnabled || instance.AgentInstallation?.IsEnabled != true)
             return;
+
+        var startupFailed = instance.BrokerRegisteredAt is null && terminal is
+            AgentRuntimeStatus.StartFailed or
+            AgentRuntimeStatus.Failed or
+            AgentRuntimeStatus.ExitedWithoutCompletion or
+            AgentRuntimeStatus.BrokerRegistrationTimedOut;
+        if (startupFailed)
+        {
+            schedule.ConsecutiveStartupFailures++;
+            if (schedule.ConsecutiveStartupFailures >= MaximumAlwaysOnStartupAttempts)
+            {
+                schedule.AutomaticStartSuppressedAt = occurredAt;
+                schedule.NextTickAt = null;
+                return;
+            }
+
+            schedule.NextTickAt = occurredAt;
+            return;
+        }
+
         var failed = terminal is not (AgentRuntimeStatus.Completed or AgentRuntimeStatus.Cancelled);
         if (settings.DefaultRestartPolicy == RestartPolicy.Always ||
             (settings.DefaultRestartPolicy == RestartPolicy.OnFailure && failed))

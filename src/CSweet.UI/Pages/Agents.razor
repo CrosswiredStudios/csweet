@@ -106,7 +106,11 @@
                                     {
                                         <MudChip T="string" Size="Size.Small" Color="@BuildStatusColor(installation.Build.Status)" Variant="Variant.Filled">@BuildStatusLabel(installation.Build.Status)</MudChip>
                                     }
-                                    @if (IsRuntimeActive(installation.LatestRuntime?.Status))
+                                    @if (installation.Schedule.AutomaticStartSuppressedAt is not null)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">Startup failed</MudChip>
+                                    }
+                                    else if (IsRuntimeActive(installation.LatestRuntime?.Status))
                                     {
                                         <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled">Running</MudChip>
                                     }
@@ -129,6 +133,22 @@
                                 <div><dt>Memory</dt><dd>@installation.MemoryMb MB</dd></div>
                                 <div><dt>CPU</dt><dd>@installation.CpuPercent%</dd></div>
                             </dl>
+                            @if (installation.Schedule.AutomaticStartSuppressedAt is not null)
+                            {
+                                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+                                    <MudText Typo="Typo.subtitle2">Automatic startup stopped after 3 failed attempts.</MudText>
+                                    <MudText Typo="Typo.body2">
+                                        @(installation.LatestRuntime?.Reason ?? "The agent did not register successfully with the runtime broker.")
+                                    </MudText>
+                                    @if (!string.IsNullOrWhiteSpace(installation.LatestRuntime?.LogExcerpt))
+                                    {
+                                        <details class="mt-2">
+                                            <summary>Startup log details</summary>
+                                            <pre class="agent-build-log">@installation.LatestRuntime.LogExcerpt</pre>
+                                        </details>
+                                    }
+                                </MudAlert>
+                            }
                             <MudStack Row="true" Class="setup-actions">
                                 @if (availableUpdate is not null)
                                 {
@@ -142,7 +162,7 @@
                                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.EditCalendar" Disabled="@_isManagingInstallation" OnClick="@(() => OpenScheduleDialog(installation))">
                                     Edit Schedule
                                 </MudButton>
-                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(_isManagingInstallation || !installation.IsEnabled || !installation.Schedule.IsEnabled)" OnClick="@(() => RunNowAsync(installation))">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(_isManagingInstallation || !installation.IsEnabled || !installation.Schedule.IsEnabled || IsAlwaysOn(installation))" OnClick="@(() => RunNowAsync(installation))">
                                     Run Now
                                 </MudButton>
                                 <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.History" Disabled="@(_isManagingInstallation || installation.LatestRuntime is null)" OnClick="@(() => OpenRunsDialogAsync(installation))">View Runs</MudButton>
@@ -1451,6 +1471,9 @@
 
     private static bool IsRuntimeActive(string? status) => status is
         "Queued" or "Starting" or "WaitingForBrokerRegistration" or "Running" or "CompletionReported" or "Stopping";
+
+    private static bool IsAlwaysOn(AgentInstallationResponse installation) =>
+        string.Equals(installation.Schedule.ActivationMode, "AlwaysOn", StringComparison.Ordinal);
 
     private static string FormatLastRun(AgentRuntimeRunResponse? run) => run is null
         ? "Never"

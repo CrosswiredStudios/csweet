@@ -189,6 +189,7 @@ public sealed class AgentInstallationService : IAgentInstallationService
         installation.Schedule.OverlapPolicy = overlapPolicy;
         installation.Schedule.MaxRuntimeSeconds = request.MaxRuntimeSeconds;
         installation.Schedule.IsEnabled = request.IsEnabled;
+        ResetAutomaticStartupFailures(installation.Schedule);
         installation.Schedule.NextTickAt = request.IsEnabled
             ? ComputeNextTick(activationMode, request.TickFrequencySeconds, now)
             : null;
@@ -282,6 +283,7 @@ public sealed class AgentInstallationService : IAgentInstallationService
 
         installation.PackageVersionId = nextPackage.Id;
         installation.PackageVersion = nextPackage;
+        ResetAutomaticStartupFailures(installation.Schedule!);
         installation.UpdatedAt = now;
         try
         {
@@ -320,6 +322,10 @@ public sealed class AgentInstallationService : IAgentInstallationService
         {
             throw new AgentInstallationException("The agent installation and schedule must be enabled to run now.");
         }
+        if (installation.Schedule.ActivationMode == ActivationMode.AlwaysOn)
+        {
+            throw new AgentInstallationException("Run Now is unavailable for always-on agents because they start automatically.");
+        }
 
         var now = DateTimeOffset.UtcNow;
         installation.Schedule.RunRequestedAt = now;
@@ -355,6 +361,7 @@ public sealed class AgentInstallationService : IAgentInstallationService
         var now = DateTimeOffset.UtcNow;
         installation.IsEnabled = true;
         installation.Schedule!.IsEnabled = true;
+        ResetAutomaticStartupFailures(installation.Schedule);
         installation.Schedule.NextTickAt = ComputeNextTick(
             installation.Schedule.ActivationMode,
             installation.Schedule.TickFrequencySeconds,
@@ -817,6 +824,8 @@ public sealed class AgentInstallationService : IAgentInstallationService
                 schedule.RunRequestedAt,
                 schedule.MaxRuntimeSeconds,
                 schedule.MaxRetriesPerTick,
+                schedule.ConsecutiveStartupFailures,
+                schedule.AutomaticStartSuppressedAt,
                 schedule.OverlapPolicy.ToString(),
                 schedule.IsEnabled),
             installation.CreatedAt,
@@ -825,6 +834,12 @@ public sealed class AgentInstallationService : IAgentInstallationService
                 build.Id, build.Status.ToString(), build.Attempt, build.QueuedAt, build.StartedAt,
                 build.CompletedAt, !string.IsNullOrWhiteSpace(build.LogPath), build.FailureMessage),
             runtime is null ? null : ToRunResponse(runtime));
+    }
+
+    private static void ResetAutomaticStartupFailures(AgentSchedule schedule)
+    {
+        schedule.ConsecutiveStartupFailures = 0;
+        schedule.AutomaticStartSuppressedAt = null;
     }
 
     private static AgentRuntimeRunResponse ToRunResponse(AgentRuntimeInstance runtime) => new(

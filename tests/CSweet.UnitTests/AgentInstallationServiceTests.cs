@@ -84,6 +84,24 @@ public sealed class AgentInstallationServiceTests
     }
 
     [Fact]
+    public async Task RunNowAsync_RejectsAlwaysOnInstallation()
+    {
+        await using var dbContext = CreateDbContext();
+        var package = await SeedAsync(dbContext);
+        (await dbContext.AgentRuntimeGlobalSettings.SingleAsync()).AllowAlwaysOnCommunityAgents = true;
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+        var installation = await service.InstallAsync(
+            package.Id,
+            ValidRequest() with { ActivationMode = "AlwaysOn" });
+
+        var exception = await Assert.ThrowsAsync<AgentInstallationException>(() =>
+            service.RunNowAsync(installation.Id));
+
+        Assert.Contains("unavailable for always-on agents", exception.Message);
+    }
+
+    [Fact]
     public async Task InstallAsync_ReusesPackageBuildAcrossBusinessInstallations()
     {
         await using var dbContext = CreateDbContext();

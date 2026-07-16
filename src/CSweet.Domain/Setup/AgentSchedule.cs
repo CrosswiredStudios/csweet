@@ -12,6 +12,8 @@ public sealed class AgentSchedule
     public DateTimeOffset? RunRequestedAt { get; set; }
     public int MaxRuntimeSeconds { get; set; }
     public int MaxRetriesPerTick { get; set; }
+    public int ConsecutiveStartupFailures { get; set; }
+    public DateTimeOffset? AutomaticStartSuppressedAt { get; set; }
     public OverlapPolicy OverlapPolicy { get; set; }
     public bool IsEnabled { get; set; }
 
