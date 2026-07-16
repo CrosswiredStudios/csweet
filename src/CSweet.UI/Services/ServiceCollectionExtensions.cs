@@ -10,6 +10,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ILlmProviderApiClient, LlmProviderApiClient>();
         services.AddScoped<IAgentRuntimeSettingsApiClient, AgentRuntimeSettingsApiClient>();
         services.AddScoped<IOrganizationApiClient, OrganizationApiClient>();
+        services.AddScoped<IBusinessContext, BusinessContext>();
         services.AddScoped<IBusinessOnboardingApiClient, BusinessOnboardingApiClient>();
         services.AddScoped<IPlanningApiClient, PlanningApiClient>();
         services.AddScoped<IChatApiClient, ChatApiClient>();

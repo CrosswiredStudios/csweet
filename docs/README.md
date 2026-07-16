@@ -17,6 +17,8 @@ This directory captures the current product, architecture, marketplace, security
 11. `10-open-questions.md`
 12. `11-brand-and-naming.md`
 13. `12-example-scenarios.md`
+14. `13-system-boundaries-and-deployment.md`
+15. `14-application-design-system.md`
 
 ## Maintenance guidance
 
@@ -25,4 +27,5 @@ This directory captures the current product, architecture, marketplace, security
 - Keep marketplace-provider contracts separate from internal domain models.
 - Keep Microsoft Agent Framework behind application-owned abstractions.
 - Add scenario tests for every major workflow introduced.
+- Keep `14-application-design-system.md` and the shared `--cs-*` CSS tokens synchronized for every visual-system change.
 - Treat these documents as living plans rather than immutable specifications.

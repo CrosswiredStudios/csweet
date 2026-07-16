@@ -1,98 +1,54 @@
-@using CSweet.Contracts.Core
 @implements IDisposable
-@inject HttpClient Http
-@inject NavigationManager Navigation
+@inject IBusinessContext BusinessContext
 
-@if (_organizations.Count > 0)
-{
-    <div class="business-switcher">
-        <MudSelect T="string"
-                   Label="Business"
-                   Value="_selectedOrganizationId"
+<div class="business-switcher">
+    @if (BusinessContext.IsLoading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Tertiary" Class="business-switcher-progress" />
+        <MudText Typo="Typo.caption">Loading businesses...</MudText>
+    }
+    else if (!string.IsNullOrWhiteSpace(BusinessContext.ErrorMessage))
+    {
+        <MudText Typo="Typo.caption" Class="business-switcher-error">@BusinessContext.ErrorMessage</MudText>
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" Size="Size.Small" OnClick="RefreshAsync">Retry</MudButton>
+    }
+    else if (BusinessContext.Businesses.Count == 0)
+    {
+        <MudButton Href="/?create=true" Variant="Variant.Outlined" Color="Color.Inherit" StartIcon="@Icons.Material.Filled.AddBusiness" FullWidth="true">
+            Create a business
+        </MudButton>
+    }
+    else
+    {
+        <MudSelect T="Guid?"
+                   Label="Focused business"
+                   Value="BusinessContext.SelectedBusiness?.Id"
                    ValueChanged="SwitchBusinessAsync"
                    Dense="true"
                    Margin="Margin.Dense"
                    Variant="Variant.Outlined"
                    Class="business-switcher-select">
-            @foreach (var organization in _organizations)
+            @foreach (var business in BusinessContext.Businesses)
             {
-                <MudSelectItem T="string" Value="@organization.Id.ToString()">@organization.Name</MudSelectItem>
+                <MudSelectItem T="Guid?" Value="business.Id">@business.Name</MudSelectItem>
             }
         </MudSelect>
-    </div>
-}
+    }
+</div>
 
 @code {
-    private IReadOnlyList<OrganizationResponse> _organizations = [];
-    private string _selectedOrganizationId = string.Empty;
-
     protected override async Task OnInitializedAsync()
     {
-        Navigation.LocationChanged += OnLocationChanged;
-        await LoadOrganizationsAsync();
-        SelectOrganizationFromRoute();
+        BusinessContext.Changed += OnContextChanged;
+        await BusinessContext.InitializeAsync();
     }
 
-    private async Task LoadOrganizationsAsync()
-    {
-        try
-        {
-            _organizations = await Http.GetFromJsonAsync<IReadOnlyList<OrganizationResponse>>("api/organizations") ?? [];
-        }
-        catch
-        {
-            _organizations = [];
-        }
-    }
+    private Task SwitchBusinessAsync(Guid? businessId) =>
+        businessId is null ? Task.CompletedTask : BusinessContext.SelectAsync(businessId.Value);
 
-    private async Task SwitchBusinessAsync(string? value)
-    {
-        if (!Guid.TryParse(value, out var organizationId))
-        {
-            return;
-        }
+    private Task RefreshAsync() => BusinessContext.RefreshAsync();
 
-        _selectedOrganizationId = organizationId.ToString();
-        await Task.Yield();
-        Navigation.NavigateTo($"/organizations/{organizationId}/command-center");
-    }
+    private void OnContextChanged() => _ = InvokeAsync(StateHasChanged);
 
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
-    {
-        SelectOrganizationFromRoute();
-        _ = InvokeAsync(StateHasChanged);
-    }
-
-    private void SelectOrganizationFromRoute()
-    {
-        var routeOrganizationId = GetOrganizationIdFromCurrentRoute();
-        if (routeOrganizationId is not null && _organizations.Any(x => x.Id == routeOrganizationId.Value))
-        {
-            _selectedOrganizationId = routeOrganizationId.Value.ToString();
-            return;
-        }
-
-        _selectedOrganizationId = _organizations.FirstOrDefault()?.Id.ToString() ?? string.Empty;
-    }
-
-    private Guid? GetOrganizationIdFromCurrentRoute()
-    {
-        var relativePath = Navigation.ToBaseRelativePath(Navigation.Uri);
-        var pathOnly = relativePath.Split('?', '#')[0];
-        var segments = pathOnly.Split('/', StringSplitOptions.RemoveEmptyEntries);
-
-        if (segments.Length >= 2 &&
-            string.Equals(segments[0], "organizations", StringComparison.OrdinalIgnoreCase) &&
-            Guid.TryParse(segments[1], out var organizationId))
-        {
-            return organizationId;
-        }
-
-        return null;
-    }
-
-    public void Dispose()
-    {
-        Navigation.LocationChanged -= OnLocationChanged;
-    }
+    public void Dispose() => BusinessContext.Changed -= OnContextChanged;
 }

@@ -1,4 +1,4 @@
-@page "/llm-providers"
+@page "/settings/llm-providers"
 @using CSweet.Contracts.Llm
 @using CSweet.Contracts.Setup
 @using CSweet.Domain.Setup
@@ -6,6 +6,8 @@
 @inject ILlmProviderApiClient LlmProviderApi
 
 <PageTitle>LLM Providers - C-Sweet</PageTitle>
+
+<SettingsNavigation />
 
 <div class="setup-shell agents-page llm-providers-page">
     <MudPaper Elevation="0" Class="page-header">

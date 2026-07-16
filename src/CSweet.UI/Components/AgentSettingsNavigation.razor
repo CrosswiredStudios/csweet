@@ -1,0 +1,12 @@
+<nav class="agent-settings-navigation" aria-label="Agent settings sections">
+    <MudButton Href="/settings/agents" Variant="@(Runtime ? Variant.Text : Variant.Filled)" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Inventory2">
+        Installed agents
+    </MudButton>
+    <MudButton Href="/settings/agents/runtime" Variant="@(Runtime ? Variant.Filled : Variant.Text)" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Memory">
+        Runtime
+    </MudButton>
+</nav>
+
+@code {
+    [Parameter] public bool Runtime { get; set; }
+}

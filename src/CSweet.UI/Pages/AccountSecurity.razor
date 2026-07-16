@@ -1,4 +1,4 @@
-@page "/account/security"
+@page "/settings/security"
 @using System.Net.Http.Json
 @using CSweet.Contracts.Setup
 @inject IAuthenticationApiClient AuthenticationApi
@@ -8,6 +8,8 @@
 @implements IAsyncDisposable
 
 <PageTitle>Account security - C-Sweet</PageTitle>
+
+<SettingsNavigation />
 
 <MudPaper Elevation="1" Class="surface-panel">
     <MudText Typo="Typo.overline" Color="Color.Primary">Account</MudText>

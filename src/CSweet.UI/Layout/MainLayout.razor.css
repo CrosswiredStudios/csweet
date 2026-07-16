@@ -1,22 +1,14 @@
 .app-bar {
-    border-bottom: 1px solid #d9e2ea;
+    border-bottom: 1px solid #e2ddd5;
+    backdrop-filter: blur(14px);
 }
+
+.app-mobile-brand { display: flex; align-items: center; gap: .55rem; }
+.app-mobile-brand img { width: 2rem; height: 2rem; object-fit: contain; }
 
 .app-title {
     min-width: 0;
     white-space: nowrap;
-}
-
-.app-bar-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    min-width: 0;
-}
-
-.app-bar-actions ::deep .business-switcher {
-    width: min(22rem, 42vw);
-    min-width: 12rem;
 }
 
 .app-drawer {
@@ -25,19 +17,15 @@
 
 .content {
     min-height: calc(100vh - var(--mud-appbar-height));
-    padding: 1.5rem;
+    padding: clamp(1rem, 2.5vw, 2.5rem);
+}
+
+@media (min-width: 961px) {
+    .app-bar { display: none; }
+    .content { min-height: 100vh; }
 }
 
 @media (max-width: 640px) {
-    .app-bar-actions {
-        gap: 0.35rem;
-    }
-
-    .app-bar-actions ::deep .business-switcher {
-        width: min(13rem, 48vw);
-        min-width: 0;
-    }
-
     .content {
         padding: 1rem;
     }

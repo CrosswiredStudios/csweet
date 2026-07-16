@@ -1,8 +1,8 @@
 .setup-layout-shell {
     min-height: 100vh;
     background:
-        radial-gradient(circle at top left, rgba(36, 91, 102, 0.1), transparent 30rem),
-        #f6f8fa;
+        radial-gradient(circle at top left, rgba(152, 231, 194, 0.13), transparent 30rem),
+        #fffcf7;
 }
 
 .setup-layout-header {
@@ -12,10 +12,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    border-bottom: 1px solid #d9e2ea;
+    border-bottom: 1px solid #e2ddd5;
     background: rgba(255, 255, 255, 0.94);
     backdrop-filter: blur(12px);
 }
+
+.setup-layout-brand img { width: 2.25rem; height: 2.25rem; object-fit: contain; }
 
 .setup-layout-brand {
     display: flex;
@@ -25,7 +27,7 @@
 }
 
 .setup-layout-brand-name {
-    color: #245b66;
+    color: #18233f;
     font-size: 1.35rem;
     font-weight: 800;
     letter-spacing: -0.03em;

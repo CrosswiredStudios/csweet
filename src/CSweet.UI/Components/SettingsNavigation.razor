@@ -1,0 +1,25 @@
+@inject NavigationManager Navigation
+
+<nav class="settings-navigation" aria-label="Settings sections">
+    <MudButton Href="/settings/llm-providers" Variant="@LlmVariant" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.AutoAwesome">
+        LLM Providers
+    </MudButton>
+    <MudButton Href="/settings/agents" Variant="@AgentsVariant" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.SmartToy">
+        Agents
+    </MudButton>
+    <MudButton Href="/settings/security" Variant="@SecurityVariant" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Security">
+        Security
+    </MudButton>
+</nav>
+
+@code {
+    private Variant LlmVariant => VariantFor("/settings/llm-providers");
+    private Variant AgentsVariant => VariantFor("/settings/agents");
+    private Variant SecurityVariant => VariantFor("/settings/security");
+
+    private Variant VariantFor(string path)
+    {
+        var current = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/').Split('?', '#')[0];
+        return current.StartsWith(path, StringComparison.OrdinalIgnoreCase) ? Variant.Filled : Variant.Text;
+    }
+}

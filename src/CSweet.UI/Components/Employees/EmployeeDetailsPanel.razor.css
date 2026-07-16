@@ -1,0 +1,14 @@
+.employee-details { display: grid; align-content: start; border: 1px solid var(--cs-border); border-radius: var(--cs-radius); background: #fff; box-shadow: var(--cs-shadow); overflow: hidden; }
+header { display: flex; gap: .8rem; align-items: flex-start; padding: 1.1rem; }
+section { display: grid; gap: .75rem; padding: 1rem 1.1rem; border-top: 1px solid var(--cs-border); }
+.employee-detail-badges { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .45rem; }
+dl { display: grid; gap: .6rem; margin: 0; }
+dl div { display: grid; grid-template-columns: 1fr auto; gap: 1rem; }
+dt { color: var(--cs-muted); }
+dd { margin: 0; color: var(--cs-navy); font-weight: 650; }
+.employee-direct-reports { display: grid; gap: .3rem; }
+.employee-direct-reports button { display: flex; gap: .6rem; align-items: center; padding: .45rem; border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.employee-direct-reports button:hover { background: #f7f5f1; }
+.employee-direct-reports button:focus-visible { outline: 3px solid rgba(232,93,117,.35); }
+.employee-direct-reports span { display: grid; }
+.employee-direct-reports small { color: var(--cs-muted); }

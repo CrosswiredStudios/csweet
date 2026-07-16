@@ -1,0 +1,15 @@
+<article class="employee-directory-card @(Employee.Id == SelectedId ? "selected" : null)">
+    <button type="button" class="employee-card-main" @onclick="SelectAsync">
+        <EmployeeAvatar Employee="Employee" />
+        <span class="employee-card-identity"><strong>@Employee.Name</strong><small>@Employee.RoleLabel</small></span>
+    </button>
+    <div class="employee-card-badges">
+        <EmployeeTypeBadge IsAgent="Employee.IsAgent" />
+        <EmployeeStatusBadge Status="Employee.Status" />
+    </div>
+    <dl>
+        <div><dt>Manager</dt><dd>@(Employee.ManagerName ?? "—")</dd></div>
+        <div><dt>Subordinates</dt><dd>@Employee.DirectReportCount</dd></div>
+    </dl>
+    <EmployeeActionMenu Employee="Employee" ActionRequested="ActionRequested" />
+</article>

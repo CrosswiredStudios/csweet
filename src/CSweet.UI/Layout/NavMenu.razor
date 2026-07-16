@@ -1,17 +1,97 @@
-<div class="nav-brand">
-    <MudAvatar Color="Color.Primary" Variant="Variant.Filled" Size="Size.Medium">CS</MudAvatar>
-    <div>
-        <MudText Typo="Typo.subtitle1">C-Sweet</MudText>
-        <MudText Typo="Typo.caption">Operating system</MudText>
+@implements IDisposable
+@inject IBusinessContext BusinessContext
+@inject IAuthenticationApiClient AuthenticationApi
+@inject AuthSessionStore AuthSession
+@inject NavigationManager Navigation
+
+<div class="nav-shell">
+    <a class="nav-brand" href="/" aria-label="C-Sweet Enterprise home">
+        <img src="images/icon_dark.svg" alt="" />
+        <div>
+            <MudText Typo="Typo.subtitle1">C-Sweet</MudText>
+            <MudText Typo="Typo.caption">Run the company</MudText>
+        </div>
+    </a>
+
+    <div class="app-nav-shell">
+        <MudNavMenu Bordered="false" Dense="true" Class="app-nav">
+            <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Outlined.Apartment">Enterprise</MudNavLink>
+
+            <div class="business-nav-group">
+                <BusinessSwitcher />
+                @if (BusinessContext.SelectedBusiness is not null)
+                {
+                    <MudNavLink Href="@OverviewHref" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Outlined.Dashboard" Class="business-nav-link">
+                        Overview
+                    </MudNavLink>
+                    <MudNavLink Href="@EmployeesHref" Icon="@Icons.Material.Outlined.Groups" Class="@EmployeesClass">
+                        Employees
+                    </MudNavLink>
+                }
+                else
+                {
+                    <div class="business-nav-disabled" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Dashboard" /> Overview</div>
+                    <div class="business-nav-disabled" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Groups" /> Employees</div>
+                }
+            </div>
+        </MudNavMenu>
+    </div>
+
+    <div class="nav-footer">
+        <MudNavMenu Bordered="false" Dense="true" Class="app-nav">
+            <MudNavLink Href="settings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Outlined.Settings">Settings</MudNavLink>
+        </MudNavMenu>
+
+        <MudMenu FullWidth="true" AnchorOrigin="Origin.TopCenter" TransformOrigin="Origin.BottomCenter" Class="user-menu">
+            <ActivatorContent>
+                <MudButton Variant="Variant.Text" Color="Color.Inherit" StartIcon="@Icons.Material.Outlined.AccountCircle" FullWidth="true" Class="user-menu-button">
+                    <span class="user-menu-label">@UserLabel</span>
+                </MudButton>
+            </ActivatorContent>
+            <ChildContent>
+                <MudText Typo="Typo.caption" Class="user-menu-email">@AuthSession.Current?.Email</MudText>
+                <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="LogoutAsync">Sign out</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
     </div>
 </div>
 
-<MudNavMenu Bordered="false" Dense="true" Class="app-nav">
-    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Home</MudNavLink>
-    <MudNavLink Href="organizations" Icon="@Icons.Material.Filled.Business">Businesses</MudNavLink>
-    <MudNavLink Href="business-onboarding" Icon="@Icons.Material.Filled.PlaylistAddCheck">Onboarding</MudNavLink>
-    <MudNavLink Href="agents" Icon="@Icons.Material.Filled.SmartToy">Agents</MudNavLink>
-    <MudNavLink Href="llm-providers" Icon="@Icons.Material.Filled.Hub">LLM Providers</MudNavLink>
-    <MudNavLink Href="configuration" Icon="@Icons.Material.Filled.Settings">Configuration</MudNavLink>
-    <MudNavLink Href="account/security" Icon="@Icons.Material.Filled.Security">Account Security</MudNavLink>
-</MudNavMenu>
+@code {
+    private string? OverviewHref => BusinessContext.SelectedBusiness is { } business
+        ? $"/organizations/{business.Id}/command-center"
+        : null;
+
+    private string? EmployeesHref => BusinessContext.SelectedBusiness is { } business
+        ? $"/organizations/{business.Id}/employees"
+        : null;
+
+    private string EmployeesClass => BusinessNavigation.IsEmployeePath(CurrentPath())
+        ? "business-nav-link active"
+        : "business-nav-link";
+
+    private string UserLabel => string.IsNullOrWhiteSpace(AuthSession.Current?.Email)
+        ? "User"
+        : AuthSession.Current.Email;
+
+    protected override void OnInitialized()
+    {
+        BusinessContext.Changed += OnContextChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private string CurrentPath() => Navigation.ToBaseRelativePath(Navigation.Uri);
+    private void OnContextChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => _ = InvokeAsync(StateHasChanged);
+
+    private async Task LogoutAsync()
+    {
+        await AuthenticationApi.LogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true);
+    }
+
+    public void Dispose()
+    {
+        BusinessContext.Changed -= OnContextChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}

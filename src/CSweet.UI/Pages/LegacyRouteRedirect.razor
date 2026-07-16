@@ -1,0 +1,24 @@
+@page "/settings"
+@page "/llm-providers"
+@page "/agents"
+@page "/configuration"
+@page "/account/security"
+@page "/organizations"
+@inject NavigationManager Navigation
+
+@code {
+    protected override void OnInitialized()
+    {
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/').Split('?', '#')[0];
+        var destination = path.ToLowerInvariant() switch
+        {
+            "agents" => "/settings/agents",
+            "configuration" => "/settings/agents/runtime",
+            "account/security" => "/settings/security",
+            "organizations" => "/",
+            _ => "/settings/llm-providers"
+        };
+
+        Navigation.NavigateTo(destination, replace: true);
+    }
+}

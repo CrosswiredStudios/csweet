@@ -1,0 +1,4 @@
+.employees-page { display: grid; gap: 1.25rem; max-width: 1440px; }
+.employees-page-header { margin-bottom: 0; }
+.employees-header-actions { flex-wrap: wrap; }
+@media (max-width: 640px) { .employees-header-actions { width: 100%; } .employees-header-actions ::deep .mud-button-root { flex: 1 1 10rem; } }

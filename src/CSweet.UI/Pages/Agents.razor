@@ -1,4 +1,4 @@
-@page "/agents"
+@page "/settings/agents"
 @implements IDisposable
 @using System.Text.Json
 @using CSweet.Contracts.Agents
@@ -9,6 +9,9 @@
 @inject IAgentRuntimeSettingsApiClient AgentRuntimeSettingsApi
 
 <PageTitle>Agents - C-Sweet</PageTitle>
+
+<SettingsNavigation />
+<AgentSettingsNavigation />
 
 <div class="setup-shell agents-page">
     <MudPaper Elevation="0" Class="page-header">

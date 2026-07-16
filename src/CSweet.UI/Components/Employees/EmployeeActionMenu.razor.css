@@ -1,0 +1,2 @@
+.employee-actions { display: flex; align-items: center; justify-content: flex-end; }
+::deep .employee-action-danger { color: var(--cs-coral) !important; }

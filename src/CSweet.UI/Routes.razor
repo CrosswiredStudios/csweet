@@ -1,6 +1,5 @@
 @using System.Net.Http.Json
 @using CSweet.Contracts.Setup
-@using CSweet.Contracts.Core
 @inject HttpClient Http
 @inject IAuthenticationApiClient AuthenticationApi
 @inject NavigationManager Navigation
@@ -48,17 +47,10 @@
                 return;
             }
 
-            var organizations = await Http.GetFromJsonAsync<IReadOnlyList<OrganizationResponse>>("api/organizations", context.CancellationToken) ?? [];
-            if (organizations.Count == 0)
-            {
-                RedirectUnless(path, "business-onboarding", "/business-onboarding");
-                return;
-            }
-
             if (path.Equals("register", StringComparison.OrdinalIgnoreCase) ||
                 PublicAccountRoutes.Any(x => path.StartsWith(x, StringComparison.OrdinalIgnoreCase)))
             {
-                Navigation.NavigateTo($"/organizations/{organizations[0].Id}/command-center");
+                Navigation.NavigateTo("/");
             }
         }
         catch

@@ -1,0 +1,1 @@
+::deep .employee-empty { display: grid; min-height: 18rem; place-items: center; align-content: center; gap: .65rem; padding: 2rem; border: 1px dashed var(--cs-border); border-radius: var(--cs-radius); background: rgba(255,255,255,.7); text-align: center; }

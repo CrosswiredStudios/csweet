@@ -1,7 +1,4 @@
 @inherits LayoutComponentBase
-@inject IAuthenticationApiClient AuthenticationApi
-@inject AuthSessionStore AuthSession
-@inject NavigationManager Navigation
 
 <MudThemeProvider Theme="_theme" />
 <MudPopoverProvider />
@@ -11,14 +8,11 @@
 <MudLayout>
     <MudAppBar Elevation="0" Dense="true" Color="Color.Surface" Class="app-bar">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleDrawer" />
-        <MudText Typo="Typo.h6" Class="app-title">C-Sweet</MudText>
-        <MudSpacer />
-        <div class="app-bar-actions">
-            <BusinessSwitcher />
-            <MudButton Href="/setup" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Tune">Setup</MudButton>
-            <MudText Typo="Typo.caption">@AuthSession.Current?.Email</MudText>
-            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="LogoutAsync" StartIcon="@Icons.Material.Filled.Logout">Sign out</MudButton>
+        <div class="app-mobile-brand">
+            <img src="images/icon.svg" alt="" />
+            <MudText Typo="Typo.h6" Class="app-title">C-Sweet</MudText>
         </div>
+        <MudSpacer />
     </MudAppBar>
 
     <MudDrawer @bind-Open="_drawerOpen"
@@ -43,21 +37,21 @@
     {
         PaletteLight = new PaletteLight
         {
-            Primary = "#245B66",
-            Secondary = "#7A6434",
-            Tertiary = "#426B49",
-            AppbarBackground = "#FFFFFF",
-            AppbarText = "#18212B",
-            DrawerBackground = "#12252B",
-            DrawerText = "#DDE7EA",
-            DrawerIcon = "#AFC2C8",
-            Background = "#F6F8FA",
+            Primary = "#18233F",
+            Secondary = "#E85D75",
+            Tertiary = "#98E7C2",
+            AppbarBackground = "#FFFCF7",
+            AppbarText = "#18233F",
+            DrawerBackground = "#0B2E53",
+            DrawerText = "#FFFFFF",
+            DrawerIcon = "#FFFFFF",
+            Background = "#FFFCF7",
             Surface = "#FFFFFF",
-            TextPrimary = "#18212B",
-            TextSecondary = "#52606D",
-            Success = "#2F7D4D",
-            Warning = "#B97800",
-            Error = "#B3261E"
+            TextPrimary = "#18233F",
+            TextSecondary = "#68738A",
+            Success = "#23845C",
+            Warning = "#F2B84B",
+            Error = "#E85D75"
         },
         LayoutProperties = new LayoutProperties
         {
@@ -70,9 +64,4 @@
         _drawerOpen = !_drawerOpen;
     }
 
-    private async Task LogoutAsync()
-    {
-        await AuthenticationApi.LogoutAsync();
-        Navigation.NavigateTo("/login", forceLoad: true);
-    }
 }

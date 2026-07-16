@@ -1,0 +1,1 @@
+::deep .employee-state { display: flex; min-height: 12rem; align-items: center; justify-content: center; gap: 1rem; border: 1px solid var(--cs-border); border-radius: var(--cs-radius); }

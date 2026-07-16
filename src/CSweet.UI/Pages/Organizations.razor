@@ -1,11 +1,9 @@
-@page "/organizations"
 @using CSweet.Contracts.Core
 @using Microsoft.JSInterop
 @inject IOrganizationApiClient OrganizationApi
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
-
-<PageTitle>Businesses - C-Sweet</PageTitle>
+@inject IBusinessContext BusinessContext
 
 <div class="setup-shell">
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="page-header">
@@ -112,6 +110,9 @@
 </MudDialog>
 
 @code {
+    [Parameter, SupplyParameterFromQuery(Name = "create")]
+    public bool CreateRequested { get; set; }
+
     private IReadOnlyList<OrganizationResponse> _organizations = Array.Empty<OrganizationResponse>();
     private bool _loading = true;
     private bool _showForm = false;
@@ -143,6 +144,14 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadOrganizations();
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (CreateRequested && !_showForm)
+        {
+            ShowCreateForm();
+        }
     }
 
     async Task LoadOrganizations()
@@ -188,7 +197,14 @@
         _showForm = true;
     }
 
-    void HideForm() => _showForm = false;
+    void HideForm()
+    {
+        _showForm = false;
+        if (CreateRequested)
+        {
+            Navigation.NavigateTo("/", replace: true);
+        }
+    }
 
     async Task Save()
     {
@@ -222,6 +238,7 @@
 
             HideForm();
             await LoadOrganizations();
+            await BusinessContext.RefreshAsync();
         }
         catch (Exception ex)
         {
@@ -241,6 +258,7 @@
             {
                 await OrganizationApi.DeleteAsync(org.Id);
                 await LoadOrganizations();
+                await BusinessContext.RefreshAsync();
             }
             catch (Exception ex)
             {

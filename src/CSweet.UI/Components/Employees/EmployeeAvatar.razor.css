@@ -1,0 +1,12 @@
+.employee-avatar {
+    display: inline-grid;
+    flex: 0 0 2.5rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    place-items: center;
+    border-radius: 50%;
+    color: #fff;
+    font-weight: 800;
+}
+.human { background: var(--cs-navy); }
+.agent { background: var(--cs-mint-strong); }

@@ -1,69 +1,47 @@
 @page "/"
 @inject HttpClient Http
 
-<PageTitle>C-Sweet</PageTitle>
+<PageTitle>Enterprise - C-Sweet</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Medium" Class="page-stack">
-    <MudStack Spacing="4" AlignItems="AlignItems.Center" Class="home-hero">
-        <MudText Typo="Typo.h2" Align="Align.Center">C-Sweet</MudText>
-        <MudText Typo="Typo.h5" Align="Align.Center" Color="Color.Secondary">
-            Executive Operating System for Small Businesses
-        </MudText>
+<MudContainer MaxWidth="MaxWidth.Large" Class="page-stack enterprise-page">
+    <header class="enterprise-header">
+        <div>
+            <MudText Typo="Typo.overline">Enterprise</MudText>
+            <MudText Typo="Typo.h2">All your businesses, one clear view.</MudText>
+            <MudText Typo="Typo.h6" Color="Color.Secondary">
+                Choose where to focus, or manage the businesses that make up your enterprise.
+            </MudText>
+        </div>
+        <img class="enterprise-logo" src="images/icon.svg" alt="" />
+    </header>
 
-        <MudPaper Elevation="1" Class="surface-panel home-status">
-            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="3">
-                <div>
-                    <MudText Typo="Typo.subtitle1">Environment Status</MudText>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">API Connectivity</MudText>
-                </div>
-                <MudChip T="string" Color="@ApiStatusColor" Variant="Variant.Filled">@ApiStatusLabel</MudChip>
-            </MudStack>
-        </MudPaper>
+    <Organizations />
 
+    <MudPaper Elevation="1" Class="surface-panel enterprise-status">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="3">
+            <div>
+                <MudText Typo="Typo.subtitle1">Platform status</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">API connectivity</MudText>
+            </div>
+            <MudChip T="string" Color="@ApiStatusColor" Variant="Variant.Filled">@ApiStatusLabel</MudChip>
+        </MudStack>
         @if (_apiStatus == false)
         {
-            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
-                Unable to reach the API service. Ensure the backend is running and accessible.
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mt-4">
+                The API service cannot be reached. Check that the backend is running and try again.
             </MudAlert>
         }
-
-        <MudButton Href="/configuration"
-                   Variant="Variant.Filled"
-                   Color="Color.Primary"
-                   Size="Size.Large"
-                   StartIcon="@Icons.Material.Filled.Settings">
-            Configuration
-        </MudButton>
-    </MudStack>
+    </MudPaper>
 </MudContainer>
 
 @code {
     private bool? _apiStatus;
-
-    private string ApiStatusLabel => _apiStatus switch
-    {
-        true => "Connected",
-        false => "Disconnected",
-        _ => "Checking..."
-    };
-
-    private Color ApiStatusColor => _apiStatus switch
-    {
-        true => Color.Success,
-        false => Color.Error,
-        _ => Color.Default
-    };
+    private string ApiStatusLabel => _apiStatus switch { true => "Connected", false => "Disconnected", _ => "Checking..." };
+    private Color ApiStatusColor => _apiStatus switch { true => Color.Success, false => Color.Error, _ => Color.Default };
 
     protected override async Task OnInitializedAsync()
     {
-        try
-        {
-            var response = await Http.GetAsync("api/health");
-            _apiStatus = response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            _apiStatus = false;
-        }
+        try { _apiStatus = (await Http.GetAsync("api/health")).IsSuccessStatusCode; }
+        catch { _apiStatus = false; }
     }
 }

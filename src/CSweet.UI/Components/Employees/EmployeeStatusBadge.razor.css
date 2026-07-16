@@ -1,0 +1,22 @@
+.employee-status {
+    display: inline-flex;
+    min-height: 1.65rem;
+    align-items: center;
+    gap: .35rem;
+    padding: .15rem .55rem;
+    border: 1px solid var(--cs-border);
+    border-radius: 999px;
+    color: var(--cs-muted);
+    background: #fff;
+    font-size: .75rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.employee-status span { width: .45rem; height: .45rem; border-radius: 50%; background: #aeb4ba; }
+.online { border-color: #83d3b2; color: var(--cs-mint-strong); }
+.online span { background: var(--cs-mint-strong); }
+.transitional { border-color: var(--cs-amber); color: #9b6800; }
+.transitional span { background: var(--cs-amber); }
+.failed { border-color: var(--cs-coral); color: #b83b51; }
+.failed span { background: var(--cs-coral); }
+.checking span { background: #7b91aa; }

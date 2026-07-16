@@ -1,0 +1,50 @@
+<aside class="employee-details" aria-label="Selected employee details">
+    @if (Employee is not null)
+    {
+        <header>
+            <EmployeeAvatar Employee="Employee" />
+            <div>
+                <MudText Typo="Typo.h6">@Employee.Name</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">@Employee.RoleLabel</MudText>
+                <div class="employee-detail-badges">
+                    <EmployeeTypeBadge IsAgent="Employee.IsAgent" />
+                    @if (Employee.IsAgent)
+                    {
+                        <EmployeeStatusBadge Status="Employee.Status" />
+                    }
+                </div>
+            </div>
+        </header>
+        <section>
+            <MudText Typo="Typo.overline">Overview</MudText>
+            <dl>
+                <div><dt>Reports to</dt><dd>@(Employee.ManagerName ?? "Nobody")</dd></div>
+                <div><dt>Subordinates</dt><dd>@Employee.DirectReportCount</dd></div>
+                <div><dt>Type</dt><dd>@(Employee.IsAgent ? "Agent" : "Human")</dd></div>
+            </dl>
+        </section>
+        <section>
+            <MudText Typo="Typo.overline">Direct reports (@Employee.DirectReportCount)</MudText>
+            @if (DirectReports.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">No direct reports.</MudText>
+            }
+            else
+            {
+                <div class="employee-direct-reports">
+                    @foreach (var report in DirectReports)
+                    {
+                        <button type="button" @onclick="@(() => SelectAsync(report.Id))">
+                            <EmployeeAvatar Employee="report" />
+                            <span><strong>@report.Name</strong><small>@report.RoleLabel</small></span>
+                        </button>
+                    }
+                </div>
+            }
+        </section>
+        <section>
+            <MudText Typo="Typo.overline">Actions</MudText>
+            <EmployeeActionMenu Employee="Employee" ShowDirectChat="false" ActionRequested="ActionRequested" />
+        </section>
+    }
+</aside>

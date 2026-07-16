@@ -1,0 +1,17 @@
+<div class="employee-actions" @onclick:stopPropagation="true">
+    @if (ShowDirectChat && Employee.Actions.Contains(EmployeeAction.OpenChat))
+    {
+        <MudTooltip Text="Open chat">
+            <MudIconButton Icon="@Icons.Material.Outlined.ChatBubbleOutline" Color="Color.Primary" aria-label="Open chat" OnClick="@(() => RequestAsync(EmployeeAction.OpenChat))" />
+        </MudTooltip>
+    }
+    @if (MenuActions.Count > 0)
+    {
+        <MudMenu Icon="@Icons.Material.Filled.MoreVert" Color="Color.Primary" AriaLabel="Employee actions">
+            @foreach (var action in MenuActions)
+            {
+                <MudMenuItem Icon="@Icon(action)" Class="@(action == EmployeeAction.Fire ? "employee-action-danger" : null)" OnClick="@(() => RequestAsync(action))">@Label(action)</MudMenuItem>
+            }
+        </MudMenu>
+    }
+</div>
