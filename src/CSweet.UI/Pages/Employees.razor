@@ -447,7 +447,6 @@
     private string? _hireEmail;
     private int _hireEmployeeType = 1;
     private string? _hireAgentKey;
-    private IReadOnlyList<AgentCatalogItemResponse> _agentCatalog = [];
     private IReadOnlyList<AgentInstallationResponse> _agentInstallations = [];
     private IReadOnlyList<LlmProviderProfileResponse> _providerProfiles = [];
     private Guid? _hireManagerId;
@@ -519,11 +518,9 @@
             _employees = await Http.GetFromJsonAsync<IReadOnlyList<OrganizationUserResponse>>($"api/core/organizations/{OrganizationId}/users") ?? [];
             _roles = await Http.GetFromJsonAsync<IReadOnlyList<RoleResponse>>($"api/organizations/{OrganizationId}/roles") ?? [];
             _workers = await Http.GetFromJsonAsync<IReadOnlyList<WorkerResponse>>($"api/organizations/{OrganizationId}/workers") ?? [];
-            var catalogTask = AgentApi.ListAsync();
             var installationsTask = AgentApi.ListInstallationsAsync();
             var providersTask = LlmProviderApi.ListAsync();
-            await Task.WhenAll(catalogTask, installationsTask, providersTask);
-            _agentCatalog = await catalogTask;
+            await Task.WhenAll(installationsTask, providersTask);
             _agentInstallations = await installationsTask;
             _providerProfiles = await providersTask;
             StartRuntimeStatusRefresh();

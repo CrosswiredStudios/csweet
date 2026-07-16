@@ -74,6 +74,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAuditEventWriter, AuditEventWriter>();
         builder.Services.AddScoped<IAgentRuntimeSettingsService, AgentRuntimeSettingsService>();
         builder.Services.AddScoped<IAgentImportPreviewService, AgentImportPreviewService>();
+        builder.Services.AddScoped<IAgentUpdateService, AgentUpdateService>();
         builder.Services.AddScoped<IAgentInstallationService, AgentInstallationService>();
         builder.Services.AddScoped<IAgentInstallationConfigurationService, AgentInstallationConfigurationService>();
         builder.Services.AddScoped<IAgentBuildService, AgentBuildService>();

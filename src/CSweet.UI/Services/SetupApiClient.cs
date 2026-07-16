@@ -30,19 +30,6 @@ public sealed class SetupApiClient : ISetupApiClient
         return await ReadActionResponseAsync(response, cancellationToken);
     }
 
-    public async Task<bool> CheckHealthAsync(CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var response = await _httpClient.GetAsync("api/health", cancellationToken);
-            return response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private static async Task<SetupActionResponse> ReadActionResponseAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken)

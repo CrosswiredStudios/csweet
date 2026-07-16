@@ -24,15 +24,9 @@ body {
 
 .auth-brand-panel .mud-typography { color: inherit; }
 .auth-mark {
-    display: grid;
+    display: block;
     width: 5rem;
     height: 5rem;
-    place-items: center;
-    border: 0.65rem solid #fff;
-    border-right-color: #ff5c5c;
-    border-radius: 999px;
-    font-size: 2rem;
-    font-weight: 800;
 }
 
 .auth-content {
@@ -1119,7 +1113,7 @@ code {
 @media (max-width: 860px) {
     .auth-shell { grid-template-columns: 1fr; }
     .auth-brand-panel { min-height: auto; padding: 1.5rem; }
-    .auth-mark { width: 3.5rem; height: 3.5rem; border-width: 0.45rem; }
+    .auth-mark { width: 3.5rem; height: 3.5rem; }
     .page-header,
     .setup-grid {
         display: block;

@@ -6,4 +6,9 @@ public sealed class AgentInstallationException : Exception
         : base(message)
     {
     }
+
+    public AgentInstallationException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }

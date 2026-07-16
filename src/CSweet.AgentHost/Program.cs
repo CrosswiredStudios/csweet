@@ -5,6 +5,7 @@ using CSweet.Application.Setup;
 using CSweet.Infrastructure.Setup;
 using CSweet.Infrastructure;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using CSweet.Memory;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,6 +23,11 @@ builder.Services.AddScoped<IAgentAuthorizationPolicy, PersistedAgentAuthorizatio
 builder.Services.AddSingleton<AgentSessionRegistry>();
 builder.Services.AddScoped<IAgentRuntimeSignalService, AgentRuntimeSignalService>();
 builder.Services.AddScoped<PlatformLlmCapabilityHandler>();
+builder.Services.AddSingleton<IMemoryStore>(_ => new PostgreSqlMemoryStore(
+    builder.Configuration.GetConnectionString("Postgres")
+    ?? builder.Configuration.GetConnectionString("csweet")
+    ?? throw new InvalidOperationException("A PostgreSQL connection is required for platform memory.")));
+builder.Services.AddScoped<PlatformMemoryCapabilityHandler>();
 
 var app = builder.Build();
 

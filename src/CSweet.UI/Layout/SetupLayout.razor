@@ -1,0 +1,59 @@
+@inherits LayoutComponentBase
+@inject IAuthenticationApiClient AuthenticationApi
+@inject AuthSessionStore AuthSession
+@inject NavigationManager Navigation
+
+<MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<div class="setup-layout-shell">
+    <header class="setup-layout-header">
+        <div class="setup-layout-brand" aria-label="C-Sweet setup">
+            <span class="setup-layout-brand-name">C-Sweet</span>
+            <span class="setup-layout-brand-context">First-run setup</span>
+        </div>
+        <div class="setup-layout-account">
+            @if (!string.IsNullOrWhiteSpace(AuthSession.Current?.Email))
+            {
+                <MudText Typo="Typo.caption">@AuthSession.Current.Email</MudText>
+            }
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Logout"
+                       OnClick="LogoutAsync">
+                Sign out
+            </MudButton>
+        </div>
+    </header>
+
+    <main class="setup-layout-content">
+        @Body
+    </main>
+</div>
+
+@code {
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#245B66",
+            Secondary = "#7A6434",
+            Tertiary = "#426B49",
+            Background = "#F6F8FA",
+            Surface = "#FFFFFF",
+            TextPrimary = "#18212B",
+            TextSecondary = "#52606D",
+            Success = "#2F7D4D",
+            Warning = "#B97800",
+            Error = "#B3261E"
+        }
+    };
+
+    private async Task LogoutAsync()
+    {
+        await AuthenticationApi.LogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true);
+    }
+}

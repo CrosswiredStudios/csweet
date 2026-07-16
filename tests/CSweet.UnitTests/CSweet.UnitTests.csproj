@@ -27,7 +27,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="CSweet.Agent.SDK" />
+    <PackageReference Include="CSweet.Agent.SDK" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
+    <ProjectReference Include="$(CSweetAgentSdkRepositoryRoot)\src\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj" Condition="'$(UseLocalCSweetAgentSdk)' == 'true'" />
+    <PackageReference Include="CSweet.Memory.Sqlite" Condition="'$(UseLocalCSweetMemory)' != 'true'" />
+    <ProjectReference Include="$(CSweetMemoryRepositoryRoot)\src\CSweet.Memory.Sqlite\CSweet.Memory.Sqlite.csproj" Condition="'$(UseLocalCSweetMemory)' == 'true'" />
     <ProjectReference Include="..\..\src\CSweet.Api\CSweet.Api.csproj" />
     <ProjectReference Include="..\..\src\CSweet.AgentHost\CSweet.AgentHost.csproj" />
     <ProjectReference Include="..\..\src\CSweet.Domain\CSweet.Domain.csproj" />

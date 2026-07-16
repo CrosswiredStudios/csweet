@@ -12,14 +12,6 @@ public sealed class AgentApiClient : IAgentApiClient
         _httpClient = httpClient;
     }
 
-    public async Task<IReadOnlyList<AgentCatalogItemResponse>> ListAsync(CancellationToken cancellationToken = default)
-    {
-        return await _httpClient.GetFromJsonAsync<IReadOnlyList<AgentCatalogItemResponse>>(
-                "api/agents",
-                cancellationToken)
-            ?? [];
-    }
-
     public async Task<AgentImportPreviewResponse> PreviewImportAsync(
         PreviewAgentImportRequest request,
         CancellationToken cancellationToken = default)
@@ -54,6 +46,24 @@ public sealed class AgentApiClient : IAgentApiClient
         await _httpClient.GetFromJsonAsync<IReadOnlyList<AgentInstallationResponse>>(
             "api/agents/installations",
             cancellationToken) ?? [];
+
+    public async Task<IReadOnlyList<AgentUpdateAvailabilityResponse>> CheckUpdatesAsync(
+        CancellationToken cancellationToken = default) =>
+        await SendAsync<IReadOnlyList<AgentUpdateAvailabilityResponse>>(
+            HttpMethod.Post,
+            "api/agents/installations/check-updates",
+            null,
+            cancellationToken);
+
+    public Task<AgentInstallationResponse> UpdateAsync(
+        Guid installationId,
+        UpdateAgentInstallationRequest request,
+        CancellationToken cancellationToken = default) =>
+        SendAsync<AgentInstallationResponse>(
+            HttpMethod.Post,
+            $"api/agents/installations/{installationId}/update",
+            request,
+            cancellationToken);
 
     public Task<AgentInstallationResponse> UpdateScheduleAsync(
         Guid installationId,

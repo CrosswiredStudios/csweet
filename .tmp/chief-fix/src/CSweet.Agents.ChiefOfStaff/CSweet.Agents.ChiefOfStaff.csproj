@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CSweet.Agent.SDK" Version="0.1.0" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
+    <PackageReference Include="CSweet.Memory" Version="0.1.0" Condition="'$(UseLocalCSweetMemory)' != 'true'" />
+    <PackageReference Include="CSweet.Memory.Broker" Version="0.1.0" Condition="'$(UseLocalCSweetMemory)' != 'true'" />
+    <PackageReference Include="CSweet.Memory.MicrosoftAgentFramework" Version="0.1.0" Condition="'$(UseLocalCSweetMemory)' != 'true'" />
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.13.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseLocalCSweetMemory)' == 'true'">
+    <ProjectReference Include="$(CSweetMemoryRepositoryRoot)\src\CSweet.Memory\CSweet.Memory.csproj" />
+    <ProjectReference Include="$(CSweetMemoryRepositoryRoot)\src\CSweet.Memory.Broker\CSweet.Memory.Broker.csproj" />
+    <ProjectReference Include="$(CSweetMemoryRepositoryRoot)\src\CSweet.Memory.MicrosoftAgentFramework\CSweet.Memory.MicrosoftAgentFramework.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseLocalCSweetAgentSdk)' == 'true'">
+    <ProjectReference Include="$(CSweetAgentSdkRepositoryRoot)\src\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\csweet-agent.json" Link="csweet-agent.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

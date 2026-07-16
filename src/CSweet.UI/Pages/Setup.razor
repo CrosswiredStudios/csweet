@@ -1,4 +1,5 @@
 @page "/setup"
+@layout SetupLayout
 @using CSweet.Contracts.Llm
 @using CSweet.Contracts.Setup
 @using System.Net.Http.Json
@@ -18,7 +19,7 @@
         <div>
             <MudText Typo="Typo.overline" Color="Color.Primary">First-run configuration</MudText>
             <MudText Typo="Typo.h3">C-Sweet Setup</MudText>
-            <MudText Color="Color.Secondary">Configure the local infrastructure C-Sweet needs before business onboarding starts.</MudText>
+            <MudText Color="Color.Secondary">Connect the services C-Sweet needs before business onboarding starts.</MudText>
         </div>
         <MudStack AlignItems="AlignItems.End" Spacing="0">
             <MudText Typo="Typo.h4" Color="Color.Primary">@CompletedStepCount / @SetupSteps.Count</MudText>
@@ -78,10 +79,8 @@
         new(1, "welcome", "Welcome", "Start here"),
         new(2, "llm-provider", "LLM Provider", "Chat model"),
         new(3, "model-capability-test", "Capability Test", "Provider checks"),
-        new(4, "storage", "Storage", "Database status"),
-        new(5, "worker-runtime", "Worker Runtime", "Local workers"),
-        new(6, "email-delivery", "Email Delivery", "Optional"),
-        new(7, "finish", "Finish", "Unlock app")
+        new(4, "email-delivery", "Email Delivery", "Optional"),
+        new(5, "finish", "Finish", "Unlock app")
     ];
 
     private SetupStatusResponse? _status;
@@ -92,9 +91,6 @@
     private bool _isBusy;
     private string? _pageError;
     private string? _stepMessage;
-    private bool? _apiHealth;
-    private bool? _workerHealth;
-
     private EmailDeliverySettingsResponse? _emailSettings;
     private string _smtpHost = string.Empty;
     private int _smtpPort = 587;
@@ -113,6 +109,7 @@
     private string _defaultChatModel = string.Empty;
     private string _defaultEmbeddingModel = string.Empty;
     private IReadOnlyList<ModelDescriptor> _availableModels = [];
+    private bool _initialModelCatalogLoadRequested;
     private bool _isCheckingModelCatalog;
     private bool? _modelCatalogSucceeded;
     private string? _modelCatalogMessage;
@@ -144,6 +141,21 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_isLoading ||
+            _activeStepKey != "llm-provider" ||
+            _initialModelCatalogLoadRequested ||
+            _availableModels.Count > 0)
+        {
+            return;
+        }
+
+        _initialModelCatalogLoadRequested = true;
+        await PreviewModelCatalogAsync();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadAsync()
@@ -185,8 +197,6 @@
     private void BackToWelcome() => SelectStep("welcome");
     private void BackToProvider() => SelectStep("llm-provider");
     private void BackToCapabilityTest() => SelectStep("model-capability-test");
-    private void BackToStorage() => SelectStep("storage");
-    private void BackToWorkerRuntime() => SelectStep("worker-runtime");
     private void BackToEmailDelivery() => SelectStep("email-delivery");
 
     private RenderFragment RenderActiveStep() => _activeStepKey switch
@@ -194,8 +204,6 @@
         "welcome" => WelcomeStep,
         "llm-provider" => LlmProviderStep,
         "model-capability-test" => CapabilityTestStep,
-        "storage" => StorageStep,
-        "worker-runtime" => WorkerRuntimeStep,
         "email-delivery" => EmailDeliveryStep,
         "finish" => FinishStep,
         _ => WelcomeStep
@@ -205,7 +213,7 @@
         <div class="setup-step-heading">
             <MudText Typo="Typo.overline" Color="Color.Primary">Step 1</MudText>
             <MudText Typo="Typo.h5">Welcome to C-Sweet.</MudText>
-            <MudText Color="Color.Secondary">Before creating your first business, configure how this instance will run AI workers and store its data.</MudText>
+            <MudText Color="Color.Secondary">Before creating your first business, connect a model provider and choose your account preferences.</MudText>
         </div>
         <MudStack Row="true" Class="setup-actions">
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="ContinueFromWelcomeAsync">Continue</MudButton>
@@ -321,46 +329,9 @@
         </MudStack>
     </div>;
 
-    private RenderFragment StorageStep => @<div>
-        <div class="setup-step-heading">
-            <MudText Typo="Typo.overline" Color="Color.Primary">Step 4</MudText>
-            <MudText Typo="Typo.h5">Storage Setup</MudText>
-            <MudText Color="Color.Secondary">Check API and configuration persistence before continuing.</MudText>
-        </div>
-        <div class="setup-check-list">
-            @CapabilityRow("API can reach database", _apiHealth, required: true)
-            @CapabilityRow("Migrations are applied", _status is not null, required: true)
-            @CapabilityRow("System configuration row exists", _status is not null, required: true)
-        </div>
-        @StepMessage()
-        <MudStack Row="true" Class="setup-actions">
-            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToCapabilityTest">Back</MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="CheckStorageAsync">Run Storage Check</MudButton>
-        </MudStack>
-    </div>;
-
-    private RenderFragment WorkerRuntimeStep => @<div>
-        <div class="setup-step-heading">
-            <MudText Typo="Typo.overline" Color="Color.Primary">Step 5</MudText>
-            <MudText Typo="Typo.h5">Worker Runtime</MudText>
-            <MudText Color="Color.Secondary">Worker runtime checks are recorded as a setup warning until the worker health endpoint is added.</MudText>
-        </div>
-        <div class="setup-check-list">
-            @CapabilityRow("Worker host reachable", _workerHealth, required: false)
-            @CapabilityRow("Worker version reported", null, required: false)
-            @CapabilityRow("Built-in local strategy worker available", null, required: false)
-        </div>
-        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mt-4">You can continue without worker health in this first UI pass.</MudAlert>
-        @StepMessage()
-        <MudStack Row="true" Class="setup-actions">
-            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToStorage">Back</MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="CompleteWorkerStepAsync">Continue</MudButton>
-        </MudStack>
-    </div>;
-
     private RenderFragment EmailDeliveryStep => @<div>
         <div class="setup-step-heading">
-            <MudText Typo="Typo.overline" Color="Color.Primary">Step 6</MudText>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Step 4</MudText>
             <MudText Typo="Typo.h5">Email Delivery <MudChip T="string" Size="Size.Small">Optional</MudChip></MudText>
             <MudText Color="Color.Secondary">Configure SMTP for email verification, password recovery, and future invitations. You can safely skip this and return later.</MudText>
         </div>
@@ -380,7 +351,7 @@
         }
         @StepMessage()
         <MudStack Row="true" Class="setup-actions">
-            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToWorkerRuntime">Back</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToCapabilityTest">Back</MudButton>
             <MudButton Variant="Variant.Text" Disabled="@_isBusy" OnClick="SkipEmailDeliveryAsync">Skip for now</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@_isBusy" OnClick="SaveEmailDeliveryAsync">Save</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="TestEmailDeliveryAsync">Save &amp; Test</MudButton>
@@ -389,7 +360,7 @@
 
     private RenderFragment FinishStep => @<div>
         <div class="setup-step-heading">
-            <MudText Typo="Typo.overline" Color="Color.Primary">Step 7</MudText>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Step 5</MudText>
             <MudText Typo="Typo.h5">Finish Setup</MudText>
             <MudText Color="Color.Secondary">Complete first-run setup and unlock business onboarding.</MudText>
         </div>
@@ -398,8 +369,6 @@
             @CapabilityRow("Required steps complete", RequiredPriorStepsComplete, required: true)
             @CapabilityRow("Default chat provider selected", _status?.DefaultChatProviderId is not null, required: true)
             @CapabilityRow("Last capability test had chat success", IsStepComplete("model-capability-test"), required: true)
-            @CapabilityRow("Storage check passed", IsStepComplete("storage"), required: true)
-            @CapabilityRow("Worker runtime checked", IsStepComplete("worker-runtime"), required: false)
             @CapabilityRow("Email delivery tested", _emailSettings?.IsReady, required: false)
         </div>
 
@@ -425,10 +394,16 @@
         }
     </div>;
 
-    private void OnProviderTypeChanged(LlmProviderType providerType)
+    private async Task OnProviderTypeChanged(LlmProviderType providerType)
     {
         _providerType = providerType;
         ApplyProviderPreset();
+
+        if (_providerType == LlmProviderType.LmStudio)
+        {
+            _initialModelCatalogLoadRequested = true;
+            await PreviewModelCatalogAsync();
+        }
     }
 
     private async Task CreateProviderAsync()
@@ -537,7 +512,7 @@
                     return;
                 }
 
-                await CompleteStepAsync("model-capability-test", "storage");
+                await CompleteStepAsync("model-capability-test", "email-delivery");
                 _stepMessage = SetupWizardState.ProviderTestMessage(_capabilityResult);
             }
             else
@@ -553,32 +528,6 @@
         {
             _isBusy = false;
         }
-    }
-
-    private async Task CheckStorageAsync()
-    {
-        _isBusy = true;
-        _stepMessage = null;
-
-        _apiHealth = await SetupApi.CheckHealthAsync();
-        if (_apiHealth == true && _status is not null)
-        {
-            await CompleteStepAsync("storage", "worker-runtime");
-            _stepMessage = "Storage checks passed.";
-        }
-        else
-        {
-            _stepMessage = "Storage checks could not be completed. Confirm the API and database are running.";
-        }
-
-        _isBusy = false;
-    }
-
-    private async Task CompleteWorkerStepAsync()
-    {
-        _workerHealth = false;
-        await CompleteStepAsync("worker-runtime", "email-delivery");
-        _stepMessage = "Worker runtime recorded with warnings.";
     }
 
     private void ApplyEmailSettings()

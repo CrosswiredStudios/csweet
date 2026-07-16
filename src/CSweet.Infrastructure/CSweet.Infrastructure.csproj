@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="CSweet.Agent.SDK" />
+    <PackageReference Include="CSweet.Agent.SDK" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="$(CSweetAgentSdkRepositoryRoot)\src\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj" Condition="'$(UseLocalCSweetAgentSdk)' == 'true'" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 

@@ -14,23 +14,14 @@ public static class AgentManagementEndpoints
     private static readonly TimeSpan ProviderRegistrationGracePeriod = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan ProviderRegistrationRetryDelay = TimeSpan.FromMilliseconds(100);
 
-    public static IServiceCollection AddAgentManagement(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddAgentManagement(this IServiceCollection services)
     {
-        services.AddScoped<IAgentCatalogService, AgentCatalogService>();
-
         return services;
     }
 
     public static IEndpointRouteBuilder MapAgentManagementEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/agents");
-
-        group.MapGet("", async (
-            IAgentCatalogService catalog,
-            CancellationToken cancellationToken) =>
-        {
-            return Results.Ok(await catalog.ListAsync(cancellationToken));
-        });
 
         group.MapPost("/imports/preview", async (
             PreviewAgentImportRequest request,
@@ -62,6 +53,12 @@ public static class AgentManagementEndpoints
             CancellationToken cancellationToken) =>
             Results.Ok(await installationService.ListAsync(cancellationToken)));
 
+        group.MapPost("/installations/check-updates", async (
+            IAgentUpdateService updateService,
+            CancellationToken cancellationToken) =>
+            Results.Ok(await updateService.CheckAsync(cancellationToken)))
+            .RequireRateLimiting(AgentRateLimiting.ImportPolicy);
+
         group.MapGet("/installations/{installationId:guid}", async (
             Guid installationId,
             IAgentInstallationService installationService,
@@ -78,6 +75,15 @@ public static class AgentManagementEndpoints
             CancellationToken cancellationToken) =>
             await ExecuteInstallationActionAsync(
                 () => installationService.UpdateScheduleAsync(installationId, request, cancellationToken)));
+
+        group.MapPost("/installations/{installationId:guid}/update", async (
+            Guid installationId,
+            UpdateAgentInstallationRequest request,
+            IAgentInstallationService installationService,
+            CancellationToken cancellationToken) =>
+            await ExecuteInstallationActionAsync(
+                () => installationService.UpdateAsync(installationId, request, cancellationToken)))
+            .RequireRateLimiting(AgentRateLimiting.BuildPolicy);
 
         group.MapPost("/installations/{installationId:guid}/run-now", async (
             Guid installationId,

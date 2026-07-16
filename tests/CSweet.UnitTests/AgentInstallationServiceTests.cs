@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Agents;
+using CSweet.Domain.Core;
 using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Persistence;
 using CSweet.Infrastructure.Setup;
@@ -96,6 +97,119 @@ public sealed class AgentInstallationServiceTests
 
         Assert.Equal(2, await dbContext.AgentInstallations.CountAsync());
         Assert.Single(await dbContext.AgentBuildJobs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task UpdateAsync_FailedPreviousBuildSwitchesVersionRevokesGrantsAndQueuesRetry()
+    {
+        await using var dbContext = CreateDbContext();
+        var current = await SeedAsync(dbContext);
+        var containers = new TestAgentContainerRunner(containerExists: true);
+        var service = CreateService(dbContext, containers);
+        var installed = await service.InstallAsync(current.Id, ValidRequest());
+        dbContext.AgentRuntimeInstances.Add(new AgentRuntimeInstance
+        {
+            Id = Guid.NewGuid(),
+            TickId = Guid.NewGuid(),
+            AgentInstallationId = installed.Id,
+            ContainerId = "old-version-container",
+            QueuedAt = DateTimeOffset.UtcNow
+        });
+        var update = new AgentPackageVersion
+        {
+            Id = Guid.NewGuid(),
+            PackageSourceId = current.PackageSourceId,
+            CommitSha = new string('2', 40),
+            ManifestDigest = new string('b', 64),
+            ManifestJson = JsonSerializer.Serialize(new
+            {
+                id = current.AgentId,
+                name = current.AgentName,
+                version = "2.0.0",
+                publisher = new { id = "com.example", name = "Example" },
+                runtime = new { type = "dotnet-project" },
+                protocol = new { minimumVersion = "1.0", maximumVersion = "1.x" },
+                capabilities = Array.Empty<string>(),
+                requestedSubscriptions = Array.Empty<string>(),
+                requestedPublications = Array.Empty<string>(),
+                requestedPermissions = Array.Empty<string>(),
+                requestedNetworkAccess = Array.Empty<string>()
+            }),
+            AgentId = current.AgentId,
+            AgentName = current.AgentName,
+            Version = "2.0.0",
+            PublisherId = "com.example",
+            PublisherName = "Example",
+            RuntimeType = "dotnet-project",
+            Status = AgentPackageVersionStatus.Failed,
+            ImportedAt = DateTimeOffset.UtcNow
+        };
+        var failedBuild = new AgentBuildJob
+        {
+            Id = Guid.NewGuid(),
+            PackageVersionId = update.Id,
+            Attempt = 1,
+            QueuedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        };
+        failedBuild.TransitionTo(AgentBuildStatus.Failed, DateTimeOffset.UtcNow);
+        update.BuildJobs.Add(failedBuild);
+        dbContext.AgentPackageVersions.Add(update);
+        await dbContext.SaveChangesAsync();
+
+        var result = await service.UpdateAsync(
+            installed.Id,
+            new UpdateAgentInstallationRequest(update.Id));
+
+        Assert.Equal(update.Id, result.PackageVersionId);
+        Assert.Equal("2.0.0", result.AgentVersion);
+        Assert.Empty(result.GrantedCapabilities);
+        Assert.Empty(result.GrantedSubscriptions);
+        Assert.Empty(result.GrantedPublications);
+        Assert.Equal(3, await dbContext.AgentBuildJobs.CountAsync());
+        var retry = await dbContext.AgentBuildJobs
+            .Where(x => x.PackageVersionId == update.Id)
+            .OrderByDescending(x => x.Attempt)
+            .FirstAsync();
+        Assert.Equal(2, retry.Attempt);
+        Assert.Equal(AgentBuildStatus.Queued, retry.Status);
+        Assert.Contains("old-version-container", containers.Removed);
+        Assert.Equal(
+            AgentRuntimeStatus.Cancelled,
+            (await dbContext.AgentRuntimeInstances.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task RemoveAsync_AssignedEmployeeRejectsBeforeDisablingInstallation()
+    {
+        await using var dbContext = CreateDbContext();
+        var package = await SeedAsync(dbContext);
+        var service = CreateService(dbContext);
+        var installed = await service.InstallAsync(package.Id, ValidRequest());
+        var organization = new Organization
+        {
+            Id = Guid.NewGuid(),
+            Name = "Example Company",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.CoreOrganizations.Add(organization);
+        dbContext.CoreOrganizationUsers.Add(new OrganizationUser
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organization.Id,
+            AgentInstallationId = installed.Id,
+            DisplayName = "Researcher",
+            EmployeeType = EmployeeType.Agent,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
+
+        var exception = await Assert.ThrowsAsync<AgentInstallationException>(
+            () => service.RemoveAsync(installed.Id));
+
+        Assert.Contains("Researcher", exception.Message);
+        Assert.Contains("Employees page", exception.Message);
+        Assert.True((await dbContext.AgentInstallations.SingleAsync()).IsEnabled);
     }
 
     [Fact]

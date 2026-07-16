@@ -5,9 +5,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="CSweet.Agent.SDK" />
+    <PackageReference Include="CSweet.Agent.SDK" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Agents.AI" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseLocalCSweetAgentSdk)' == 'true'">
+    <ProjectReference Include="$(CSweetAgentSdkRepositoryRoot)\src\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj" />
   </ItemGroup>
 
   <ItemGroup>

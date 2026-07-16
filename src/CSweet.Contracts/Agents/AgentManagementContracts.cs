@@ -2,16 +2,6 @@ using System.Text.Json;
 
 namespace CSweet.Contracts.Agents;
 
-public sealed record AgentCatalogItemResponse(
-    string Id,
-    string Name,
-    string Version,
-    string PublisherId,
-    string PublisherName,
-    string RuntimeType,
-    IReadOnlyList<string> Capabilities,
-    IReadOnlyList<string> RequestedPermissions);
-
 public sealed record AgentConfigurationSchemaResponse(
     string AgentId,
     string AgentVersion,

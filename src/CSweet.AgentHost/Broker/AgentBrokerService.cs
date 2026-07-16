@@ -14,18 +14,21 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
     private readonly ILogger<AgentBrokerService> _logger;
     private readonly IAgentRuntimeSignalService _runtimeSignals;
     private readonly PlatformLlmCapabilityHandler _platformLlm;
+    private readonly PlatformMemoryCapabilityHandler _platformMemory;
 
     public AgentBrokerService(
         IAgentAuthorizationPolicy authorizationPolicy,
         AgentSessionRegistry sessions,
         IAgentRuntimeSignalService runtimeSignals,
         PlatformLlmCapabilityHandler platformLlm,
+        PlatformMemoryCapabilityHandler platformMemory,
         ILogger<AgentBrokerService> logger)
     {
         _authorizationPolicy = authorizationPolicy;
         _sessions = sessions;
         _runtimeSignals = runtimeSignals;
         _platformLlm = platformLlm;
+        _platformMemory = platformMemory;
         _logger = logger;
     }
 
@@ -164,6 +167,17 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                                 CapabilityResult = result
                             });
                         }
+                        break;
+                    }
+                    if (PlatformMemoryCapabilityHandler.IsPlatformMemoryCapability(message.CapabilityRequest.Capability))
+                    {
+                        var result = await _platformMemory.HandleAsync(session, message.CapabilityRequest, cancellationToken);
+                        session.TrySend(new BrokerToAgentMessage
+                        {
+                            MessageId = Guid.NewGuid().ToString("N"),
+                            CorrelationId = message.CorrelationId,
+                            CapabilityResult = result
+                        });
                         break;
                     }
                     _sessions.RequestCapability(

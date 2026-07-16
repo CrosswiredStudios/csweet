@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/CSweet.Agents.ChiefOfStaff/CSweet.Agents.ChiefOfStaff.csproj" />
+  <Project Path="tests/CSweet.Agents.ChiefOfStaff.Tests/CSweet.Agents.ChiefOfStaff.Tests.csproj" />
+</Solution>

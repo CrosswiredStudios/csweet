@@ -13,8 +13,6 @@ public sealed class SetupService : ISetupService
         ("welcome", "Welcome", true),
         ("llm-provider", "LLM Provider", true),
         ("model-capability-test", "Model Capability Test", true),
-        ("storage", "Storage", true),
-        ("worker-runtime", "Worker Runtime", true),
         ("email-delivery", "Email Delivery", false),
         ("finish", "Finish", true)
     ];

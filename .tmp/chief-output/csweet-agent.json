@@ -1,0 +1,46 @@
+{
+  "manifestVersion": "1.0",
+  "id": "com.csweet.chief-of-staff",
+  "name": "C-Sweet Chief of Staff",
+  "version": "0.1.1",
+  "publisher": { "id": "com.csweet", "name": "C-Sweet" },
+  "runtime": {
+    "type": "dotnet-project",
+    "projectPath": "src/CSweet.Agents.ChiefOfStaff/CSweet.Agents.ChiefOfStaff.csproj",
+    "targetFramework": "net10.0",
+    "defaultActivationMode": "AlwaysOn",
+    "supportsMultipleInstallations": true,
+    "maximumConcurrentJobs": 20
+  },
+  "protocol": { "minimumVersion": "1.0", "maximumVersion": "1.x" },
+  "capabilities": [
+    "assistant.converse.v1",
+    "assistant.summarize-activity.v1",
+    "assistant.plan-work.v1",
+    "agent.configuration.describe.v1",
+    "agent.configuration.update.v1"
+  ],
+  "requestedSubscriptions": [
+    "com.csweet.user.message.received.v1",
+    "com.csweet.action.completed.v1",
+    "com.csweet.action.rejected.v1",
+    "com.csweet.approval.completed.v1"
+  ],
+  "requestedPublications": [
+    "com.csweet.assistant.response.created.v1",
+    "com.csweet.assistant.response.chunk.v1",
+    "com.csweet.assistant.progress.updated.v1",
+    "com.csweet.action.proposed.v1"
+  ],
+  "requestedPermissions": [
+    "conversation.read",
+    "conversation.respond",
+    "capability.request",
+    "action.propose",
+    "memory.business.read",
+    "memory.business.propose",
+    "memory.user.read",
+    "memory.user.propose"
+  ],
+  "requestedNetworkAccess": []
+}

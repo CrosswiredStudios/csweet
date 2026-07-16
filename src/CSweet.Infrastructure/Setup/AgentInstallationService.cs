@@ -199,6 +199,118 @@ public sealed class AgentInstallationService : IAgentInstallationService
         return ToResponse(installation);
     }
 
+    public async Task<AgentInstallationResponse> UpdateAsync(
+        Guid installationId,
+        UpdateAgentInstallationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var installation = await GetInstallationAsync(installationId, cancellationToken);
+        var currentPackage = installation.PackageVersion!;
+        var nextPackage = await _dbContext.AgentPackageVersions
+            .Include(x => x.BuildJobs)
+            .SingleOrDefaultAsync(x => x.Id == request.PackageVersionId, cancellationToken)
+            ?? throw new AgentInstallationException("The selected agent update is no longer available.");
+
+        if (nextPackage.PackageSourceId != currentPackage.PackageSourceId ||
+            !string.Equals(nextPackage.AgentId, currentPackage.AgentId, StringComparison.Ordinal))
+        {
+            throw new AgentInstallationException("The selected package is not an update for this agent.");
+        }
+
+        if (await _dbContext.AgentInstallations.AnyAsync(
+                x => x.Id != installation.Id &&
+                     x.PackageVersionId == nextPackage.Id &&
+                     x.BusinessId == installation.BusinessId,
+                cancellationToken))
+        {
+            throw new AgentInstallationException(
+                $"Agent version {nextPackage.Version} is already installed for business {installation.BusinessId}. Refresh the Agents page before trying again.");
+        }
+
+        if (SemanticVersionComparer.Compare(nextPackage.Version, currentPackage.Version) <= 0)
+        {
+            throw new AgentInstallationException("The selected package version is not newer than the installed version.");
+        }
+
+        if (nextPackage.Status is not (
+                AgentPackageVersionStatus.Previewed or
+                AgentPackageVersionStatus.Approved or
+                AgentPackageVersionStatus.Built or
+                AgentPackageVersionStatus.Failed))
+        {
+            throw new AgentInstallationException("The selected agent update is not available for installation.");
+        }
+
+        var manifest = DeserializeManifest(nextPackage.ManifestJson);
+        var grant = installation.Grant!;
+        grant.CapabilitiesJson = RetainRequestedGrants(grant.CapabilitiesJson, manifest.Capabilities);
+        grant.SubscriptionsJson = RetainRequestedGrants(grant.SubscriptionsJson, manifest.RequestedSubscriptions);
+        grant.PublicationsJson = RetainRequestedGrants(grant.PublicationsJson, manifest.RequestedPublications);
+        grant.PermissionsJson = RetainRequestedGrants(grant.PermissionsJson, manifest.RequestedPermissions);
+        grant.NetworkAccessJson = RetainRequestedGrants(grant.NetworkAccessJson, manifest.RequestedNetworkAccess);
+
+        await RemoveRuntimeContainersAsync(installation, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var runtime in installation.RuntimeInstances.Where(x => AgentRuntimeInstance.IsActive(x.Status)))
+        {
+            var terminalStatus = runtime.Status == AgentRuntimeStatus.CompletionReported
+                ? AgentRuntimeStatus.Failed
+                : AgentRuntimeStatus.Cancelled;
+            runtime.TransitionTo(terminalStatus, now, "Agent installation updated to a newer package version.");
+        }
+        var latestBuild = nextPackage.BuildJobs.OrderByDescending(x => x.Attempt).FirstOrDefault();
+        var shouldQueueBuild = nextPackage.Status != AgentPackageVersionStatus.Built &&
+            latestBuild?.Status is not (
+                AgentBuildStatus.Queued or
+                AgentBuildStatus.Cloning or
+                AgentBuildStatus.Building);
+        if (nextPackage.Status != AgentPackageVersionStatus.Built)
+        {
+            nextPackage.Status = AgentPackageVersionStatus.Approved;
+        }
+        if (shouldQueueBuild)
+        {
+            _dbContext.AgentBuildJobs.Add(new AgentBuildJob
+            {
+                Id = Guid.NewGuid(),
+                PackageVersionId = nextPackage.Id,
+                Attempt = (latestBuild?.Attempt ?? 0) + 1,
+                QueuedAt = now
+            });
+        }
+
+        installation.PackageVersionId = nextPackage.Id;
+        installation.PackageVersion = nextPackage;
+        installation.UpdatedAt = now;
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+        {
+            _logger.LogError(
+                exception,
+                "Could not update agent installation {AgentInstallationId} to package {PackageVersionId}.",
+                installation.Id,
+                nextPackage.Id);
+            throw new AgentInstallationException(
+                "The agent update could not be saved. Refresh the Agents page and try again; the installed version was not changed.",
+                exception);
+        }
+
+        await _auditWriter.WriteAsync(
+            "agent-installation.updated",
+            nameof(AgentInstallation),
+            installation.Id,
+            $"Updated {currentPackage.AgentId} for business {installation.BusinessId} from " +
+            $"{currentPackage.Version} ({currentPackage.CommitSha}) to {nextPackage.Version} ({nextPackage.CommitSha}).",
+            null,
+            cancellationToken);
+
+        return ToResponse(installation);
+    }
+
     public async Task<AgentInstallationResponse> RunNowAsync(
         Guid installationId,
         CancellationToken cancellationToken = default)
@@ -262,6 +374,22 @@ public sealed class AgentInstallationService : IAgentInstallationService
             ?? throw new AgentInstallationException("The agent installation was not found.");
         var package = installation.PackageVersion!;
         var settings = await GetSettingsAsync(cancellationToken);
+        var assignedEmployees = await _dbContext.CoreOrganizationUsers
+            .AsNoTracking()
+            .Where(x => x.AgentInstallationId == installation.Id)
+            .OrderBy(x => x.DisplayName)
+            .Select(x => x.DisplayName)
+            .ToListAsync(cancellationToken);
+        if (assignedEmployees.Count > 0)
+        {
+            var names = string.Join(", ", assignedEmployees.Take(3));
+            var remainder = assignedEmployees.Count > 3
+                ? $" and {assignedEmployees.Count - 3} more"
+                : string.Empty;
+            throw new AgentInstallationException(
+                $"This agent is assigned to {assignedEmployees.Count} employee(s): {names}{remainder}. " +
+                "Remove those employees from the Employees page before removing the agent installation.");
+        }
         var removePackage = !await _dbContext.AgentInstallations.AnyAsync(
             x => x.PackageVersionId == package.Id && x.Id != installation.Id,
             cancellationToken);
@@ -273,6 +401,9 @@ public sealed class AgentInstallationService : IAgentInstallationService
                 "The agent is currently building. Wait for the build to finish before removing it.");
         }
 
+        await using var transaction = _dbContext.Database.IsRelational()
+            ? await _dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
         installation.IsEnabled = false;
         if (installation.Schedule is not null)
         {
@@ -312,7 +443,24 @@ public sealed class AgentInstallationService : IAgentInstallationService
                 }
             }
         }
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+        }
+        catch (DbUpdateException exception)
+        {
+            _logger.LogError(
+                exception,
+                "Could not remove agent installation {AgentInstallationId} because it is still referenced.",
+                installation.Id);
+            throw new AgentInstallationException(
+                "The agent could not be removed because another record still references it. Refresh Employees and remove any assignments before trying again.",
+                exception);
+        }
 
         var cleanupWarnings = removePackage ? CleanupFiles(cleanupPaths, settings) : 0;
         await _auditWriter.WriteAsync(
@@ -625,6 +773,12 @@ public sealed class AgentInstallationService : IAgentInstallationService
 
     private static string SerializeGrant(IReadOnlyList<string> values) =>
         JsonSerializer.Serialize(values.Distinct(StringComparer.Ordinal).ToList(), SerializerOptions);
+
+    private static string RetainRequestedGrants(string grantedJson, IReadOnlyList<string> requested)
+    {
+        var requestedSet = requested.ToHashSet(StringComparer.Ordinal);
+        return SerializeGrant(DeserializeGrant(grantedJson).Where(requestedSet.Contains).ToList());
+    }
 
     private static IReadOnlyList<string> DeserializeGrant(string json) =>
         JsonSerializer.Deserialize<IReadOnlyList<string>>(json, SerializerOptions) ?? [];

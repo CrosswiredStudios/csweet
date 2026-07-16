@@ -29,6 +29,11 @@ public interface IAgentInstallationService
         Guid installationId,
         CancellationToken cancellationToken = default);
 
+    Task<AgentInstallationResponse> UpdateAsync(
+        Guid installationId,
+        UpdateAgentInstallationRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<AgentInstallationResponse> EnableAsync(
         Guid installationId,
         CancellationToken cancellationToken = default);

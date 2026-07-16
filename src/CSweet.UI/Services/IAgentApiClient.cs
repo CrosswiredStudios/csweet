@@ -4,8 +4,6 @@ namespace CSweet.UI.Services;
 
 public interface IAgentApiClient
 {
-    Task<IReadOnlyList<AgentCatalogItemResponse>> ListAsync(CancellationToken cancellationToken = default);
-
     Task<AgentImportPreviewResponse> PreviewImportAsync(
         PreviewAgentImportRequest request,
         CancellationToken cancellationToken = default);
@@ -16,6 +14,14 @@ public interface IAgentApiClient
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<AgentInstallationResponse>> ListInstallationsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<AgentUpdateAvailabilityResponse>> CheckUpdatesAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<AgentInstallationResponse> UpdateAsync(
+        Guid installationId,
+        UpdateAgentInstallationRequest request,
         CancellationToken cancellationToken = default);
 
     Task<AgentInstallationResponse> UpdateScheduleAsync(
