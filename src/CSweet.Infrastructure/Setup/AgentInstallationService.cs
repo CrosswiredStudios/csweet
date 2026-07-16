@@ -11,6 +11,7 @@ namespace CSweet.Infrastructure.Setup;
 
 public sealed class AgentInstallationService : IAgentInstallationService
 {
+    private static readonly TimeSpan RuntimeContainerCleanupTimeout = TimeSpan.FromSeconds(30);
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
@@ -562,9 +563,17 @@ public sealed class AgentInstallationService : IAgentInstallationService
         AgentInstallation installation,
         CancellationToken cancellationToken)
     {
+        using var cleanupCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cleanupCancellation.CancelAfter(RuntimeContainerCleanupTimeout);
+
         foreach (var runtime in installation.RuntimeInstances)
         {
-            var containerIdentifier = runtime.ContainerId ?? runtime.ContainerName;
+            // A failed start can leave only the generated container name on the runtime
+            // record even though Docker never created a container. The runtime manager
+            // already attempts name-based cleanup when the start fails, so do not recheck
+            // every historical failed attempt during installation removal or update.
+            var containerIdentifier = runtime.ContainerId ??
+                (AgentRuntimeInstance.IsActive(runtime.Status) ? runtime.ContainerName : null);
             if (string.IsNullOrWhiteSpace(containerIdentifier))
             {
                 continue;
@@ -572,10 +581,15 @@ public sealed class AgentInstallationService : IAgentInstallationService
 
             try
             {
-                if (await _containers.InspectAsync(containerIdentifier, cancellationToken) is not null)
+                if (await _containers.InspectAsync(containerIdentifier, cleanupCancellation.Token) is not null)
                 {
-                    await _containers.RemoveAsync(containerIdentifier, force: true, cancellationToken);
+                    await _containers.RemoveAsync(containerIdentifier, force: true, cleanupCancellation.Token);
                 }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new AgentInstallationException(
+                    "Timed out while stopping an agent runtime container. Check Docker and try again.");
             }
             catch (AgentContainerException exception)
             {

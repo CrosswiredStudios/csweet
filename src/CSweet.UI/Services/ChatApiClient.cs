@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using CSweet.Contracts.Core;
+using Microsoft.AspNetCore.Components.WebAssembly.Http;
 
 namespace CSweet.UI.Services;
 
@@ -14,6 +15,16 @@ public sealed class ChatApiClient : IChatApiClient
     public ChatApiClient(HttpClient httpClient)
     {
         _httpClient = httpClient;
+    }
+
+    public async Task<IReadOnlyList<ConversationResponse>> GetConversationsAsync(
+        Guid organizationId,
+        Guid agentOrganizationUserId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _httpClient.GetFromJsonAsync<IReadOnlyList<ConversationResponse>>(
+            $"api/core/organizations/{organizationId}/conversations?agentOrganizationUserId={agentOrganizationUserId}",
+            cancellationToken) ?? [];
     }
 
     public async Task<ConversationResponse> StartConversationAsync(
@@ -58,6 +69,10 @@ public sealed class ChatApiClient : IChatApiClient
         {
             Content = JsonContent.Create(new SendChatMessageRequest(message))
         };
+
+        // Fetch buffers response bodies by default in some browser runtimes. Opting into
+        // response streaming lets each SSE event reach the Razor component immediately.
+        request.SetBrowserResponseStreamingEnabled(true);
 
         using var response = await _httpClient.SendAsync(
             request,

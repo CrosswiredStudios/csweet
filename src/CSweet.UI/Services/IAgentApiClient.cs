@@ -16,6 +16,10 @@ public interface IAgentApiClient
     Task<IReadOnlyList<AgentInstallationResponse>> ListInstallationsAsync(
         CancellationToken cancellationToken = default);
 
+    Task<AgentInstallationResponse?> GetInstallationAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<AgentUpdateAvailabilityResponse>> CheckUpdatesAsync(
         CancellationToken cancellationToken = default);
 

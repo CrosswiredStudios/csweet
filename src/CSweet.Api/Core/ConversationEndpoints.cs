@@ -9,6 +9,16 @@ public static class ConversationEndpoints
     {
         var group = endpoints.MapGroup("/api/core/organizations/{organizationId:guid}/conversations");
 
+        group.MapGet("", async (
+            Guid organizationId,
+            Guid agentOrganizationUserId,
+            IConversationService service,
+            CancellationToken cancellationToken) =>
+            Results.Ok(await service.ListAsync(
+                organizationId,
+                agentOrganizationUserId,
+                cancellationToken)));
+
         group.MapPost("", async (
             Guid organizationId,
             StartConversationRequest request,
@@ -22,19 +32,28 @@ public static class ConversationEndpoints
         });
 
         group.MapGet("/{conversationId:guid}", async (
+            Guid organizationId,
             Guid conversationId,
             IConversationService service,
             CancellationToken cancellationToken) =>
         {
             var conversation = await service.GetAsync(conversationId, cancellationToken);
-            return conversation is null ? Results.NotFound() : Results.Ok(conversation);
+            return conversation is null || conversation.OrganizationId != organizationId
+                ? Results.NotFound()
+                : Results.Ok(conversation);
         });
 
         group.MapGet("/{conversationId:guid}/messages", async (
+            Guid organizationId,
             Guid conversationId,
             IConversationService service,
             CancellationToken cancellationToken) =>
-            Results.Ok(await service.ListMessagesAsync(conversationId, cancellationToken)));
+        {
+            var conversation = await service.GetAsync(conversationId, cancellationToken);
+            return conversation is null || conversation.OrganizationId != organizationId
+                ? Results.NotFound()
+                : Results.Ok(await service.ListMessagesAsync(conversationId, cancellationToken));
+        });
 
         return endpoints;
     }

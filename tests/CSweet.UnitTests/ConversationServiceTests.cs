@@ -366,6 +366,32 @@ public class ConversationServiceTests
     #region ListMessagesAsync Tests
 
     [Fact]
+    public async Task ListAsync_ReturnsOnlyAgentConversationsInMostRecentOrder()
+    {
+        await using var dbContext = CreateDbContext();
+        var service = new ConversationService(dbContext, new TestAuditEventWriter());
+        var organization = CreateOrganization();
+        var otherOrganization = CreateOrganization();
+        var agentId = Guid.NewGuid();
+        var otherAgentId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        dbContext.CoreOrganizations.AddRange(organization, otherOrganization);
+        dbContext.CoreConversations.AddRange(
+            new Conversation { Id = Guid.NewGuid(), OrganizationId = organization.Id, AgentOrganizationUserId = agentId, InitiatedByOrganizationUserId = Guid.NewGuid(), Title = "Older", CreatedAt = now.AddHours(-2), UpdatedAt = now.AddHours(-2) },
+            new Conversation { Id = Guid.NewGuid(), OrganizationId = organization.Id, AgentOrganizationUserId = agentId, InitiatedByOrganizationUserId = Guid.NewGuid(), Title = "Newest", CreatedAt = now.AddHours(-1), UpdatedAt = now },
+            new Conversation { Id = Guid.NewGuid(), OrganizationId = organization.Id, AgentOrganizationUserId = otherAgentId, InitiatedByOrganizationUserId = Guid.NewGuid(), Title = "Other agent", CreatedAt = now, UpdatedAt = now },
+            new Conversation { Id = Guid.NewGuid(), OrganizationId = otherOrganization.Id, AgentOrganizationUserId = agentId, InitiatedByOrganizationUserId = Guid.NewGuid(), Title = "Other organization", CreatedAt = now, UpdatedAt = now });
+        await dbContext.SaveChangesAsync();
+
+        var conversations = await service.ListAsync(organization.Id, agentId);
+
+        Assert.Equal(2, conversations.Count);
+        Assert.Equal("Newest", conversations[0].Title);
+        Assert.Equal("Older", conversations[1].Title);
+    }
+
+    [Fact]
     public async Task ListMessagesAsync_ReturnsChronologicalOrder()
     {
         await using var dbContext = CreateDbContext();

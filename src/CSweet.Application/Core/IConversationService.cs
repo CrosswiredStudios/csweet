@@ -5,6 +5,11 @@ namespace CSweet.Application.Core;
 
 public interface IConversationService
 {
+    Task<IReadOnlyList<ConversationResponse>> ListAsync(
+        Guid organizationId,
+        Guid agentOrganizationUserId,
+        CancellationToken cancellationToken = default);
+
     Task<ConversationResponse?> GetAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ConversationMessageResponse>> ListMessagesAsync(

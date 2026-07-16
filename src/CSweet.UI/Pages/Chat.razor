@@ -12,13 +12,14 @@
 <div class="command-center-shell chat-page">
     <MudPaper Elevation="0" Class="page-header chat-page-header">
         <div>
-            <MudText Typo="Typo.overline" Color="Color.Primary">Conversation</MudText>
+            <div class="chat-agent-status"><span aria-hidden="true"></span> Agent conversation</div>
             <MudText Typo="Typo.h3">@(_agent?.DisplayName ?? "Agent")</MudText>
             <MudText Color="Color.Secondary">@(_conversation?.Title ?? "Live assistant chat")</MudText>
         </div>
         <MudButton Href="@($"/organizations/{OrganizationId}/employees")"
                    Variant="Variant.Outlined"
                    Color="Color.Primary"
+                   Class="chat-back-button"
                    StartIcon="@Icons.Material.Filled.ArrowBack">
             Employees
         </MudButton>
@@ -57,7 +58,38 @@
             }
         }
 
-        <MudPaper Elevation="1" Class="surface-panel chat-transcript" role="log" aria-live="polite">
+        <div class="chat-workspace">
+        <MudPaper Elevation="1" Class="surface-panel chat-history" aria-label="Conversation history">
+            <div class="chat-history-header">
+                <MudText Typo="Typo.subtitle2">Conversations</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Add"
+                               Color="Color.Primary"
+                               Size="Size.Small"
+                               aria-label="New conversation"
+                               Disabled="_streaming"
+                               OnClick="NewConversationAsync" />
+            </div>
+            @if (_conversations.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">No previous conversations.</MudText>
+            }
+            else
+            {
+                @foreach (var conversation in _conversations)
+                {
+                    <button type="button"
+                            class="chat-history-item @(conversation.Id == _conversation?.Id ? "chat-history-item-active" : null)"
+                            disabled="@_streaming"
+                            @onclick="@(() => SelectConversationAsync(conversation))">
+                        <span>@ConversationTitle(conversation)</span>
+                        <small>@conversation.UpdatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</small>
+                    </button>
+                }
+            }
+        </MudPaper>
+
+        <div class="chat-main">
+        <MudPaper Elevation="1" Class="surface-panel chat-transcript" role="log" aria-live="polite" aria-busy="@_streaming">
             @if (_messages.Count == 0 && !_streaming)
             {
                 <div class="chat-empty-state">
@@ -70,8 +102,12 @@
             @foreach (var message in _messages)
             {
                 <div class="chat-row @(message.Role == UserRole ? "chat-row-user" : "chat-row-assistant")">
+                    @if (message.Role != UserRole)
+                    {
+                        <div class="chat-agent-avatar" aria-hidden="true">@AgentInitial</div>
+                    }
                     <div class="chat-bubble @(message.Role == UserRole ? "chat-bubble-user" : "chat-bubble-assistant")">
-                        <MudText Typo="Typo.body1">@message.Content</MudText>
+                        <ChatMarkdown Content="@message.Content" />
                     </div>
                 </div>
             }
@@ -79,6 +115,7 @@
             @if (_streaming)
             {
                 <div class="chat-row chat-row-assistant">
+                    <div class="chat-agent-avatar" aria-hidden="true">@AgentInitial</div>
                     <div class="chat-bubble chat-bubble-assistant">
                         @if (string.IsNullOrEmpty(_streamingText))
                         {
@@ -87,7 +124,7 @@
                         }
                         else
                         {
-                            <MudText Typo="Typo.body1">@_streamingText</MudText>
+                            <ChatMarkdown Content="@_streamingText" />
                         }
                     </div>
                 </div>
@@ -111,6 +148,8 @@
                 Send
             </MudButton>
         </MudPaper>
+        </div>
+        </div>
     }
 </div>
 
@@ -125,6 +164,7 @@
     public Guid AgentUserId { get; set; }
 
     private readonly List<ConversationMessageResponse> _messages = [];
+    private readonly List<ConversationResponse> _conversations = [];
     private readonly CancellationTokenSource _disposeCts = new();
     private OrganizationUserResponse? _agent;
     private ConversationResponse? _conversation;
@@ -134,6 +174,10 @@
     private bool _loading = true;
     private bool _streaming;
     private string? _errorMessage;
+
+    private string AgentInitial => string.IsNullOrWhiteSpace(_agent?.DisplayName)
+        ? "A"
+        : _agent.DisplayName[..1].ToUpperInvariant();
 
     private string LoadingMessage => _runtimeReadiness?.Stage switch
     {
@@ -168,7 +212,9 @@
         _loading = true;
         _errorMessage = null;
         _runtimeReadiness = null;
+        _conversation = null;
         _messages.Clear();
+        _conversations.Clear();
 
         try
         {
@@ -197,17 +243,15 @@
                 StateHasChanged();
             }
 
-            _conversation = await ChatApi.StartConversationAsync(
-                OrganizationId,
-                AgentUserId,
-                _disposeCts.Token);
-
-            var existing = await ChatApi.GetMessagesAsync(
-                OrganizationId,
-                _conversation.Id,
-                _disposeCts.Token);
-
-            _messages.AddRange(existing);
+            await RefreshConversationsAsync(_disposeCts.Token);
+            if (_conversations.Count == 0)
+            {
+                await NewConversationAsync();
+            }
+            else
+            {
+                await SelectConversationAsync(_conversations[0]);
+            }
         }
         catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
         {
@@ -227,6 +271,51 @@
     }
 
     private Task RetryStartupAsync() => OnParametersSetAsync();
+
+    private async Task NewConversationAsync()
+    {
+        if (_streaming)
+        {
+            return;
+        }
+
+        _conversation = await ChatApi.StartConversationAsync(
+            OrganizationId,
+            AgentUserId,
+            _disposeCts.Token);
+        _messages.Clear();
+        _conversations.Insert(0, _conversation);
+        _errorMessage = null;
+    }
+
+    private async Task SelectConversationAsync(ConversationResponse conversation)
+    {
+        if (_streaming || conversation.Id == _conversation?.Id)
+        {
+            return;
+        }
+
+        _conversation = conversation;
+        _messages.Clear();
+        _messages.AddRange(await ChatApi.GetMessagesAsync(
+            OrganizationId,
+            conversation.Id,
+            _disposeCts.Token));
+        _errorMessage = null;
+    }
+
+    private async Task RefreshConversationsAsync(CancellationToken cancellationToken)
+    {
+        var conversations = await ChatApi.GetConversationsAsync(
+            OrganizationId,
+            AgentUserId,
+            cancellationToken);
+        _conversations.Clear();
+        _conversations.AddRange(conversations);
+    }
+
+    private static string ConversationTitle(ConversationResponse conversation) =>
+        string.IsNullOrWhiteSpace(conversation.Title) ? "New conversation" : conversation.Title;
 
     private async Task OnKeyDownAsync(KeyboardEventArgs args)
     {
@@ -267,17 +356,21 @@
                 _disposeCts.Token))
             {
                 _streamingText += delta;
-                StateHasChanged();
+                await InvokeAsync(StateHasChanged);
             }
 
             if (!string.IsNullOrWhiteSpace(_streamingText))
             {
+                var conversationId = _conversation.Id;
                 _messages.Add(new ConversationMessageResponse(
                     Guid.NewGuid(),
-                    _conversation.Id,
+                    conversationId,
                     AssistantRole,
                     _streamingText,
                     DateTimeOffset.UtcNow));
+
+                await RefreshConversationsAsync(_disposeCts.Token);
+                _conversation = _conversations.FirstOrDefault(x => x.Id == conversationId) ?? _conversation;
             }
         }
         catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)

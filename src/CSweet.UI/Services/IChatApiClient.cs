@@ -4,6 +4,11 @@ namespace CSweet.UI.Services;
 
 public interface IChatApiClient
 {
+    Task<IReadOnlyList<ConversationResponse>> GetConversationsAsync(
+        Guid organizationId,
+        Guid agentOrganizationUserId,
+        CancellationToken cancellationToken = default);
+
     Task<ConversationResponse> StartConversationAsync(
         Guid organizationId,
         Guid agentOrganizationUserId,

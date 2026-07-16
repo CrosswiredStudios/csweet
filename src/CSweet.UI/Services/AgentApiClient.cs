@@ -47,6 +47,13 @@ public sealed class AgentApiClient : IAgentApiClient
             "api/agents/installations",
             cancellationToken) ?? [];
 
+    public Task<AgentInstallationResponse?> GetInstallationAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default) =>
+        _httpClient.GetFromJsonAsync<AgentInstallationResponse>(
+            $"api/agents/installations/{installationId}",
+            cancellationToken);
+
     public async Task<IReadOnlyList<AgentUpdateAvailabilityResponse>> CheckUpdatesAsync(
         CancellationToken cancellationToken = default) =>
         await SendAsync<IReadOnlyList<AgentUpdateAvailabilityResponse>>(

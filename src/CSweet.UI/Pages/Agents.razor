@@ -1,4 +1,5 @@
 @page "/agents"
+@implements IDisposable
 @using System.Text.Json
 @using CSweet.Contracts.Agents
 @using CSweet.Contracts.Llm
@@ -90,6 +91,7 @@
                     @foreach (var installation in _installations)
                     {
                         var availableUpdate = UpdateFor(installation.Id);
+                        var buildProgress = BuildProgressFor(installation.Id);
                         <MudPaper Elevation="1" Class="agent-installation-card">
                             <div class="configuration-section-header">
                                 <div>
@@ -147,6 +149,19 @@
                                             <pre class="agent-build-log">@installation.LatestRuntime.LogExcerpt</pre>
                                         </details>
                                     }
+                                </MudAlert>
+                            }
+                            @if (buildProgress is not null)
+                            {
+                                <MudAlert Severity="@buildProgress.Severity" Variant="Variant.Outlined" Class="mb-3">
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">@buildProgress.Title</MudText>
+                                        <MudText Typo="Typo.body2">@buildProgress.Detail</MudText>
+                                        @if (!buildProgress.IsTerminal)
+                                        {
+                                            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                                        }
+                                    </MudStack>
                                 </MudAlert>
                             }
                             <MudStack Row="true" Class="setup-actions">
@@ -698,6 +713,11 @@
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
                 The new GitHub commit will be built before it runs. Schedule and configuration are preserved. Grants removed from the new manifest are revoked automatically; newly requested access remains denied.
             </MudAlert>
+            @if (_isManagingInstallation)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Stopping the current runtime and queuing the new package...</MudText>
+            }
             @if (!string.IsNullOrWhiteSpace(_updateError))
             {
                 <MudAlert Severity="Severity.Error">@_updateError</MudAlert>
@@ -784,6 +804,8 @@
     private AgentInstallationResponse? _updateInstallation;
     private AgentUpdateAvailabilityResponse? _selectedUpdate;
     private string? _updateError;
+    private readonly CancellationTokenSource _disposeCts = new();
+    private readonly Dictionary<Guid, AgentBuildProgress> _buildProgress = [];
 
     private string SchemaChipLabel => _schema is null ? "Offline" : "Configurable";
     private Color SchemaChipColor => _schema is null ? Color.Warning : Color.Success;
@@ -958,11 +980,15 @@
                     _approvedNetworkAccess.ToList(),
                     _installMaxRuntimeSeconds,
                     _installMemoryMb,
-                    _installCpuPercent));
+                    _installCpuPercent),
+                _disposeCts.Token);
             _installations = _installations.Append(installation).ToList();
             _importDialogOpen = false;
-            SetInstallationMessage($"{installation.AgentName} installed.", true);
+            _isInstallingImport = false;
+            await InvokeAsync(StateHasChanged);
+            await TrackAgentBuildAsync(installation, isUpdate: false, cancellationToken: _disposeCts.Token);
         }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
         catch (Exception exception)
         {
             _importError = exception.Message;
@@ -1069,29 +1095,123 @@
             return;
         }
 
+        var installationId = _updateInstallation.Id;
         _isManagingInstallation = true;
         _updateError = null;
+        SetBuildProgress(installationId, "Preparing update", "Stopping the current runtime and queuing the new package.");
         try
         {
             var updated = await AgentApi.UpdateAsync(
-                _updateInstallation.Id,
-                new UpdateAgentInstallationRequest(packageVersionId));
+                installationId,
+                new UpdateAgentInstallationRequest(packageVersionId),
+                _disposeCts.Token);
             ReplaceInstallation(updated);
             _updates = _updates.Where(update => update.InstallationId != updated.Id).ToList();
             _updateDialogOpen = false;
             _updateInstallation = null;
             _selectedUpdate = null;
-            SetInstallationMessage($"{updated.AgentName} updated to {updated.AgentVersion}. The new package is being built.", true);
+            _isManagingInstallation = false;
+            await InvokeAsync(StateHasChanged);
+            await TrackAgentBuildAsync(updated, isUpdate: true, cancellationToken: _disposeCts.Token);
         }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
         catch (Exception exception)
         {
             _updateError = exception.Message;
+            _buildProgress.Remove(installationId);
         }
         finally
         {
             _isManagingInstallation = false;
         }
     }
+
+    private async Task TrackAgentBuildAsync(
+        AgentInstallationResponse installation,
+        bool isUpdate,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(15);
+        var consecutiveRefreshFailures = 0;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            ReplaceInstallation(installation);
+            var build = installation.Build;
+            if (build is null || string.Equals(build.Status, "Succeeded", StringComparison.Ordinal))
+            {
+                var completionTitle = isUpdate ? "Update complete" : "Agent ready";
+                SetBuildProgress(installation.Id, completionTitle, $"{installation.AgentName} {installation.AgentVersion} is built and ready.", true, Severity.Success);
+                SetInstallationMessage(
+                    isUpdate
+                        ? $"{installation.AgentName} updated to {installation.AgentVersion} and is ready."
+                        : $"{installation.AgentName} installed and ready.",
+                    true);
+                return;
+            }
+
+            if (build.Status is "Failed" or "Cancelled")
+            {
+                var failureDetail = build.FailureMessage ?? $"The build ended with status {build.Status}.";
+                SetBuildProgress(installation.Id, "Agent build failed", failureDetail, true, Severity.Error);
+                SetInstallationMessage(
+                    isUpdate
+                        ? $"{installation.AgentName} was updated, but its new package could not be built."
+                        : $"{installation.AgentName} was installed, but its package could not be built.",
+                    false);
+                return;
+            }
+
+            var (title, detail) = build.Status switch
+            {
+                "Queued" => ("Build queued", "Waiting for an available build worker."),
+                "Cloning" => ("Fetching source", "Cloning the approved GitHub commit."),
+                "Building" => ("Building package", "Compiling and packaging the new agent version."),
+                _ => ("Updating agent", $"Build status: {build.Status}.")
+            };
+            SetBuildProgress(installation.Id, title, detail);
+            await InvokeAsync(StateHasChanged);
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                SetBuildProgress(installation.Id, "Build is still running", "Progress tracking stopped after 15 minutes. Refresh the page to see the latest status.", true, Severity.Warning);
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            try
+            {
+                installation = await AgentApi.GetInstallationAsync(installation.Id, cancellationToken)
+                    ?? throw new InvalidOperationException("The updated installation could not be found.");
+                consecutiveRefreshFailures = 0;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                consecutiveRefreshFailures++;
+                if (consecutiveRefreshFailures >= 3)
+                {
+                    SetBuildProgress(installation.Id, "Could not refresh build progress", exception.Message, true, Severity.Warning);
+                    return;
+                }
+                SetBuildProgress(installation.Id, "Reconnecting", "The build is continuing; retrying the progress check.");
+            }
+        }
+    }
+
+    private AgentBuildProgress? BuildProgressFor(Guid installationId) =>
+        _buildProgress.GetValueOrDefault(installationId);
+
+    private void SetBuildProgress(
+        Guid installationId,
+        string title,
+        string detail,
+        bool isTerminal = false,
+        Severity severity = Severity.Info) =>
+        _buildProgress[installationId] = new AgentBuildProgress(title, detail, isTerminal, severity);
 
     private void CloseScheduleDialog()
     {
@@ -1490,6 +1610,18 @@
 
     private static string FormatNextTick(DateTimeOffset? nextTickAt) =>
         nextTickAt?.ToLocalTime().ToString("g") ?? "Not scheduled";
+
+    public void Dispose()
+    {
+        _disposeCts.Cancel();
+        _disposeCts.Dispose();
+    }
+
+    private sealed record AgentBuildProgress(
+        string Title,
+        string Detail,
+        bool IsTerminal,
+        Severity Severity);
 
     private static RenderFragment ImportValueSection(string title, IReadOnlyList<string> values) => @<div class="agent-import-values-section">
         <MudText Typo="Typo.subtitle2">@title</MudText>

@@ -9,6 +9,7 @@ using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
 using CSweet.Domain.Setup;
 using Google.Protobuf;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace CSweet.Api.Chat;
 
@@ -154,6 +155,12 @@ public static class ChatMessageEndpoints
             "Persisted user chat message and subscribed to assistant chunks for conversation {ConversationId}.",
             conversationId);
 
+        http.Response.ContentType = "text/event-stream";
+        http.Response.Headers.CacheControl = "no-cache, no-transform";
+        http.Response.Headers["X-Accel-Buffering"] = "no";
+        http.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+        await http.Response.StartAsync(cancellationToken);
+
         var reader = router.Subscribe(conversationId);
 
         var payload = new UserMessageReceived(
@@ -182,10 +189,6 @@ public static class ChatMessageEndpoints
             },
             conversationId.ToString(),
             cancellationToken);
-
-        http.Response.ContentType = "text/event-stream";
-        http.Response.Headers.CacheControl = "no-cache";
-        http.Response.Headers["X-Accel-Buffering"] = "no";
 
         var assembled = new StringBuilder();
         var completed = false;

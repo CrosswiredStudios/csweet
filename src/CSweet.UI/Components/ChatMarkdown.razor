@@ -1,0 +1,15 @@
+@using Markdig
+
+<div class="chat-markdown">@((MarkupString)Render(Content))</div>
+
+@code {
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .DisableHtml()
+        .Build();
+
+    [Parameter, EditorRequired]
+    public string Content { get; set; } = string.Empty;
+
+    private static string Render(string value) => Markdown.ToHtml(value, Pipeline);
+}

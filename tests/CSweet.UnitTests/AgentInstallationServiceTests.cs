@@ -294,6 +294,33 @@ public sealed class AgentInstallationServiceTests
     }
 
     [Fact]
+    public async Task RemoveAsync_SkipsHistoricalFailedStartWithoutContainerId()
+    {
+        await using var dbContext = CreateDbContext();
+        var package = await SeedAsync(dbContext);
+        var containers = new TestAgentContainerRunner(containerExists: true);
+        var service = CreateService(dbContext, containers);
+        var installation = await service.InstallAsync(package.Id, ValidRequest());
+        var runtime = new AgentRuntimeInstance
+        {
+            Id = Guid.NewGuid(),
+            TickId = Guid.NewGuid(),
+            AgentInstallationId = installation.Id,
+            ContainerName = "failed-start-container",
+            QueuedAt = DateTimeOffset.UtcNow
+        };
+        runtime.TransitionTo(AgentRuntimeStatus.Starting, DateTimeOffset.UtcNow);
+        runtime.TransitionTo(AgentRuntimeStatus.StartFailed, DateTimeOffset.UtcNow, "Docker never created the container.");
+        dbContext.AgentRuntimeInstances.Add(runtime);
+        await dbContext.SaveChangesAsync();
+
+        await service.RemoveAsync(installation.Id);
+
+        Assert.DoesNotContain("failed-start-container", containers.Inspected);
+        Assert.DoesNotContain("failed-start-container", containers.Removed);
+    }
+
+    [Fact]
     public async Task RemoveAsync_RejectsRemovalWhilePackageIsBuilding()
     {
         await using var dbContext = CreateDbContext();
@@ -427,6 +454,7 @@ public sealed class AgentInstallationServiceTests
 
     private sealed class TestAgentContainerRunner(bool containerExists = false, string logs = "") : IAgentContainerRunner
     {
+        public List<string> Inspected { get; } = [];
         public List<string> Removed { get; } = [];
 
         public Task<AgentContainerStatus> StartAsync(AgentContainerStartRequest request, CancellationToken cancellationToken = default) =>
@@ -435,10 +463,13 @@ public sealed class AgentInstallationServiceTests
         public Task StopAsync(string containerId, TimeSpan gracePeriod, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
-        public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<AgentContainerStatus?>(containerExists
+        public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default)
+        {
+            Inspected.Add(containerId);
+            return Task.FromResult<AgentContainerStatus?>(containerExists
                 ? new AgentContainerStatus(containerId, containerId, AgentContainerState.Exited, 0, null, null, null)
                 : null);
+        }
 
         public Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default)
         {

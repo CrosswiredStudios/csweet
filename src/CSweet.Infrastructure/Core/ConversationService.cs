@@ -18,6 +18,19 @@ public sealed class ConversationService : IConversationService
         _auditEventWriter = auditEventWriter;
     }
 
+    public async Task<IReadOnlyList<ConversationResponse>> ListAsync(
+        Guid organizationId,
+        Guid agentOrganizationUserId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.CoreConversations
+            .Where(x => x.OrganizationId == organizationId &&
+                x.AgentOrganizationUserId == agentOrganizationUserId)
+            .OrderByDescending(x => x.UpdatedAt)
+            .Select(x => x.ToResponse())
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<ConversationResponse?> GetAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         var conversation = await _dbContext.CoreConversations
