@@ -20,6 +20,11 @@ public sealed class AgentRuntimeSignalService(CSweetDbContext dbContext) : IAgen
         var storedHash = Convert.FromHexString(instance.WorkloadTokenHash);
         if (!CryptographicOperations.FixedTimeEquals(presentedHash, storedHash))
             throw new InvalidOperationException("The runtime workload token is invalid.");
+        // A broker stream can reconnect while the same runtime is still running.
+        // Identity and workload-token validation above make this retry safe; rejecting it
+        // leaves the durable runtime marked Running with no live broker session.
+        if (instance.Status == AgentRuntimeStatus.Running)
+            return;
         if (instance.Status != AgentRuntimeStatus.WaitingForBrokerRegistration)
             throw new InvalidOperationException("The runtime instance is not awaiting broker registration.");
         if (instance.AgentInstallation?.Schedule is { } schedule)

@@ -5,4 +5,5 @@ public sealed record ConversationMessageResponse(
     Guid ConversationId,
     int Role,          // 0 = User, 1 = Assistant (matches ConversationRole)
     string Content,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    Guid? ChatTurnId = null);

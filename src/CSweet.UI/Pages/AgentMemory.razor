@@ -1,0 +1,309 @@
+@page "/organizations/{OrganizationId:guid}/employees/{EmployeeId:guid}/memory"
+@layout CommandCenterLayout
+@using CSweet.Contracts.Memory
+@inject HttpClient Http
+
+<PageTitle>Agent Memory - C-Sweet</PageTitle>
+
+<div class="command-center-shell memory-page">
+    <MudBreadcrumbs Items="_breadcrumbs" />
+
+    @if (_loading)
+    {
+        <MudPaper Elevation="1" Class="surface-panel memory-loading">
+            <MudProgressCircular Indeterminate="true" Color="Color.Secondary" />
+            <MudText>Loading agent memory...</MudText>
+        </MudPaper>
+    }
+    else if (_summary is null)
+    {
+        <MudAlert Severity="Severity.Error">@(_error ?? "This agent memory could not be found.")</MudAlert>
+    }
+    else
+    {
+        <MudPaper Elevation="0" Class="page-header memory-header">
+            <div>
+                <MudText Typo="Typo.overline" Color="Color.Secondary">Agent memory</MudText>
+                <MudText Typo="Typo.h3">@_summary.EmployeeName</MudText>
+                <MudText Color="Color.Secondary">@_summary.AgentName / @_summary.AgentDefinitionId</MudText>
+                <MudText Typo="Typo.caption">Installation @_summary.InstallationId</MudText>
+            </div>
+            <MudChip T="string" Color="@(_summary.Health == "Healthy" ? Color.Success : Color.Warning)" Variant="Variant.Outlined">
+                @_summary.Health
+            </MudChip>
+        </MudPaper>
+
+        <section class="memory-summary-grid" aria-label="Memory summary">
+            @SummaryCard("Episodes", _summary.EpisodeCount, Icons.Material.Filled.History)
+            @SummaryCard("Claims", _summary.ClaimCount, Icons.Material.Filled.FactCheck)
+            @SummaryCard("Entities", _summary.EntityCount, Icons.Material.Filled.AccountTree)
+            @SummaryCard("Relationships", _summary.RelationshipCount, Icons.Material.Filled.Share)
+            @SummaryCard("Procedures", _summary.ProcedureCount, Icons.Material.Filled.Schema)
+            @SummaryCard("Pending", _summary.PendingCaptureCount, Icons.Material.Filled.Sync)
+        </section>
+
+        <MudPaper Elevation="1" Class="surface-panel memory-controls">
+            <MudTextField T="string" Label="Search memory" @bind-Value="_search" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          OnKeyDown="SearchKeyDown" Immediate="true" />
+            <MudSelect T="string" Label="Type" @bind-Value="_kind" Variant="Variant.Outlined">
+                <MudSelectItem T="string" Value="@string.Empty">All memory</MudSelectItem>
+                @foreach (var kind in Kinds)
+                {
+                    <MudSelectItem T="string" Value="@kind">@kind</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" Label="Namespace" @bind-Value="_scope" Variant="Variant.Outlined">
+                <MudSelectItem T="string" Value="@string.Empty">All namespaces</MudSelectItem>
+                <MudSelectItem T="string" Value="@("Relationship")">Relationship</MudSelectItem>
+                <MudSelectItem T="string" Value="@("Employee")">Employee</MudSelectItem>
+                <MudSelectItem T="string" Value="@("Organization")">Organization</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="string" Label="Source" @bind-Value="_source" Variant="Variant.Outlined">
+                <MudSelectItem T="string" Value="@string.Empty">All sources</MudSelectItem>
+                <MudSelectItem T="string" Value="@("user")">User</MudSelectItem>
+                <MudSelectItem T="string" Value="@("assistant")">Assistant</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="string" Label="Sensitivity" @bind-Value="_sensitivity" Variant="Variant.Outlined">
+                <MudSelectItem T="string" Value="@string.Empty">All sensitivities</MudSelectItem>
+                @foreach (var value in Sensitivities) { <MudSelectItem T="string" Value="@value">@value</MudSelectItem> }
+            </MudSelect>
+            <MudSelect T="string" Label="Confirmation" @bind-Value="_state" Variant="Variant.Outlined">
+                <MudSelectItem T="string" Value="@string.Empty">All states</MudSelectItem>
+                @foreach (var value in States) { <MudSelectItem T="string" Value="@value">@value</MudSelectItem> }
+            </MudSelect>
+            <MudDatePicker Label="From" @bind-Date="_from" Variant="Variant.Outlined" Clearable="true" />
+            <MudDatePicker Label="To" @bind-Date="_to" Variant="Variant.Outlined" Clearable="true" />
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="LoadItemsAsync">Search</MudButton>
+        </MudPaper>
+
+        <MudTabs @bind-ActivePanelIndex="_tab" Rounded="true" ApplyEffectsToContainer="true">
+            <MudTabPanel Text="Timeline" Icon="@Icons.Material.Filled.Timeline">
+                @ItemsPanel("Episode")
+            </MudTabPanel>
+            <MudTabPanel Text="Knowledge" Icon="@Icons.Material.Filled.Lightbulb">
+                @ItemsPanel("Knowledge")
+            </MudTabPanel>
+            <MudTabPanel Text="Graph" Icon="@Icons.Material.Filled.Hub">
+                @GraphPanel()
+            </MudTabPanel>
+            <MudTabPanel Text="Procedures" Icon="@Icons.Material.Filled.Schema">
+                @ItemsPanel("Procedure")
+            </MudTabPanel>
+        </MudTabs>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid OrganizationId { get; set; }
+    [Parameter] public Guid EmployeeId { get; set; }
+
+    private static readonly string[] Kinds = ["Episode", "Claim", "Entity", "Relationship", "Procedure", "Core"];
+    private static readonly string[] Sensitivities = ["Public", "Internal", "Personal", "Confidential", "Restricted"];
+    private static readonly string[] States = ["Recorded", "NotRequired", "Pending", "Confirmed", "Rejected", "Current", "Superseded"];
+    private AgentMemorySummaryResponse? _summary;
+    private AgentMemoryPageResponse? _page;
+    private AgentMemoryGraphResponse? _graph;
+    private AgentMemoryItemResponse? _selected;
+    private bool _loading = true;
+    private bool _loadingItems;
+    private string? _error;
+    private string _search = string.Empty;
+    private string _kind = string.Empty;
+    private string _scope = string.Empty;
+    private string _source = string.Empty;
+    private string _sensitivity = string.Empty;
+    private string _state = string.Empty;
+    private DateTime? _from;
+    private DateTime? _to;
+    private int _tab;
+    private List<BreadcrumbItem> _breadcrumbs = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _breadcrumbs =
+        [
+            new("Employees", $"/organizations/{OrganizationId}/employees"),
+            new("Memory", null, true)
+        ];
+        _loading = true;
+        try
+        {
+            _summary = await Http.GetFromJsonAsync<AgentMemorySummaryResponse>(BaseUrl + "/summary");
+            await Task.WhenAll(LoadItemsAsync(), LoadGraphAsync());
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string BaseUrl => $"api/core/organizations/{OrganizationId}/employees/{EmployeeId}/memory";
+
+    private async Task LoadItemsAsync()
+    {
+        _loadingItems = true;
+        try
+        {
+            var parameters = new List<string> { "limit=100" };
+            if (!string.IsNullOrWhiteSpace(_search)) parameters.Add($"search={Uri.EscapeDataString(_search)}");
+            if (!string.IsNullOrWhiteSpace(_kind)) parameters.Add($"kind={Uri.EscapeDataString(_kind)}");
+            if (!string.IsNullOrWhiteSpace(_scope)) parameters.Add($"scope={Uri.EscapeDataString(_scope)}");
+            if (!string.IsNullOrWhiteSpace(_source)) parameters.Add($"source={Uri.EscapeDataString(_source)}");
+            if (!string.IsNullOrWhiteSpace(_sensitivity)) parameters.Add($"sensitivity={Uri.EscapeDataString(_sensitivity)}");
+            if (!string.IsNullOrWhiteSpace(_state)) parameters.Add($"state={Uri.EscapeDataString(_state)}");
+            if (_from.HasValue) parameters.Add($"from={Uri.EscapeDataString(_from.Value.ToString("O"))}");
+            if (_to.HasValue) parameters.Add($"to={Uri.EscapeDataString(_to.Value.Date.AddDays(1).AddTicks(-1).ToString("O"))}");
+            _page = await Http.GetFromJsonAsync<AgentMemoryPageResponse>($"{BaseUrl}/items?{string.Join('&', parameters)}");
+            _selected = null;
+        }
+        finally
+        {
+            _loadingItems = false;
+        }
+    }
+
+    private async Task LoadGraphAsync()
+    {
+        var suffix = string.IsNullOrWhiteSpace(_search) ? string.Empty : $"?search={Uri.EscapeDataString(_search)}";
+        _graph = await Http.GetFromJsonAsync<AgentMemoryGraphResponse>($"{BaseUrl}/graph{suffix}");
+    }
+
+    private async Task SelectItemAsync(AgentMemoryItemResponse item)
+    {
+        _selected = item;
+        _selected = await Http.GetFromJsonAsync<AgentMemoryItemResponse>($"{BaseUrl}/items/{item.Id}") ?? item;
+    }
+
+    private async Task SearchKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await Task.WhenAll(LoadItemsAsync(), LoadGraphAsync());
+        }
+    }
+
+    private RenderFragment SummaryCard(string label, int count, string icon) => @<MudPaper Elevation="1" Class="memory-summary-card">
+            <MudIcon Icon="@icon" Color="Color.Secondary" />
+            <div><MudText Typo="Typo.h5">@count</MudText><MudText Typo="Typo.caption">@label</MudText></div>
+        </MudPaper>;
+
+    private RenderFragment ItemsPanel(string view)
+    {
+        var items = (_page?.Items ?? []).Where(item => view switch
+        {
+            "Episode" => item.Kind == "Episode",
+            "Procedure" => item.Kind is "Procedure" or "Core",
+            _ => item.Kind is "Claim" or "Entity" or "Relationship"
+        }).ToList();
+        return @<div class="memory-explorer-layout">
+            <MudPaper Elevation="0" Class="memory-list" role="list">
+                @if (_loadingItems)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Secondary" />
+                }
+                else if (items.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">No matching @view.ToLowerInvariant() memory has been recorded yet.</MudAlert>
+                }
+                else
+                {
+                    @foreach (var item in items)
+                    {
+                        <button type="button" class="memory-item @(item.Id == _selected?.Id ? "selected" : null)" @onclick="@(() => SelectItemAsync(item))">
+                            <span class="memory-item-heading"><strong>@item.Title</strong><small>@item.OccurredAt.ToLocalTime().ToString("g")</small></span>
+                            <span>@Truncate(item.Content, 220)</span>
+                            <span class="memory-item-meta">@item.Scope / @(item.UserName ?? item.Source) / @item.Sensitivity / @item.State</span>
+                        </button>
+                    }
+                }
+            </MudPaper>
+            @DetailPanel()
+        </div>;
+    }
+
+    private RenderFragment DetailPanel() => @<aside class="memory-detail" aria-label="Memory details">
+            @if (_selected is null)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Psychology" Size="Size.Large" Color="Color.Secondary" />
+                <MudText Color="Color.Secondary">Select a memory to inspect its provenance.</MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.overline">@_selected.Kind</MudText>
+                <MudText Typo="Typo.h6">@_selected.Title</MudText>
+                <MudText Class="memory-detail-content">@_selected.Content</MudText>
+                <dl>
+                    <dt>Scope</dt><dd>@_selected.Scope</dd>
+                    <dt>Relationship</dt><dd>@(_selected.UserName ?? "Shared")</dd>
+                    <dt>Source</dt><dd>@_selected.Source</dd>
+                    <dt>Sensitivity</dt><dd>@_selected.Sensitivity</dd>
+                    <dt>State</dt><dd>@_selected.State</dd>
+                    @if (_selected.ConversationId.HasValue) { <dt>Conversation</dt><dd>@_selected.ConversationId</dd> }
+                    @if (_selected.Confidence.HasValue) { <dt>Confidence</dt><dd>@_selected.Confidence.Value.ToString("P0")</dd> }
+                </dl>
+                @if (_selected.Metadata is not null)
+                {
+                    <MudText Typo="Typo.subtitle2">Provenance</MudText>
+                    @foreach (var pair in _selected.Metadata)
+                    {
+                        <MudText Typo="Typo.caption"><strong>@pair.Key:</strong> @pair.Value</MudText>
+                    }
+                }
+                @if (_selected.RecallUses is { Count: > 0 })
+                {
+                    <MudText Typo="Typo.subtitle2">Recall history</MudText>
+                    @foreach (var use in _selected.RecallUses)
+                    {
+                        <MudText Typo="Typo.caption">@use.UsedAt.ToLocalTime().ToString("g") in conversation @use.ConversationId</MudText>
+                    }
+                }
+            }
+        </aside>;
+
+    private RenderFragment GraphPanel()
+    {
+        if (_graph is null || _graph.Nodes.Count == 0)
+        {
+            return @<MudAlert Severity="Severity.Info" Variant="Variant.Outlined">Entity relationships will appear after durable memory has been enriched.</MudAlert>;
+        }
+        var positioned = _graph.Nodes.Select((node, index) => new { node, X = 90 + index % 4 * 210, Y = 70 + index / 4 * 130 }).ToList();
+        var byId = positioned.ToDictionary(x => x.node.Id);
+        return @<div>
+            <div class="memory-graph" role="img" aria-label="Agent memory entity graph">
+                <svg viewBox="0 0 900 600">
+                    @foreach (var edge in _graph.Edges.Where(edge => byId.ContainsKey(edge.FromId) && byId.ContainsKey(edge.ToId)))
+                    {
+                        var from = byId[edge.FromId]; var to = byId[edge.ToId];
+                        <line x1="@from.X" y1="@from.Y" x2="@to.X" y2="@to.Y" />
+                    }
+                    @foreach (var item in positioned)
+                    {
+                        <g transform="translate(@item.X @item.Y)">
+                            <circle r="42" />
+                        </g>
+                    }
+                </svg>
+            </div>
+            <MudTable Items="@_graph.Nodes" Dense="true" Breakpoint="Breakpoint.Sm" AriaLabel="Memory entities">
+                <HeaderContent><MudTh>Name</MudTh><MudTh>Type</MudTh><MudTh>Scope</MudTh></HeaderContent>
+                <RowTemplate><MudTd DataLabel="Name">@context.Label</MudTd><MudTd DataLabel="Type">@context.Type</MudTd><MudTd DataLabel="Scope">@context.Scope</MudTd></RowTemplate>
+            </MudTable>
+            <MudTable Items="@_graph.Edges" Dense="true" Breakpoint="Breakpoint.Sm" AriaLabel="Memory relationships">
+                <HeaderContent><MudTh>From</MudTh><MudTh>Relationship</MudTh><MudTh>To</MudTh><MudTh>Confidence</MudTh></HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="From">@(byId.TryGetValue(context.FromId, out var from) ? from.node.Label : context.FromId.ToString())</MudTd>
+                    <MudTd DataLabel="Relationship">@context.Label</MudTd>
+                    <MudTd DataLabel="To">@(byId.TryGetValue(context.ToId, out var to) ? to.node.Label : context.ToId.ToString())</MudTd>
+                    <MudTd DataLabel="Confidence">@context.Confidence.ToString("P0")</MudTd>
+                </RowTemplate>
+            </MudTable>
+        </div>;
+    }
+
+    private static string Truncate(string value, int length) => value.Length <= length ? value : value[..length] + "...";
+}

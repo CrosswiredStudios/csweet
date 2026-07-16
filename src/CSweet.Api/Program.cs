@@ -11,6 +11,7 @@ using CSweet.Infrastructure;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
+using CSweet.Infrastructure.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +20,10 @@ builder.AddCSweetInfrastructure();
 builder.Services.AddChatGateway(builder.Configuration);
 builder.Services.AddAgentManagement();
 builder.Services.AddAgentRateLimiting();
+builder.Services.AddHostedService<MemoryCaptureWorker>();
+builder.Services.AddHostedService<ChatTurnWorker>();
+builder.Services.AddSingleton<IChatTurnEventRouter, ChatTurnEventRouter>();
+builder.Services.Configure<ChatTurnOptions>(builder.Configuration.GetSection("ChatTurns"));
 builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme)
     .AddIdentityCookies();
 builder.Services.ConfigureApplicationCookie(options =>
@@ -126,7 +131,9 @@ app.MapWorkTaskEndpoints();
 app.MapTaskRunEndpoints();
 app.MapArtifactEndpoints();
 app.MapConversationEndpoints();
+app.MapAgentMemoryEndpoints();
 app.MapChatMessageEndpoints();
+app.MapChatTurnEndpoints();
 app.MapAgentManagementEndpoints();
 
 app.MapControllers();

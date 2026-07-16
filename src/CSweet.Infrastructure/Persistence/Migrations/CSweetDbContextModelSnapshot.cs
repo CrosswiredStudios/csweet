@@ -22,6 +22,85 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("CSweet.Domain.Core.AgentMemoryNamespaceRegistration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PartitionKey")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PartitionKey")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "EmployeeId", "UserId");
+
+                    b.ToTable("AgentMemoryNamespaces");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Core.AgentMemoryRecallUse", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Layer")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("MemoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId", "UsedAt");
+
+                    b.HasIndex("OrganizationId", "EmployeeId", "MemoryId", "UsedAt");
+
+                    b.ToTable("AgentMemoryRecallUses");
+                });
+
             modelBuilder.Entity("CSweet.Domain.Core.Approval", b =>
                 {
                     b.Property<Guid>("Id")
@@ -108,6 +187,151 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.ToTable("CoreArtifacts");
                 });
 
+            modelBuilder.Entity("CSweet.Domain.Core.ChatTurn", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AssistantMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempt")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
+
+                    b.Property<DateTimeOffset?>("FirstOutputAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LastActivityAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("NextTraceSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PartialResponse")
+                        .IsRequired()
+                        .HasMaxLength(131072)
+                        .HasColumnType("character varying(131072)");
+
+                    b.Property<DateTimeOffset?>("ResponseReadyAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RetryOfTurnId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserMessageId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssistantMessageId");
+
+                    b.HasIndex("UserMessageId")
+                        .IsUnique();
+
+                    b.HasIndex("ConversationId", "CreatedAt");
+
+                    b.HasIndex("Status", "CreatedAt");
+
+                    b.ToTable("ChatTurns");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Core.ChatTurnTraceEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("ChatTurnId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DetailsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<long?>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Sensitivity")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(8192)
+                        .HasColumnType("character varying(8192)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChatTurnId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("ChatTurnTraceEvents");
+                });
+
             modelBuilder.Entity("CSweet.Domain.Core.Conversation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -148,6 +372,9 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ChatTurnId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasMaxLength(32768)
@@ -166,9 +393,57 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ChatTurnId");
+
                     b.HasIndex("ConversationId", "CreatedAt");
 
                     b.ToTable("CoreConversationMessages");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Core.MemoryCaptureOutboxItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ConversationMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EnrichedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EpisodeCapturedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationMessageId")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "NextAttemptAt");
+
+                    b.ToTable("MemoryCaptureOutbox");
                 });
 
             modelBuilder.Entity("CSweet.Domain.Core.Organization", b =>
@@ -261,7 +536,9 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AgentInstallationId");
+                    b.HasIndex("AgentInstallationId")
+                        .IsUnique()
+                        .HasFilter("\"AgentInstallationId\" IS NOT NULL");
 
                     b.HasIndex("ApplicationUserId");
 
@@ -1964,6 +2241,43 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.Navigation("TaskRun");
                 });
 
+            modelBuilder.Entity("CSweet.Domain.Core.ChatTurn", b =>
+                {
+                    b.HasOne("CSweet.Domain.Core.ConversationMessage", "AssistantMessage")
+                        .WithMany()
+                        .HasForeignKey("AssistantMessageId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CSweet.Domain.Core.Conversation", "Conversation")
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CSweet.Domain.Core.ConversationMessage", "UserMessage")
+                        .WithMany()
+                        .HasForeignKey("UserMessageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AssistantMessage");
+
+                    b.Navigation("Conversation");
+
+                    b.Navigation("UserMessage");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Core.ChatTurnTraceEvent", b =>
+                {
+                    b.HasOne("CSweet.Domain.Core.ChatTurn", "ChatTurn")
+                        .WithMany("TraceEvents")
+                        .HasForeignKey("ChatTurnId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ChatTurn");
+                });
+
             modelBuilder.Entity("CSweet.Domain.Core.Conversation", b =>
                 {
                     b.HasOne("CSweet.Domain.Core.OrganizationUser", "AgentOrganizationUser")
@@ -1992,6 +2306,17 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Conversation");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Core.MemoryCaptureOutboxItem", b =>
+                {
+                    b.HasOne("CSweet.Domain.Core.ConversationMessage", "ConversationMessage")
+                        .WithMany()
+                        .HasForeignKey("ConversationMessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ConversationMessage");
                 });
 
             modelBuilder.Entity("CSweet.Domain.Core.OrganizationUser", b =>
@@ -2300,6 +2625,11 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Core.ChatTurn", b =>
+                {
+                    b.Navigation("TraceEvents");
                 });
 
             modelBuilder.Entity("CSweet.Domain.Core.Conversation", b =>

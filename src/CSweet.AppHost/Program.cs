@@ -24,8 +24,7 @@ var migrator = builder.AddExecutable(
         repositoryRoot,
         "run",
         "--project",
-        "src/CSweet.Migrator/CSweet.Migrator.csproj",
-        "--no-build")
+        "src/CSweet.Migrator/CSweet.Migrator.csproj")
     .WithReference(postgres)
     .WaitFor(postgres);
 

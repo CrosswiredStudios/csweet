@@ -110,6 +110,15 @@
                         <ChatMarkdown Content="@message.Content" />
                     </div>
                 </div>
+                @if (message.Role == AssistantRole && message.ChatTurnId is Guid completedTurnId && _turns.ContainsKey(completedTurnId))
+                {
+                    @TracePanel(_turns[completedTurnId])
+                }
+            }
+
+            @foreach (var pending in _turns.Values.Where(turn => !_messages.Any(message => message.Role == AssistantRole && message.ChatTurnId == turn.Turn.Id)).OrderBy(turn => turn.Turn.CreatedAt))
+            {
+                @TracePanel(pending)
             }
 
             @if (_streaming)
@@ -119,7 +128,7 @@
                     <div class="chat-bubble chat-bubble-assistant">
                         @if (string.IsNullOrEmpty(_streamingText))
                         {
-                            <MudText Typo="Typo.body2" Color="Color.Secondary">Personal Assistant is thinking...</MudText>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">The turn is running. Expand its execution trace for live details.</MudText>
                             <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
                         }
                         else
@@ -165,6 +174,8 @@
 
     private readonly List<ConversationMessageResponse> _messages = [];
     private readonly List<ConversationResponse> _conversations = [];
+    private readonly Dictionary<Guid, TurnView> _turns = [];
+    private readonly HashSet<Guid> _observingTurns = [];
     private readonly CancellationTokenSource _disposeCts = new();
     private OrganizationUserResponse? _agent;
     private ConversationResponse? _conversation;
@@ -214,6 +225,7 @@
         _runtimeReadiness = null;
         _conversation = null;
         _messages.Clear();
+        _turns.Clear();
         _conversations.Clear();
 
         try
@@ -284,6 +296,7 @@
             AgentUserId,
             _disposeCts.Token);
         _messages.Clear();
+        _turns.Clear();
         _conversations.Insert(0, _conversation);
         _errorMessage = null;
     }
@@ -301,6 +314,7 @@
             OrganizationId,
             conversation.Id,
             _disposeCts.Token));
+        await LoadTurnsAsync(_disposeCts.Token);
         _errorMessage = null;
     }
 
@@ -336,42 +350,16 @@
         _draft = string.Empty;
         _errorMessage = null;
 
-        _messages.Add(new ConversationMessageResponse(
-            Guid.NewGuid(),
-            _conversation.Id,
-            UserRole,
-            text,
-            DateTimeOffset.UtcNow));
-
         _streaming = true;
         _streamingText = string.Empty;
         StateHasChanged();
 
         try
         {
-            await foreach (var delta in ChatApi.SendMessageAsync(
-                OrganizationId,
-                _conversation.Id,
-                text,
-                _disposeCts.Token))
-            {
-                _streamingText += delta;
-                await InvokeAsync(StateHasChanged);
-            }
-
-            if (!string.IsNullOrWhiteSpace(_streamingText))
-            {
-                var conversationId = _conversation.Id;
-                _messages.Add(new ConversationMessageResponse(
-                    Guid.NewGuid(),
-                    conversationId,
-                    AssistantRole,
-                    _streamingText,
-                    DateTimeOffset.UtcNow));
-
-                await RefreshConversationsAsync(_disposeCts.Token);
-                _conversation = _conversations.FirstOrDefault(x => x.Id == conversationId) ?? _conversation;
-            }
+            var started = await ChatApi.StartTurnAsync(OrganizationId, _conversation.Id, text, _disposeCts.Token);
+            _messages.Add(started.UserMessage);
+            _turns[started.Turn.Id] = new TurnView(started.Turn) { Expanded = true };
+            await ObserveTurnAsync(started.Turn.Id, _disposeCts.Token);
         }
         catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
         {
@@ -382,10 +370,159 @@
         }
         finally
         {
-            _streaming = false;
-            _streamingText = string.Empty;
+            UpdateStreamingState();
             StateHasChanged();
         }
+    }
+
+    private async Task LoadTurnsAsync(CancellationToken cancellationToken)
+    {
+        _turns.Clear();
+        foreach (var turnId in _messages.Where(x => x.ChatTurnId.HasValue).Select(x => x.ChatTurnId!.Value).Distinct())
+        {
+            var turn = await ChatApi.GetTurnAsync(OrganizationId, turnId, cancellationToken);
+            if (turn is null) continue;
+            var view = new TurnView(turn) { Expanded = !IsTerminal(turn.Status) };
+            view.Events.AddRange(await ChatApi.GetTurnTraceAsync(OrganizationId, turnId, cancellationToken));
+            _turns[turnId] = view;
+            if (!IsTerminal(turn.Status)) _ = ObserveTurnAsync(turnId, cancellationToken);
+        }
+        UpdateStreamingState();
+    }
+
+    private async Task ObserveTurnAsync(Guid turnId, CancellationToken cancellationToken)
+    {
+        if (!_observingTurns.Add(turnId)) return;
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (!_turns.TryGetValue(turnId, out var view)) return;
+                var cursor = view.Events.Count == 0 ? -1 : view.Events.Max(x => x.Sequence);
+                try
+                {
+                    await foreach (var traceEvent in ChatApi.StreamTurnEventsAsync(OrganizationId, turnId, cursor, cancellationToken))
+                    {
+                        if (view.Events.All(x => x.Sequence != traceEvent.Sequence)) view.Events.Add(traceEvent);
+                        if (traceEvent.EventType == "turn.restarted") _streamingText = string.Empty;
+                        if (traceEvent.EventType == "output.delta" && !string.IsNullOrEmpty(traceEvent.Summary))
+                            _streamingText += traceEvent.Summary;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+                catch
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                }
+
+                var latest = await ChatApi.GetTurnAsync(OrganizationId, turnId, cancellationToken);
+                if (latest is null) return;
+                view.Turn = latest;
+                if (!IsTerminal(latest.Status)) continue;
+                view.Expanded = false;
+                var conversationId = latest.ConversationId;
+                _messages.Clear();
+                _messages.AddRange(await ChatApi.GetMessagesAsync(OrganizationId, conversationId, cancellationToken));
+                await RefreshConversationsAsync(cancellationToken);
+                _conversation = _conversations.FirstOrDefault(x => x.Id == conversationId) ?? _conversation;
+                _streamingText = string.Empty;
+                UpdateStreamingState();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+        }
+        finally
+        {
+            _observingTurns.Remove(turnId);
+        }
+    }
+
+    private async Task RetryTurnAsync(TurnView failed)
+    {
+        var started = await ChatApi.RetryTurnAsync(OrganizationId, failed.Turn.Id, _disposeCts.Token);
+        _messages.Add(started.UserMessage);
+        _turns[started.Turn.Id] = new TurnView(started.Turn) { Expanded = true };
+        _streamingText = string.Empty;
+        UpdateStreamingState();
+        await ObserveTurnAsync(started.Turn.Id, _disposeCts.Token);
+    }
+
+    private async Task CancelTurnAsync(TurnView view)
+    {
+        await ChatApi.CancelTurnAsync(OrganizationId, view.Turn.Id, _disposeCts.Token);
+        view.Turn = await ChatApi.GetTurnAsync(OrganizationId, view.Turn.Id, _disposeCts.Token) ?? view.Turn;
+        view.Expanded = false;
+        UpdateStreamingState();
+    }
+
+    private void UpdateStreamingState() =>
+        _streaming = _turns.Values.Any(x => !IsTerminal(x.Turn.Status));
+
+    private static bool IsTerminal(string status) => status is "Completed" or "CompletedWithWarnings" or "Failed" or "Cancelled";
+
+    private RenderFragment TracePanel(TurnView view) => @<div class="chat-trace @TraceClass(view.Turn.Status)">
+        <button type="button" class="chat-trace-summary" aria-expanded="@view.Expanded" @onclick="@(() => ToggleTraceAsync(view))">
+            <MudIcon Icon="@TraceIcon(view.Turn.Status)" Size="Size.Small" />
+            <span>@TraceSummary(view)</span>
+            <MudIcon Icon="@(view.Expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
+        </button>
+        @if (view.Expanded)
+        {
+            <div class="chat-trace-events" role="list" aria-label="Execution trace" tabindex="0">
+                @foreach (var traceEvent in view.Events.OrderBy(x => x.Sequence))
+                {
+                    <div class="chat-trace-event" role="listitem">
+                        <div><strong>@traceEvent.Title</strong><small>@traceEvent.OccurredAt.ToLocalTime().ToString("T") @if (traceEvent.DurationMs.HasValue) { <span>· @traceEvent.DurationMs ms</span> }</small></div>
+                        @if (!string.IsNullOrWhiteSpace(traceEvent.Summary)) { <pre>@traceEvent.Summary</pre> }
+                        @if (traceEvent.Details.HasValue) { <details><summary>Structured details</summary><pre>@traceEvent.Details.Value.ToString()</pre></details> }
+                    </div>
+                }
+                @if (!IsTerminal(view.Turn.Status))
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => CancelTurnAsync(view))">Cancel</MudButton>
+                }
+                else if (view.Turn.Status is "Failed" or "CompletedWithWarnings")
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" OnClick="@(() => RetryTurnAsync(view))">Retry</MudButton>
+                }
+            </div>
+        }
+    </div>;
+
+    private static string TraceSummary(TurnView view)
+    {
+        var duration = (view.Turn.CompletedAt ?? DateTimeOffset.UtcNow) - view.Turn.CreatedAt;
+        var memories = view.Events.Count(x => x.Category == "memory" && x.EventType == "recall.completed");
+        var modelCalls = view.Events.Count(x => x.EventType == "model.dispatched");
+        return $"{view.Turn.Status} in {Math.Max(0, (int)duration.TotalSeconds)}s · {memories} memory search · {modelCalls} model call";
+    }
+
+    private static string TraceClass(string status) => status switch { "Failed" => "chat-trace-failed", "CompletedWithWarnings" => "chat-trace-warning", _ => string.Empty };
+    private static string TraceIcon(string status) => status switch
+    {
+        "Completed" => Icons.Material.Filled.CheckCircle,
+        "Failed" => Icons.Material.Filled.Error,
+        "CompletedWithWarnings" => Icons.Material.Filled.Warning,
+        "Cancelled" => Icons.Material.Filled.Cancel,
+        _ => Icons.Material.Filled.Psychology
+    };
+
+    private async Task ToggleTraceAsync(TurnView view)
+    {
+        view.Expanded = !view.Expanded;
+        if (!view.Expanded) return;
+        var latest = await ChatApi.GetTurnTraceAsync(OrganizationId, view.Turn.Id, _disposeCts.Token);
+        view.Events.Clear();
+        view.Events.AddRange(latest);
+        view.Turn = await ChatApi.GetTurnAsync(OrganizationId, view.Turn.Id, _disposeCts.Token) ?? view.Turn;
+    }
+
+    private sealed class TurnView(ChatTurnResponse turn)
+    {
+        public ChatTurnResponse Turn { get; set; } = turn;
+        public List<ChatTurnTraceEventResponse> Events { get; } = [];
+        public bool Expanded { get; set; }
     }
 
     public void Dispose()

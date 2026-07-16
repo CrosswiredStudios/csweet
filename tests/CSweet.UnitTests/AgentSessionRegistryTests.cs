@@ -70,6 +70,44 @@ public sealed class AgentSessionRegistryTests
     }
 
     [Fact]
+    public async Task PublishEvent_WithInstallationRoutePermission_CanTargetAnotherBusiness()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var source = Register(registry, "platform", "default", publications: new[] { "chat.v1" }, permissions: new[] { "installation.route" });
+        var target = Register(registry, "agent", "business-2", subscriptions: new[] { "chat.v1" }, installationId: "target-instance");
+
+        registry.PublishEvent(source, new PublishEvent
+        {
+            EventType = "chat.v1",
+            Subject = "agent-installation/target-instance/conversation/1"
+        }, "cross-business-turn");
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var delivered = await target.Outbound.ReadAsync(timeout.Token);
+        Assert.Equal(BrokerToAgentMessage.PayloadOneofCase.Event, delivered.PayloadCase);
+        Assert.False(source.Outbound.TryRead(out _));
+    }
+
+    [Fact]
+    public async Task PublishEvent_WithNoSubscriber_ReturnsCorrelatedErrorToPublisher()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var source = Register(registry, "source", "business-1", publications: new[] { "chat.v1" });
+
+        registry.PublishEvent(source, new PublishEvent
+        {
+            EventType = "chat.v1",
+            Subject = "conversation/1"
+        }, "turn-correlation");
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var error = await source.Outbound.ReadAsync(timeout.Token);
+        Assert.Equal(BrokerToAgentMessage.PayloadOneofCase.Error, error.PayloadCase);
+        Assert.Equal("turn-correlation", error.CorrelationId);
+        Assert.Equal("event_undelivered", error.Error.Code);
+    }
+
+    [Fact]
     public async Task RequestCapability_WithInstallationSelector_UsesTargetInstance()
     {
         var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);

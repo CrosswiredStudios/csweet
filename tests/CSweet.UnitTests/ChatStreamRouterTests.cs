@@ -5,6 +5,21 @@ namespace CSweet.UnitTests;
 public sealed class ChatStreamRouterTests
 {
     [Fact]
+    public async Task ConversationAlias_RoutesLegacyChunksToDurableTurn()
+    {
+        var router = new ChatStreamRouter();
+        var conversationId = Guid.NewGuid();
+        var turnId = Guid.NewGuid();
+        router.BindAlias(conversationId, turnId);
+        var reader = router.Subscribe(turnId);
+
+        router.Publish(conversationId, new ChatStreamChunk(0, "legacy", IsFinal: false));
+
+        Assert.Equal("legacy", (await reader.ReadAsync()).Delta);
+        router.UnbindAlias(conversationId, turnId);
+    }
+
+    [Fact]
     public async Task Publish_DeliversChunksInOrder()
     {
         var router = new ChatStreamRouter();

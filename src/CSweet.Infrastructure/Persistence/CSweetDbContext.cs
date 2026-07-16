@@ -53,6 +53,11 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
     // Conversation entities
     public DbSet<Conversation> CoreConversations => Set<Conversation>();
     public DbSet<ConversationMessage> CoreConversationMessages => Set<ConversationMessage>();
+    public DbSet<ChatTurn> ChatTurns => Set<ChatTurn>();
+    public DbSet<ChatTurnTraceEvent> ChatTurnTraceEvents => Set<ChatTurnTraceEvent>();
+    public DbSet<MemoryCaptureOutboxItem> MemoryCaptureOutbox => Set<MemoryCaptureOutboxItem>();
+    public DbSet<AgentMemoryNamespaceRegistration> AgentMemoryNamespaces => Set<AgentMemoryNamespaceRegistration>();
+    public DbSet<AgentMemoryRecallUse> AgentMemoryRecallUses => Set<AgentMemoryRecallUse>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<RootRecoveryCode> RootRecoveryCodes => Set<RootRecoveryCode>();
     public DbSet<EmailDeliveryConfiguration> EmailDeliveryConfigurations => Set<EmailDeliveryConfiguration>();

@@ -24,4 +24,11 @@ public interface IChatApiClient
         Guid conversationId,
         string message,
         CancellationToken cancellationToken = default);
+
+    Task<ChatTurnStartResponse> StartTurnAsync(Guid organizationId, Guid conversationId, string message, CancellationToken cancellationToken = default);
+    Task<ChatTurnResponse?> GetTurnAsync(Guid organizationId, Guid turnId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ChatTurnTraceEventResponse>> GetTurnTraceAsync(Guid organizationId, Guid turnId, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<ChatTurnTraceEventResponse> StreamTurnEventsAsync(Guid organizationId, Guid turnId, long afterSequence = -1, CancellationToken cancellationToken = default);
+    Task<ChatTurnStartResponse> RetryTurnAsync(Guid organizationId, Guid turnId, CancellationToken cancellationToken = default);
+    Task CancelTurnAsync(Guid organizationId, Guid turnId, CancellationToken cancellationToken = default);
 }

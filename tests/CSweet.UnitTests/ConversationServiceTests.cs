@@ -228,6 +228,9 @@ public class ConversationServiceTests
         Assert.Equal("Hello", messages[0].Content);
         Assert.Equal("Hi there!", messages[1].Content);
         Assert.Equal("How are you?", messages[2].Content);
+        Assert.Equal(3, await dbContext.MemoryCaptureOutbox.CountAsync());
+        Assert.All(await dbContext.MemoryCaptureOutbox.ToListAsync(), item =>
+            Assert.Equal(MemoryCaptureStatus.Pending, item.Status));
     }
 
     [Fact]

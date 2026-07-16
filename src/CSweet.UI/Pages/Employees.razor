@@ -148,6 +148,21 @@
                                 Open chat
                             </MudButton>
                         }
+                        @if (employee.EmployeeType == 1)
+                        {
+                            <span @onclick:stopPropagation="true">
+                                <MudTooltip Text="@(employee.AgentInstallationId.HasValue ? "Explore memory" : "This agent employee has no installed runtime memory")">
+                                    <span>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Psychology"
+                                                       Color="Color.Secondary"
+                                                       Size="Size.Small"
+                                                       Disabled="@(!employee.AgentInstallationId.HasValue)"
+                                                       aria-label="Explore memory"
+                                                       OnClick="@(() => OpenMemory(employee))" />
+                                    </span>
+                                </MudTooltip>
+                            </span>
+                        }
                         @if (!IsSelf(employee))
                         {
                             <span @onclick:stopPropagation="true">
@@ -843,6 +858,14 @@
         if (IsChattableAgent(employee))
         {
             Navigation.NavigateTo($"/organizations/{OrganizationId}/chat/{employee.Id}");
+        }
+    }
+
+    private void OpenMemory(OrganizationUserResponse employee)
+    {
+        if (employee.EmployeeType == 1 && employee.AgentInstallationId.HasValue)
+        {
+            Navigation.NavigateTo($"/organizations/{OrganizationId}/employees/{employee.Id}/memory");
         }
     }
 

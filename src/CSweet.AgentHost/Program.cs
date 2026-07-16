@@ -28,6 +28,7 @@ builder.Services.AddSingleton<IMemoryStore>(_ => new PostgreSqlMemoryStore(
     ?? builder.Configuration.GetConnectionString("csweet")
     ?? throw new InvalidOperationException("A PostgreSQL connection is required for platform memory.")));
 builder.Services.AddScoped<PlatformMemoryCapabilityHandler>();
+builder.Services.AddScoped<IAgentMemoryIdentityResolver, AgentMemoryIdentityResolver>();
 
 var app = builder.Build();
 

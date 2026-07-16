@@ -63,13 +63,22 @@ public sealed class OrganizationUserService : IOrganizationUserService
 
         if (request.AgentInstallationId.HasValue)
         {
-            var installationAvailable = await _dbContext.AgentInstallations.AnyAsync(
+            var installation = await _dbContext.AgentInstallations.SingleOrDefaultAsync(
                 x => x.Id == request.AgentInstallationId && x.IsEnabled,
                 cancellationToken);
-            if (!installationAvailable)
+            if (installation is null)
             {
                 return Failure("invalid_agent_instance", "The selected agent installation is not available.");
             }
+
+            if (await _dbContext.CoreOrganizationUsers.AnyAsync(
+                x => x.AgentInstallationId == request.AgentInstallationId,
+                cancellationToken))
+            {
+                return Failure("agent_instance_in_use", "The selected agent installation already belongs to another employee.");
+            }
+
+            installation.BusinessId = organizationId.ToString("D");
         }
 
         if (request.ReportsToOrganizationUserId.HasValue)

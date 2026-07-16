@@ -7,6 +7,7 @@ public sealed class ConversationMessage
     public ConversationRole Role { get; set; }
     public string Content { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
+    public Guid? ChatTurnId { get; set; }
 
     // Navigation
     public Conversation? Conversation { get; set; }

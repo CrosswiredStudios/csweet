@@ -214,6 +214,59 @@ public sealed class AgentRuntimeManagerTests
     }
 
     [Fact]
+    public async Task BrokerRegistration_ReconnectForSameRunningRuntime_IsAccepted()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        var containers = new FakeRunner();
+        var manager = CreateManager(db, containers);
+        await new AgentInteractiveRuntimeService(db, manager).EnsureReadyAsync(installation.Id);
+        var request = Assert.Single(containers.Starts);
+        var signals = new AgentRuntimeSignalService(db);
+
+        await signals.RecordBrokerRegistrationAsync(
+            request.RuntimeInstanceId,
+            request.TickId,
+            request.InstallationId,
+            request.WorkloadToken);
+        await signals.RecordBrokerRegistrationAsync(
+            request.RuntimeInstanceId,
+            request.TickId,
+            request.InstallationId,
+            request.WorkloadToken);
+
+        var runtime = await db.AgentRuntimeInstances.SingleAsync();
+        Assert.Equal(AgentRuntimeStatus.Running, runtime.Status);
+        Assert.Single(await db.AgentRuntimeEvents.Where(x => x.Status == AgentRuntimeStatus.Running).ToListAsync());
+    }
+
+    [Fact]
+    public async Task BrokerRegistration_ReconnectStillValidatesWorkloadToken()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        var containers = new FakeRunner();
+        var manager = CreateManager(db, containers);
+        await new AgentInteractiveRuntimeService(db, manager).EnsureReadyAsync(installation.Id);
+        var request = Assert.Single(containers.Starts);
+        var signals = new AgentRuntimeSignalService(db);
+        await signals.RecordBrokerRegistrationAsync(
+            request.RuntimeInstanceId,
+            request.TickId,
+            request.InstallationId,
+            request.WorkloadToken);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            signals.RecordBrokerRegistrationAsync(
+                request.RuntimeInstanceId,
+                request.TickId,
+                request.InstallationId,
+                "invalid-token"));
+
+        Assert.Equal("The runtime workload token is invalid.", exception.Message);
+    }
+
+    [Fact]
     public async Task DuePeriodicSchedule_StartsOneRuntimeAndSchedulesNextTick()
     {
         await using var db = CreateDb();

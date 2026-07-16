@@ -20,6 +20,11 @@ internal static class CoreConfigurations
         modelBuilder.Entity<Approval>(ConfigureApproval);
         modelBuilder.Entity<Conversation>(ConfigureConversation);
         modelBuilder.Entity<ConversationMessage>(ConfigureConversationMessage);
+        modelBuilder.Entity<ChatTurn>(ConfigureChatTurn);
+        modelBuilder.Entity<ChatTurnTraceEvent>(ConfigureChatTurnTraceEvent);
+        modelBuilder.Entity<MemoryCaptureOutboxItem>(ConfigureMemoryCaptureOutbox);
+        modelBuilder.Entity<AgentMemoryNamespaceRegistration>(ConfigureAgentMemoryNamespace);
+        modelBuilder.Entity<AgentMemoryRecallUse>(ConfigureAgentMemoryRecallUse);
     }
 
     static void ConfigureOrganizationUser(EntityTypeBuilder<OrganizationUser> entity)
@@ -61,7 +66,9 @@ internal static class CoreConfigurations
             .HasForeignKey(x => x.AgentInstallationId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        entity.HasIndex(x => x.AgentInstallationId);
+        entity.HasIndex(x => x.AgentInstallationId)
+            .IsUnique()
+            .HasFilter("\"AgentInstallationId\" IS NOT NULL");
         entity.HasIndex(x => new { x.OrganizationId, x.ApplicationUserId })
             .IsUnique()
             .HasFilter("\"ApplicationUserId\" IS NOT NULL");
@@ -239,5 +246,66 @@ internal static class CoreConfigurations
             .OnDelete(DeleteBehavior.Cascade);
 
         entity.HasIndex(x => new { x.ConversationId, x.CreatedAt });
+        entity.HasIndex(x => x.ChatTurnId);
+    }
+
+    static void ConfigureChatTurn(EntityTypeBuilder<ChatTurn> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
+        entity.Property(x => x.PartialResponse).HasMaxLength(131072).IsRequired();
+        entity.Property(x => x.ErrorCode).HasMaxLength(64);
+        entity.Property(x => x.ErrorMessage).HasMaxLength(4096);
+        entity.Property(x => x.LeaseOwner).HasMaxLength(160);
+        entity.HasIndex(x => new { x.Status, x.CreatedAt });
+        entity.HasIndex(x => new { x.ConversationId, x.CreatedAt });
+        entity.HasIndex(x => x.UserMessageId).IsUnique();
+        entity.HasOne(x => x.Conversation).WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(x => x.UserMessage).WithMany().HasForeignKey(x => x.UserMessageId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(x => x.AssistantMessage).WithMany().HasForeignKey(x => x.AssistantMessageId).OnDelete(DeleteBehavior.SetNull);
+    }
+
+    static void ConfigureChatTurnTraceEvent(EntityTypeBuilder<ChatTurnTraceEvent> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Category).HasMaxLength(32).IsRequired();
+        entity.Property(x => x.EventType).HasMaxLength(64).IsRequired();
+        entity.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        entity.Property(x => x.Title).HasMaxLength(256).IsRequired();
+        entity.Property(x => x.Summary).HasMaxLength(8192);
+        entity.Property(x => x.DetailsJson).HasColumnType("jsonb");
+        entity.Property(x => x.Sensitivity).HasMaxLength(32).IsRequired();
+        entity.HasIndex(x => new { x.ChatTurnId, x.Sequence }).IsUnique();
+        entity.HasOne(x => x.ChatTurn).WithMany(x => x.TraceEvents).HasForeignKey(x => x.ChatTurnId).OnDelete(DeleteBehavior.Cascade);
+    }
+
+    static void ConfigureMemoryCaptureOutbox(EntityTypeBuilder<MemoryCaptureOutboxItem> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+        entity.Property(x => x.LastError).HasMaxLength(2048);
+        entity.HasIndex(x => x.ConversationMessageId).IsUnique();
+        entity.HasIndex(x => new { x.Status, x.NextAttemptAt });
+        entity.HasOne(x => x.ConversationMessage)
+            .WithMany()
+            .HasForeignKey(x => x.ConversationMessageId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+
+    static void ConfigureAgentMemoryNamespace(EntityTypeBuilder<AgentMemoryNamespaceRegistration> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.PartitionKey).HasMaxLength(1024).IsRequired();
+        entity.Property(x => x.Scope).HasMaxLength(32).IsRequired();
+        entity.HasIndex(x => x.PartitionKey).IsUnique();
+        entity.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.UserId });
+    }
+
+    static void ConfigureAgentMemoryRecallUse(EntityTypeBuilder<AgentMemoryRecallUse> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Layer).HasMaxLength(32).IsRequired();
+        entity.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.MemoryId, x.UsedAt });
+        entity.HasIndex(x => new { x.ConversationId, x.UsedAt });
     }
 }

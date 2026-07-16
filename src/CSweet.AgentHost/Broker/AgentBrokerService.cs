@@ -61,6 +61,8 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
 
         var grant = authorization.Grant;
 
+        var session = _sessions.Register(firstMessage.Register, grant);
+
         if (!string.IsNullOrWhiteSpace(firstMessage.Register.RuntimeInstanceId))
         {
             try
@@ -74,13 +76,13 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
             }
             catch (Exception exception) when (exception is FormatException or InvalidOperationException)
             {
+                _sessions.Unregister(session);
                 _logger.LogWarning(exception, "Rejected invalid runtime registration for installation {InstallationId}.", firstMessage.Register.InstallationId);
                 await responseStream.WriteAsync(CreateRejectedRegistration("The runtime registration context is invalid."));
                 return;
             }
         }
 
-        var session = _sessions.Register(firstMessage.Register, grant);
         var registration = new RegistrationResult
         {
             Accepted = true,

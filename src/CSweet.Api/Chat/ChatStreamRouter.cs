@@ -6,6 +6,7 @@ namespace CSweet.Api.Chat;
 public sealed class ChatStreamRouter : IChatStreamRouter
 {
     private readonly ConcurrentDictionary<Guid, Channel<ChatStreamChunk>> _channels = new();
+    private readonly ConcurrentDictionary<Guid, Guid> _aliases = new();
 
     public ChannelReader<ChatStreamChunk> Subscribe(Guid conversationId)
     {
@@ -22,6 +23,7 @@ public sealed class ChatStreamRouter : IChatStreamRouter
 
     public void Publish(Guid conversationId, ChatStreamChunk chunk)
     {
+        if (_aliases.TryGetValue(conversationId, out var streamId)) conversationId = streamId;
         if (!_channels.TryGetValue(conversationId, out var channel))
         {
             return;
@@ -41,5 +43,13 @@ public sealed class ChatStreamRouter : IChatStreamRouter
         {
             channel.Writer.TryComplete();
         }
+    }
+
+    public void BindAlias(Guid aliasId, Guid streamId) => _aliases[aliasId] = streamId;
+
+    public void UnbindAlias(Guid aliasId, Guid streamId)
+    {
+        if (_aliases.TryGetValue(aliasId, out var current) && current == streamId)
+            _aliases.TryRemove(aliasId, out _);
     }
 }

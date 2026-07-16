@@ -104,7 +104,8 @@ internal static class CoreMappers
             message.ConversationId,
             (int)message.Role,
             message.Content,
-            message.CreatedAt);
+            message.CreatedAt,
+            message.ChatTurnId);
     }
 
     #endregion

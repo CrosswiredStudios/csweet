@@ -65,6 +65,22 @@ public sealed class PlatformMemoryCapabilityHandlerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CrossEmployeeMemory_IsRejectedForResolvedInstallationIdentity()
+    {
+        var session = Session("legacy-business", "capability.request", "memory.user.read");
+        session.MemoryTenantId = "business-a";
+        session.MemoryEmployeeId = "employee-a";
+        var partition = new MemoryPartition("business-a", AgentId: "employee-b", UserId: "user-1");
+
+        var result = await _handler.HandleAsync(session, Request(
+            CSweetMemoryCapabilities.Query, "search",
+            new MemorySearchRequest(partition, MemoryScope.User, "anything")), CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("Cross-employee", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BusinessNamespace_RequiresBusinessReadPermission()
     {
         var session = Session("business-a", "capability.request", "memory.user.read");

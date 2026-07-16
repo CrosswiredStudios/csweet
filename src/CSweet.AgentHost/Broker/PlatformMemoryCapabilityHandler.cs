@@ -13,13 +13,23 @@ public sealed class PlatformMemoryCapabilityHandler
     private readonly IMemoryStore _store;
     private readonly IKnowledgeTransferStore _transfers;
     private readonly ILogger<PlatformMemoryCapabilityHandler> _logger;
+    private readonly IAgentMemoryIdentityResolver? _identityResolver;
 
     public PlatformMemoryCapabilityHandler(IMemoryStore store, ILogger<PlatformMemoryCapabilityHandler> logger)
+        : this(store, logger, null)
+    {
+    }
+
+    public PlatformMemoryCapabilityHandler(
+        IMemoryStore store,
+        ILogger<PlatformMemoryCapabilityHandler> logger,
+        IAgentMemoryIdentityResolver? identityResolver)
     {
         _store = store;
         _transfers = store as IKnowledgeTransferStore
             ?? throw new InvalidOperationException("The platform memory store must support knowledge transfer.");
         _logger = logger;
+        _identityResolver = identityResolver;
     }
 
     public static bool IsPlatformMemoryCapability(string capability) => capability is
@@ -42,6 +52,13 @@ public sealed class PlatformMemoryCapabilityHandler
         {
             var command = JsonSerializer.Deserialize<CSweetMemoryCommand>(request.Payload.Span, JsonOptions)
                 ?? throw new JsonException("The memory command is empty.");
+            if (_identityResolver is not null)
+            {
+                var identity = await _identityResolver.ResolveAsync(session, cancellationToken)
+                    ?? throw new UnauthorizedAccessException("The installation is not linked to exactly one agent employee.");
+                session.MemoryTenantId = identity.TenantId;
+                session.MemoryEmployeeId = identity.EmployeeId;
+            }
             await _store.InitializeAsync(cancellationToken);
             var result = request.Capability switch
             {
@@ -197,8 +214,13 @@ public sealed class PlatformMemoryCapabilityHandler
 
     private static void Authorize(AgentSession session, MemoryPartition partition, MemoryAction action)
     {
-        if (!string.Equals(partition.TenantId, session.BusinessId, StringComparison.Ordinal))
+        var tenantId = session.MemoryTenantId ?? session.BusinessId;
+        if (!string.Equals(partition.TenantId, tenantId, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("Cross-business memory access is forbidden.");
+        if (!string.IsNullOrWhiteSpace(partition.AgentId) &&
+            !string.IsNullOrWhiteSpace(session.MemoryEmployeeId) &&
+            !string.Equals(partition.AgentId, session.MemoryEmployeeId, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Cross-employee memory access is forbidden.");
         var area = partition.UserId is null ? "business" : "user";
         var verb = action switch { MemoryAction.Read => "read", MemoryAction.Propose => "propose", _ => "manage" };
         var permission = $"memory.{area}.{verb}";

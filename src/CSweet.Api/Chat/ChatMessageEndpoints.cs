@@ -33,6 +33,7 @@ public static class ChatMessageEndpoints
         SendChatMessageRequest request,
         HttpContext http,
         IConversationService conversations,
+        IAgentMemoryService memory,
         IAgentBrokerClient broker,
         IAgentInteractiveRuntimeService interactiveRuntime,
         IAgentInstallationConfigurationService configurations,
@@ -145,11 +146,25 @@ public static class ChatMessageEndpoints
             conversation.AgentOrganizationUserId,
             providerId.Value);
 
-        await conversations.AppendMessageAsync(
+        var recalledMemory = await memory.RecallForConversationAsync(
+            conversationId,
+            request.Message,
+            cancellationToken);
+
+        var userMessage = await conversations.AppendMessageAsync(
             conversationId,
             ConversationRole.User,
             request.Message,
             cancellationToken);
+
+        try
+        {
+            await memory.CaptureMessageAsync(userMessage.Id, cancellationToken: cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogWarning(exception, "Memory capture was deferred for user message {MessageId}.", userMessage.Id);
+        }
 
         logger.LogInformation(
             "Persisted user chat message and subscribed to assistant chunks for conversation {ConversationId}.",
@@ -163,11 +178,14 @@ public static class ChatMessageEndpoints
 
         var reader = router.Subscribe(conversationId);
 
+        var agentPrompt = string.IsNullOrWhiteSpace(recalledMemory)
+            ? request.Message
+            : $"<memory_context>\n{recalledMemory}\n</memory_context>\n\n<current_user_message>\n{request.Message}\n</current_user_message>";
         var payload = new UserMessageReceived(
             providerId.Value,
             conversationId.ToString(),
             conversation.InitiatedByOrganizationUserId.ToString(),
-            request.Message,
+            agentPrompt,
             Context: null);
 
         // TODO(targeting): user.message.received is broadcast to same-business subscribers.
@@ -219,12 +237,13 @@ public static class ChatMessageEndpoints
                         chunk.Delta.Length);
                 }
 
-                if (chunk.Error is null && !chunk.IsFinal && chunk.Delta.Length > 0)
+                if (chunk.Error is null && chunk.Kind == "output" && !chunk.IsFinal && chunk.Delta.Length > 0)
                 {
                     assembled.Append(chunk.Delta);
                 }
 
-                await WriteSseChunkAsync(http, chunk, cancellationToken);
+                if (chunk.Kind == "output" || chunk.IsFinal || chunk.Error is not null)
+                    await WriteSseChunkAsync(http, chunk, cancellationToken);
 
                 if (chunk.IsFinal)
                 {
@@ -259,11 +278,20 @@ public static class ChatMessageEndpoints
 
         if (completed && assembled.Length > 0)
         {
-            await conversations.AppendMessageAsync(
+            var assistantMessage = await conversations.AppendMessageAsync(
                 conversationId,
                 ConversationRole.Assistant,
                 assembled.ToString(),
                 CancellationToken.None);
+
+            try
+            {
+                await memory.CaptureMessageAsync(assistantMessage.Id, cancellationToken: CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Memory capture was deferred for assistant message {MessageId}.", assistantMessage.Id);
+            }
 
             logger.LogInformation(
                 "Persisted assistant response for conversation {ConversationId}. ResponseLength {ResponseLength}.",

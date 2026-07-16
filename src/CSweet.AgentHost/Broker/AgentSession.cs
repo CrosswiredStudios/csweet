@@ -41,6 +41,10 @@ public sealed class AgentSession
     public string RuntimeInstanceId { get; }
     public string TickId { get; }
 
+    public string? MemoryTenantId { get; set; }
+
+    public string? MemoryEmployeeId { get; set; }
+
     public AuthorizedAgentGrant Grant { get; }
 
     public ChannelReader<BrokerToAgentMessage> Outbound => _outbound.Reader;

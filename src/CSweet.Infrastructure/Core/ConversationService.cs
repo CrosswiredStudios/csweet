@@ -164,6 +164,15 @@ public sealed class ConversationService : IConversationService
         }
 
         _dbContext.CoreConversationMessages.Add(message);
+        _dbContext.MemoryCaptureOutbox.Add(new MemoryCaptureOutboxItem
+        {
+            Id = Guid.NewGuid(),
+            ConversationMessageId = message.Id,
+            Status = MemoryCaptureStatus.Pending,
+            Attempts = 0,
+            CreatedAt = now,
+            NextAttemptAt = now
+        });
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return message.ToResponse();

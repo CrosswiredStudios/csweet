@@ -145,6 +145,7 @@ public sealed class AgentSessionRegistry
 
         if (deliveredCount == 0)
         {
+            var error = $"No connected agent installation is subscribed to '{publishedEvent.EventType}' for subject '{publishedEvent.Subject}'.";
             _logger.LogWarning(
                 "Broker delivered event {EventType} from {AgentId} on subject {Subject} to 0 sessions in business {BusinessId}. Correlation {CorrelationId}. Check subscriber registration and grants.",
                 publishedEvent.EventType,
@@ -152,6 +153,7 @@ public sealed class AgentSessionRegistry
                 publishedEvent.Subject,
                 source.BusinessId,
                 correlationId);
+            SendError(source, correlationId, "event_undelivered", error);
             return;
         }
 

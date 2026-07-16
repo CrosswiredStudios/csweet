@@ -112,6 +112,15 @@ public sealed class ApiGatewayBrokerWorker : BackgroundService
                         "Broker rejected an API gateway message. Code: {Code}. Message: {Message}",
                         message.Error.Code,
                         message.Error.Message);
+                    if (Guid.TryParse(message.CorrelationId, out var turnId))
+                    {
+                        _router.Publish(turnId, new ChatStreamChunk(
+                            0,
+                            message.Error.Message,
+                            IsFinal: true,
+                            Error: message.Error.Code,
+                            Kind: "error"));
+                    }
                     break;
 
                 case BrokerToAgentMessage.PayloadOneofCase.Shutdown:
@@ -156,8 +165,8 @@ public sealed class ApiGatewayBrokerWorker : BackgroundService
         }
 
         _router.Publish(
-            conversationId,
-            new ChatStreamChunk(chunk.Sequence, chunk.Delta, chunk.IsFinal, chunk.Error));
+            chunk.TurnId == Guid.Empty ? conversationId : chunk.TurnId,
+            new ChatStreamChunk(chunk.Sequence, chunk.Delta, chunk.IsFinal, chunk.Error, chunk.Kind, chunk.Metadata, chunk.Attempt));
 
         _logger.LogInformation(
             "API gateway routed assistant chunk for conversation {ConversationId}. Sequence {Sequence}. IsFinal {IsFinal}. Error {Error}. DeltaLength {DeltaLength}.",

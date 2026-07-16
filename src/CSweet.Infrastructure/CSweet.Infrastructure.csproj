@@ -7,6 +7,9 @@
 
   <ItemGroup>
     <PackageReference Include="CSweet.Agent.SDK" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
+    <PackageReference Include="CSweet.Memory" Condition="'$(UseLocalCSweetMemory)' != 'true'" />
+    <PackageReference Include="CSweet.Memory.PostgreSql" Condition="'$(UseLocalCSweetMemory)' != 'true'" />
+    <PackageReference Include="CSweet.Memory.Sqlite" Condition="'$(UseLocalCSweetMemory)' != 'true'" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
@@ -22,6 +25,9 @@
 
   <ItemGroup>
     <ProjectReference Include="$(CSweetAgentSdkRepositoryRoot)\src\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj" Condition="'$(UseLocalCSweetAgentSdk)' == 'true'" />
+    <ProjectReference Include="$(CSweetMemoryRepositoryRoot)\src\CSweet.Memory\CSweet.Memory.csproj" Condition="'$(UseLocalCSweetMemory)' == 'true'" />
+    <ProjectReference Include="$(CSweetMemoryRepositoryRoot)\src\CSweet.Memory.PostgreSql\CSweet.Memory.PostgreSql.csproj" Condition="'$(UseLocalCSweetMemory)' == 'true'" />
+    <ProjectReference Include="$(CSweetMemoryRepositoryRoot)\src\CSweet.Memory.Sqlite\CSweet.Memory.Sqlite.csproj" Condition="'$(UseLocalCSweetMemory)' == 'true'" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 

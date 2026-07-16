@@ -19,6 +19,8 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using CSweet.Memory;
 
 namespace CSweet.Infrastructure;
 
@@ -145,6 +147,18 @@ public static class DependencyInjection
         builder.Services.AddScoped<IArtifactApprovalService, ArtifactApprovalService>();
         builder.Services.AddScoped<IOrganizationUserService, OrganizationUserService>();
         builder.Services.AddScoped<IConversationService, ConversationService>();
+        builder.Services.AddScoped<IChatTurnService, ChatTurnService>();
+        if (builder.Environment.IsEnvironment("Testing"))
+        {
+            builder.Services.TryAddSingleton<IMemoryStore>(_ => new SqliteMemoryStore(
+                Path.Combine(Path.GetTempPath(), $"csweet-memory-tests-{Environment.ProcessId}.db")));
+        }
+        else
+        {
+            builder.Services.TryAddScoped<IMemoryStore>(_ => new PostgreSqlMemoryStore(
+                connectionString ?? throw new InvalidOperationException("A PostgreSQL connection is required for memory.")));
+        }
+        builder.Services.AddScoped<IAgentMemoryService, AgentMemoryService>();
 
         return builder;
     }

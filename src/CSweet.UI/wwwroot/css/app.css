@@ -4,6 +4,83 @@ body {
     font-family: Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+.chat-trace {
+    margin: .45rem 3.25rem .75rem;
+    border: 1px solid rgba(92, 111, 139, .28);
+    border-radius: .65rem;
+    background: rgba(25, 35, 52, .45);
+    overflow: hidden;
+}
+
+.chat-trace-summary {
+    width: 100%;
+    min-height: 2.35rem;
+    padding: .45rem .7rem;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: .55rem;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
+.chat-trace-failed { border-color: rgba(244, 67, 54, .65); }
+.chat-trace-warning { border-color: rgba(255, 193, 7, .65); }
+.chat-trace-events {
+    max-height: min(60vh, 36rem);
+    padding: .25rem .75rem .75rem;
+    border-top: 1px solid rgba(92, 111, 139, .2);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+.chat-trace-event { padding: .65rem 0; border-bottom: 1px solid rgba(92, 111, 139, .16); }
+.chat-trace-event > div { display: flex; justify-content: space-between; gap: 1rem; }
+.chat-trace-event small { opacity: .72; }
+.chat-trace-event pre {
+    max-height: 20rem;
+    margin: .35rem 0 0;
+    white-space: pre-wrap;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    font: inherit;
+    opacity: .9;
+}
+.chat-trace-event details { margin-top: .35rem; }
+
+.memory-loading { display: flex; align-items: center; gap: 1rem; padding: 2rem; }
+.memory-header { align-items: center; }
+.memory-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 1rem; }
+.memory-summary-card { display: flex; align-items: center; gap: .9rem; padding: 1rem; }
+.memory-controls { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(160px, 220px) auto; gap: 1rem; align-items: center; padding: 1rem; }
+.memory-tab-panel { padding: 1rem 0; }
+.memory-explorer-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 1rem; min-height: 420px; }
+.memory-list { display: flex; flex-direction: column; gap: .65rem; }
+.memory-item { display: flex; flex-direction: column; gap: .45rem; width: 100%; border: 1px solid var(--mud-palette-lines-default); border-radius: 8px; background: var(--mud-palette-surface); color: inherit; padding: .9rem; text-align: left; cursor: pointer; }
+.memory-item:hover, .memory-item.selected { border-color: var(--mud-palette-secondary); background: color-mix(in srgb, var(--mud-palette-secondary) 8%, var(--mud-palette-surface)); }
+.memory-item-heading { display: flex; justify-content: space-between; gap: 1rem; }
+.memory-item-heading small, .memory-item-meta { color: var(--mud-palette-text-secondary); font-size: .75rem; }
+.memory-detail { border-left: 1px solid var(--mud-palette-lines-default); padding: 1rem; overflow-wrap: anywhere; }
+.memory-detail-content { white-space: pre-wrap; margin: 1rem 0; }
+.memory-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: .4rem .8rem; }
+.memory-detail dt { color: var(--mud-palette-text-secondary); }
+.memory-detail dd { margin: 0; }
+.memory-graph { overflow: auto; border: 1px solid var(--mud-palette-lines-default); border-radius: 8px; }
+.memory-graph svg { width: 100%; min-width: 720px; max-height: 600px; }
+.memory-graph line { stroke: var(--mud-palette-lines-default); stroke-width: 2; }
+.memory-graph circle { fill: var(--mud-palette-surface); stroke: var(--mud-palette-secondary); stroke-width: 3; }
+.memory-graph text { fill: var(--mud-palette-text-primary); font-size: 11px; }
+.memory-graph .memory-graph-type { fill: var(--mud-palette-text-secondary); font-size: 9px; }
+@media (max-width: 800px) {
+    .memory-controls, .memory-explorer-layout { grid-template-columns: 1fr; }
+    .memory-detail { border-left: 0; border-top: 1px solid var(--mud-palette-lines-default); }
+}
+
 .auth-shell {
     display: grid;
     grid-template-columns: minmax(18rem, 36%) minmax(0, 1fr);

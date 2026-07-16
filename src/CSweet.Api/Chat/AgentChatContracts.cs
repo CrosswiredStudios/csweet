@@ -14,11 +14,17 @@ internal sealed record UserMessageReceived(
     string ConversationId,
     string UserId,
     string Message,
-    IReadOnlyDictionary<string, string>? Context);
+    IReadOnlyDictionary<string, string>? Context,
+    Guid TurnId = default,
+    int Attempt = 0);
 
 internal sealed record AssistantResponseChunk(
     string ConversationId,
     int Sequence,
     string Delta,
     bool IsFinal,
-    string? Error = null);
+    string? Error = null,
+    Guid TurnId = default,
+    string Kind = "output",
+    IReadOnlyDictionary<string, string>? Metadata = null,
+    int Attempt = 0);
