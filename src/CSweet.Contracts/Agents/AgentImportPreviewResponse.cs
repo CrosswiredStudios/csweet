@@ -20,4 +20,9 @@ public sealed record AgentImportPreviewResponse(
     IReadOnlyList<string> RequestedPermissions,
     IReadOnlyList<string> RequestedNetworkAccess,
     IReadOnlyList<AgentManifestWarningResponse> Warnings,
-    string Status);
+    string Status)
+{
+    public string PluginKind { get; init; } = "Agent";
+    public string ManifestFileName { get; init; } = "csweet-agent.json";
+    public IReadOnlyList<string> RequestedCapabilities { get; init; } = [];
+}

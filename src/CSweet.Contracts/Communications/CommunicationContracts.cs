@@ -1,9 +1,23 @@
 namespace CSweet.Contracts.Communications;
 
-public sealed record ConnectDiscordWorkspaceRequest(string GuildId, string Mode, string RelayPairingId);
+public sealed record ConnectCommunicationWorkspaceRequest(
+    string WorkspaceExternalId,
+    string Mode,
+    Guid PluginInstallationId,
+    string? ManagedRootExternalId = null);
+
+public sealed record ConnectDiscordWorkspaceRequest(
+    string GuildId,
+    string Mode,
+    Guid PluginInstallationId,
+    string? ManagedRootExternalId = null);
 public sealed record CommunicationConnectionResponse(
     Guid Id, Guid OrganizationId, string Provider, string WorkspaceExternalId,
-    string WorkspaceMode, string Status, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    string WorkspaceMode, string Status, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt)
+{
+    public Guid? PluginInstallationId { get; init; }
+    public string? ManagedRootExternalId { get; init; }
+}
 public sealed record ProvisioningChangeResponse(
     string Change, string Kind, string Purpose, string DesiredName, string? ExternalId, string? Detail);
 public sealed record ProvisioningPreviewResponse(Guid OrganizationId, string Provider, string WorkspaceExternalId,

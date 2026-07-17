@@ -79,7 +79,8 @@ public sealed class PersistedAgentAuthorizationPolicy : IAgentAuthorizationPolic
                 Intersect(registration.DeclaredCapabilities, Deserialize(installation.Grant.CapabilitiesJson)),
                 Intersect(registration.RequestedSubscriptions, Deserialize(installation.Grant.SubscriptionsJson)),
                 Intersect(registration.RequestedPublications, Deserialize(installation.Grant.PublicationsJson)),
-                Intersect(registration.RequestedPermissions, Deserialize(installation.Grant.PermissionsJson)));
+                Intersect(registration.RequestedPermissions, Deserialize(installation.Grant.PermissionsJson)),
+                Deserialize(installation.Grant.RequestedCapabilitiesJson).ToHashSet(StringComparer.Ordinal));
             return new AgentAuthorizationResult(true, grant, string.Empty);
         }
         catch (JsonException)

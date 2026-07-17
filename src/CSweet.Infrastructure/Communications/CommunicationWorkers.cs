@@ -48,23 +48,23 @@ public sealed class CommunicationDeliveryWorker(IServiceScopeFactory scopeFactor
         {
             var connection = delivery.ConnectionId.HasValue
                 ? await db.CommunicationConnections.SingleOrDefaultAsync(x => x.Id == delivery.ConnectionId, cancellationToken)
-                : await db.CommunicationConnections.SingleOrDefaultAsync(x => x.OrganizationId == delivery.OrganizationId && x.Provider == CommunicationProviderKind.Discord, cancellationToken);
+                : null;
             if (connection is null)
             {
                 // Employee desired state is retained in the employee row; connecting later queues a full reconciliation.
                 delivery.Status = CommunicationDeliveryStatus.Delivered; delivery.LastError = "No external workspace is connected.";
             }
-            else if (!Guid.TryParse(connection.RelayPairingId, out var pairingId))
-                throw new InvalidOperationException("The Discord connection has no valid relay pairing ID.");
+            else if (connection.PluginInstallationId is not Guid pluginInstallationId)
+                throw new InvalidOperationException("The communication connection has no plugin installation.");
             else
             {
-                var relay = services.GetRequiredService<ICommunicationRelayClient>();
+                var plugin = services.GetRequiredService<ICommunicationPluginClient>();
                 if (delivery.Kind == CommunicationDeliveryKind.SendMessage)
                 {
                     var envelope = JsonSerializer.Deserialize<OutboundCommunicationEnvelope>(delivery.PayloadJson)
                         ?? throw new InvalidOperationException("The outbound communication payload is invalid.");
-                    var send = await relay.SendAsync(pairingId, envelope, cancellationToken);
-                    if (!send.Succeeded) throw new InvalidOperationException(send.Error?.Message ?? "Discord delivery failed.");
+                    var send = await plugin.SendAsync(pluginInstallationId, envelope, cancellationToken);
+                    if (!send.Succeeded) throw new InvalidOperationException(send.Error?.Message ?? "Communication delivery failed.");
                     delivery.ExternalReceiptId = send.ExternalId;
                     if (delivery.ConversationMessageId.HasValue && send.ExternalId is not null)
                     {
@@ -76,14 +76,30 @@ public sealed class CommunicationDeliveryWorker(IServiceScopeFactory scopeFactor
                         });
                     }
                 }
+                else if (delivery.Kind == CommunicationDeliveryKind.RegisterLinkCode)
+                {
+                    var request = JsonSerializer.Deserialize<CommunicationPluginLinkCodeRequest>(delivery.PayloadJson)
+                        ?? throw new InvalidOperationException("The link-code payload is invalid.");
+                    await plugin.RegisterLinkCodeAsync(pluginInstallationId, request.Code, request.ExpiresAt, cancellationToken);
+                }
+                else if (delivery.Kind == CommunicationDeliveryKind.AssignIdentity)
+                {
+                    var request = JsonSerializer.Deserialize<CommunicationPluginIdentityRequest>(delivery.PayloadJson)
+                        ?? throw new InvalidOperationException("The identity payload is invalid.");
+                    var assignment = await plugin.AssignMemberAsync(pluginInstallationId, request.WorkspaceExternalId,
+                        request.ExternalUserId, request.MemberRoleExternalId, cancellationToken);
+                    if (!assignment.Succeeded)
+                        throw new InvalidOperationException(assignment.Error?.Message ?? "Identity assignment failed.");
+                    delivery.ExternalReceiptId = assignment.ExternalId;
+                }
                 else
                 {
                     var workspace = services.GetRequiredService<ICommunicationWorkspaceService>();
                     var plan = delivery.Kind == CommunicationDeliveryKind.DisconnectWorkspace
                         ? await BuildDisconnectPlanAsync(db, connection, cancellationToken)
-                        : await workspace.PreviewAsync(connection.OrganizationId, cancellationToken)
+                        : await workspace.PreviewAsync(connection.OrganizationId, connection.ProviderKey, cancellationToken)
                             ?? throw new InvalidOperationException("No provisioning plan is available.");
-                    var result = await relay.ApplyProvisioningAsync(pairingId, plan, cancellationToken);
+                    var result = await plugin.ApplyProvisioningAsync(pluginInstallationId, plan, cancellationToken);
                     if (!result.Succeeded) throw new InvalidOperationException(string.Join("; ", result.Errors.Select(x => x.Message)));
                     foreach (var descriptor in result.Resources)
                     {
@@ -132,7 +148,7 @@ public sealed class CommunicationDeliveryWorker(IServiceScopeFactory scopeFactor
         CommunicationConnection connection, CancellationToken cancellationToken)
     {
         var resources = await db.ManagedExternalResources.Where(x => x.ConnectionId == connection.Id && !x.IsArchived).ToListAsync(cancellationToken);
-        return new WorkspaceProvisioningPlan(connection.OrganizationId, "Discord", connection.WorkspaceExternalId,
+        return new WorkspaceProvisioningPlan(connection.OrganizationId, connection.ProviderKey, connection.WorkspaceExternalId,
             resources.Select(x => new WorkspaceProvisioningChange(CommunicationChangeKind.Archive,
                 Enum.Parse<CommunicationResourceKind>(x.Kind.ToString()), x.Purpose, x.DisplayName, x.ExternalId,
                 "Disconnecting archives managed resources and preserves C-Sweet history.")).ToList(), DateTimeOffset.UtcNow);
@@ -142,56 +158,5 @@ public sealed class CommunicationDeliveryWorker(IServiceScopeFactory scopeFactor
     {
         var segments = purpose.Split(':');
         return segments.Length >= 3 && segments[0] == scope && Guid.TryParse(segments[1], out var id) ? id : null;
-    }
-}
-
-public sealed class CommunicationInboundWorker(IServiceScopeFactory scopeFactory, ILogger<CommunicationInboundWorker> logger) : BackgroundService
-{
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                using var scope = scopeFactory.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
-                var connections = await db.CommunicationConnections.AsNoTracking().Where(x => x.Provider == CommunicationProviderKind.Discord &&
-                    x.Status != CommunicationConnectionStatus.Paused && x.RelayPairingId != null).ToListAsync(stoppingToken);
-                foreach (var connection in connections)
-                {
-                    if (!Guid.TryParse(connection.RelayPairingId, out var pairingId)) continue;
-                    var relay = scope.ServiceProvider.GetRequiredService<ICommunicationRelayClient>();
-                    await foreach (var envelope in relay.ReadInboundAsync(pairingId, stoppingToken))
-                    {
-                        CommunicationActionResponse result;
-                        if (envelope.Content?.StartsWith("/link ", StringComparison.OrdinalIgnoreCase) == true && envelope.SenderExternalId is not null)
-                        {
-                            var service = scope.ServiceProvider.GetRequiredService<ICommunicationWorkspaceService>();
-                            var linked = await service.RedeemLinkCodeAsync(new RedeemExternalIdentityRequest(connection.WorkspaceExternalId,
-                                envelope.SenderExternalId, envelope.Content[6..].Trim()), stoppingToken);
-                            result = linked is null ? new(false, "invalid_link_code", "That link code is invalid or expired.") : new(true, null, "Discord account linked to C-Sweet.");
-                        }
-                        else result = await scope.ServiceProvider.GetRequiredService<ICommunicationRouter>().RouteInboundAsync(envelope, stoppingToken);
-
-                        var isControlCommand = envelope.Content?.StartsWith("/talk", StringComparison.OrdinalIgnoreCase) == true ||
-                                               envelope.Content?.StartsWith("/link", StringComparison.OrdinalIgnoreCase) == true;
-                        if ((!result.Succeeded || isControlCommand) && envelope.ChannelExternalId is not null)
-                        {
-                            await relay.SendAsync(pairingId, new OutboundCommunicationEnvelope(Guid.NewGuid(), "Discord",
-                                connection.WorkspaceExternalId, envelope.ChannelExternalId, result.Message, envelope.ThreadExternalId,
-                                envelope.MessageExternalId, "C-Sweet", null, $"response:{envelope.Id:D}"), stoppingToken);
-                        }
-                        await relay.AcknowledgeAsync(pairingId, envelope.Id, stoppingToken);
-                    }
-                }
-                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-            catch (Exception exception)
-            {
-                logger.LogError(exception, "Communication inbound polling failed.");
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
-            }
-        }
     }
 }

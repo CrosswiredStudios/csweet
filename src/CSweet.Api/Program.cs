@@ -13,12 +13,14 @@ using CSweet.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
 using CSweet.Infrastructure.Core;
+using CSweet.Infrastructure.Communications;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 builder.AddCSweetInfrastructure();
 builder.Services.AddChatGateway(builder.Configuration);
+builder.Services.AddCommunicationPluginBroker(builder.Configuration);
 builder.Services.AddAgentManagement();
 builder.Services.AddAgentRateLimiting();
 builder.Services.AddHostedService<MemoryCaptureWorker>();
@@ -137,6 +139,7 @@ app.MapChatMessageEndpoints();
 app.MapChatTurnEndpoints();
 app.MapCommunicationEndpoints();
 app.MapAgentManagementEndpoints();
+app.MapPluginManagementEndpoints();
 
 app.MapControllers();
 

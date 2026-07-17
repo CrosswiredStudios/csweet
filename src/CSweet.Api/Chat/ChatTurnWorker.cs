@@ -292,7 +292,7 @@ public sealed class ChatTurnWorker(
             var assistantEntity = await db.CoreConversationMessages.SingleAsync(x => x.Id == assistant.Id, hardTimeout.Token);
             assistantEntity.ChatTurnId = turnId;
             assistantEntity.SenderOrganizationUserId = turn.TargetAgentOrganizationUserId;
-            await QueueDiscordReplyAsync(db, turn, userMessage, assistantEntity, hardTimeout.Token);
+            await QueueCommunicationReplyAsync(db, turn, userMessage, assistantEntity, hardTimeout.Token);
             await db.SaveChangesAsync(hardTimeout.Token);
             await turns.SetStatusAsync(turnId, ChatTurnStatus.FinalizingMemory.ToString(), cancellationToken: hardTimeout.Token);
             var memoryWarning = bypassMemory;
@@ -445,7 +445,7 @@ public sealed class ChatTurnWorker(
         var assistantEntity = await db.CoreConversationMessages.SingleAsync(x => x.Id == assistant.Id, cancellationToken);
         assistantEntity.ChatTurnId = turnId;
         assistantEntity.SenderOrganizationUserId = current.TargetAgentOrganizationUserId;
-        await QueueDiscordReplyAsync(db, current, current.UserMessage!, assistantEntity, cancellationToken);
+        await QueueCommunicationReplyAsync(db, current, current.UserMessage!, assistantEntity, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await MarkMemoryCaptureBypassedAsync(db, assistant.Id, "Deterministic failure responses are excluded from memory.", cancellationToken);
 
@@ -564,21 +564,24 @@ public sealed class ChatTurnWorker(
     private static bool IsCapabilityProviderTemporarilyUnavailable(string? error) =>
         error?.StartsWith("No authorized agent", StringComparison.Ordinal) == true;
 
-    private static async Task QueueDiscordReplyAsync(CSweetDbContext db, ChatTurn turn, ConversationMessage? userMessage,
+    private static async Task QueueCommunicationReplyAsync(CSweetDbContext db, ChatTurn turn, ConversationMessage? userMessage,
         ConversationMessage assistantMessage, CancellationToken cancellationToken)
     {
         userMessage ??= await db.CoreConversationMessages.SingleAsync(x => x.Id == turn.UserMessageId, cancellationToken);
-        if (!string.Equals(userMessage.SourceProvider, "Discord", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(userMessage.SourceChannelExternalId)) return;
+        if (string.IsNullOrWhiteSpace(userMessage.SourceProvider) ||
+            string.Equals(userMessage.SourceProvider, "InApp", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(userMessage.SourceChannelExternalId)) return;
+        var providerKey = userMessage.SourceProvider.Trim().ToLowerInvariant();
         var connection = await db.CommunicationConnections.SingleOrDefaultAsync(x => x.OrganizationId == turn.OrganizationId &&
-            x.Provider == CommunicationProviderKind.Discord && x.Status != CommunicationConnectionStatus.Disconnected, cancellationToken);
+            x.ProviderKey == providerKey && x.Status != CommunicationConnectionStatus.Disconnected, cancellationToken);
         if (connection is null) return;
         var replyTo = await db.ExternalMessageReferences.Where(x => x.ConnectionId == connection.Id && x.ConversationMessageId == userMessage.Id)
             .Select(x => x.MessageExternalId).SingleOrDefaultAsync(cancellationToken);
         var persona = await db.CoreOrganizationUsers.Where(x => x.Id == turn.TargetAgentOrganizationUserId)
             .Select(x => x.DisplayName).SingleAsync(cancellationToken);
-        var envelope = new OutboundCommunicationEnvelope(Guid.NewGuid(), "Discord", connection.WorkspaceExternalId,
+        var envelope = new OutboundCommunicationEnvelope(Guid.NewGuid(), connection.ProviderKey, connection.WorkspaceExternalId,
             userMessage.SourceChannelExternalId, assistantMessage.Content, null, replyTo, persona, null,
-            $"discord-reply:{assistantMessage.Id:D}");
+            $"communication-reply:{connection.ProviderKey}:{assistantMessage.Id:D}");
         var now = DateTimeOffset.UtcNow;
         db.CommunicationDeliveries.Add(new CommunicationDelivery
         {

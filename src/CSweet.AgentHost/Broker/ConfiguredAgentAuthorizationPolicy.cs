@@ -56,7 +56,8 @@ public sealed class ConfiguredAgentAuthorizationPolicy
             Intersect(registration.DeclaredCapabilities, configured.Capabilities),
             Intersect(registration.RequestedSubscriptions, configured.Subscriptions),
             Intersect(registration.RequestedPublications, configured.Publications),
-            Intersect(registration.RequestedPermissions, configured.Permissions));
+            Intersect(registration.RequestedPermissions, configured.Permissions),
+            configured.RequestedCapabilities.ToHashSet(StringComparer.Ordinal));
         rejectionReason = string.Empty;
         return true;
     }

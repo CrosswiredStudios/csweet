@@ -5,6 +5,7 @@ public sealed class AgentInstallation
     public Guid Id { get; set; }
     public Guid PackageVersionId { get; set; }
     public string BusinessId { get; set; } = "default";
+    public PluginInstallationScope Scope { get; set; } = PluginInstallationScope.Organization;
     public bool IsEnabled { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

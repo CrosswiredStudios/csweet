@@ -78,15 +78,29 @@ public static class DependencyInjection
         builder.Services.AddScoped<ISetupService, SetupService>();
         builder.Services.AddScoped<IAuditEventWriter, AuditEventWriter>();
         builder.Services.AddScoped<IAgentRuntimeSettingsService, AgentRuntimeSettingsService>();
-        builder.Services.AddScoped<IAgentImportPreviewService, AgentImportPreviewService>();
+        builder.Services.AddScoped<AgentImportPreviewService>();
+        builder.Services.AddScoped<IAgentImportPreviewService>(sp => sp.GetRequiredService<AgentImportPreviewService>());
+        builder.Services.AddScoped<IPluginImportService>(sp => sp.GetRequiredService<AgentImportPreviewService>());
+        builder.Services.AddSingleton<IPluginManifestReader, PluginManifestReader>();
         builder.Services.AddScoped<IAgentUpdateService, AgentUpdateService>();
-        builder.Services.AddScoped<IAgentInstallationService, AgentInstallationService>();
+        builder.Services.AddScoped<AgentInstallationService>();
+        builder.Services.AddScoped<IAgentInstallationService>(sp => sp.GetRequiredService<AgentInstallationService>());
+        builder.Services.AddScoped<IPluginInstallationService>(sp => sp.GetRequiredService<AgentInstallationService>());
+        builder.Services.AddScoped<IPluginOrganizationGrantService, PluginOrganizationGrantService>();
+        builder.Services.AddScoped<IPluginAuthorizationPolicy, PersistedPluginAuthorizationPolicy>();
+        builder.Services.AddScoped<IPluginSecretStore, DataProtectionPluginSecretStore>();
         builder.Services.AddScoped<IAgentInstallationConfigurationService, AgentInstallationConfigurationService>();
         builder.Services.AddScoped<IAgentBuildService, AgentBuildService>();
-        builder.Services.AddSingleton<IAgentBuildExecutor, DockerAgentBuildExecutor>();
+        builder.Services.AddSingleton<DockerAgentBuildExecutor>();
+        builder.Services.AddSingleton<IAgentBuildExecutor>(sp => sp.GetRequiredService<DockerAgentBuildExecutor>());
+        builder.Services.AddSingleton<IPluginBuildExecutor>(sp => sp.GetRequiredService<DockerAgentBuildExecutor>());
         builder.Services.AddSingleton<IDockerCommandExecutor, DockerCommandExecutor>();
-        builder.Services.AddSingleton<IAgentContainerRunner, DockerAgentContainerRunner>();
-        builder.Services.AddScoped<IAgentRuntimeManager, AgentRuntimeManager>();
+        builder.Services.AddSingleton<DockerAgentContainerRunner>();
+        builder.Services.AddSingleton<IAgentContainerRunner>(sp => sp.GetRequiredService<DockerAgentContainerRunner>());
+        builder.Services.AddSingleton<IPluginContainerRunner>(sp => sp.GetRequiredService<DockerAgentContainerRunner>());
+        builder.Services.AddScoped<AgentRuntimeManager>();
+        builder.Services.AddScoped<IAgentRuntimeManager>(sp => sp.GetRequiredService<AgentRuntimeManager>());
+        builder.Services.AddScoped<IPluginRuntimeManager>(sp => sp.GetRequiredService<AgentRuntimeManager>());
         builder.Services.AddScoped<IAgentInteractiveRuntimeService, AgentInteractiveRuntimeService>();
         builder.Services.AddScoped<IAgentRuntimeSignalService, AgentRuntimeSignalService>();
         builder.Services.AddScoped<IAgentRuntimeCleanupService, AgentRuntimeCleanupService>();
@@ -99,12 +113,14 @@ public static class DependencyInjection
                     builder.Configuration["services:agenthost:http:0"],
                     builder.Configuration["services:agenthost:https:0"]);
             });
-        builder.Services.AddHttpClient<IGitHubAgentRepositoryClient, GitHubAgentRepositoryClient>(client =>
+        builder.Services.AddHttpClient<GitHubAgentRepositoryClient>(client =>
         {
             client.BaseAddress = new Uri("https://api.github.com/");
             client.DefaultRequestHeaders.UserAgent.ParseAdd("CSweet-Agent-Importer/1.0");
             client.Timeout = TimeSpan.FromSeconds(30);
         });
+        builder.Services.AddScoped<IGitHubAgentRepositoryClient>(sp => sp.GetRequiredService<GitHubAgentRepositoryClient>());
+        builder.Services.AddScoped<IPluginSourceResolver>(sp => sp.GetRequiredService<GitHubAgentRepositoryClient>());
         builder.Services.AddSingleton<ILlmProviderSecretStore>(_ =>
         {
             if (builder.Environment.IsEnvironment("Testing"))
@@ -153,15 +169,8 @@ public static class DependencyInjection
         builder.Services.AddScoped<IChatTurnService, ChatTurnService>();
         builder.Services.AddScoped<ICommunicationWorkspaceService, CommunicationWorkspaceService>();
         builder.Services.AddScoped<ICommunicationRouter, CommunicationRouter>();
+        builder.Services.AddScoped<ICommunicationIngressHandler, CommunicationIngressHandler>();
         builder.Services.AddScoped<INotificationService, NotificationService>();
-        builder.Services.AddHttpClient<ICommunicationRelayClient, HttpCommunicationRelayClient>(client =>
-        {
-            var endpoint = builder.Configuration["Communications:Relay:BaseUrl"]
-                ?? builder.Configuration["services:discord-relay:http:0"]
-                ?? (builder.Environment.IsDevelopment() ? "http://localhost:5190/" : "https://discord-relay.csweet.ai/");
-            client.BaseAddress = new Uri(endpoint.EndsWith('/') ? endpoint : endpoint + "/");
-            client.Timeout = TimeSpan.FromSeconds(60);
-        });
         if (builder.Environment.IsEnvironment("Testing"))
         {
             builder.Services.TryAddSingleton<IMemoryStore>(_ => new SqliteMemoryStore(

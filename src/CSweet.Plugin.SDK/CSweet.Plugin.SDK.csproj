@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>CSweet.Plugin.SDK</PackageId>
+    <Description>Provider-neutral broker client facade for C-Sweet plugins.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CSweet.Agent.SDK" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
+    <ProjectReference Include="$(CSweetAgentSdkRepositoryRoot)\src\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj" Condition="'$(UseLocalCSweetAgentSdk)' == 'true'" />
+    <ProjectReference Include="..\CSweet.Communications.Abstractions\CSweet.Communications.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

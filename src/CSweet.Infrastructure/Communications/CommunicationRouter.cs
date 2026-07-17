@@ -18,7 +18,7 @@ public sealed class CommunicationRouter(CSweetDbContext db, IChatTurnService tur
             return new(false, "unsupported_message", "A text message and sender are required.");
 
         var connection = await db.CommunicationConnections.SingleOrDefaultAsync(x =>
-            x.Provider == CommunicationProviderKind.Discord && x.WorkspaceExternalId == envelope.WorkspaceExternalId &&
+            x.ProviderKey == CommunicationProviderKeys.Discord && x.WorkspaceExternalId == envelope.WorkspaceExternalId &&
             x.Status != CommunicationConnectionStatus.Paused && x.Status != CommunicationConnectionStatus.Disconnected, cancellationToken);
         if (connection is null) return new(false, "workspace_not_connected", "The Discord workspace is not connected.");
         if (await db.ExternalMessageReferences.AnyAsync(x => x.ConnectionId == connection.Id && x.MessageExternalId == envelope.MessageExternalId, cancellationToken))
@@ -26,6 +26,27 @@ public sealed class CommunicationRouter(CSweetDbContext db, IChatTurnService tur
 
         var identity = await db.ExternalIdentityLinks.SingleOrDefaultAsync(x => x.ConnectionId == connection.Id &&
             x.ExternalUserId == envelope.SenderExternalId && x.IsVerified && x.RevokedAt == null, cancellationToken);
+        if (identity is null && connection.PluginInstallationId is Guid pluginInstallationId)
+        {
+            var applicationUserId = await db.ExternalIdentities.AsNoTracking().Where(x =>
+                    x.PluginInstallationId == pluginInstallationId && x.ProviderKey == connection.ProviderKey &&
+                    x.ExternalUserId == envelope.SenderExternalId && x.RevokedAt == null)
+                .Select(x => (Guid?)x.ApplicationUserId).SingleOrDefaultAsync(cancellationToken);
+            var member = applicationUserId is null ? null : await db.CoreOrganizationUsers.SingleOrDefaultAsync(x =>
+                x.OrganizationId == connection.OrganizationId && x.ApplicationUserId == applicationUserId &&
+                x.EmployeeType == EmployeeType.Human && x.IsActive, cancellationToken);
+            if (member is not null)
+            {
+                identity = new ExternalIdentityLink
+                {
+                    Id = Guid.NewGuid(), ConnectionId = connection.Id, OrganizationId = connection.OrganizationId,
+                    ApplicationUserId = member.ApplicationUserId!.Value, OrganizationUserId = member.Id,
+                    ExternalUserId = envelope.SenderExternalId, IsVerified = true, CreatedAt = DateTimeOffset.UtcNow
+                };
+                db.ExternalIdentityLinks.Add(identity);
+                await db.SaveChangesAsync(cancellationToken);
+            }
+        }
         if (identity is null) return new(false, "identity_not_linked", "Link this Discord account to a C-Sweet human employee first.");
 
         var channelResource = string.IsNullOrWhiteSpace(envelope.ChannelExternalId) ? null :

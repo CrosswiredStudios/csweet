@@ -1,5 +1,6 @@
 @page "/organizations/{OrganizationId:guid}/communications"
 @using CSweet.Contracts.Communications
+@using CSweet.Contracts.Agents
 @inject HttpClient Http
 
 <PageTitle>Communications - C-Sweet</PageTitle>
@@ -37,8 +38,14 @@
                     <MudSelectItem Value="@("Dedicated")">Dedicated server</MudSelectItem>
                     <MudSelectItem Value="@("Contained")">Existing server</MudSelectItem>
                 </MudSelect>
-                <MudTextField Label="Relay pairing ID" @bind-Value="_relayPairingId" Variant="Variant.Outlined" Class="mt-3"
-                              HelperText="Created by the official C-Sweet Discord installation flow." />
+                <MudSelect T="Guid?" Label="Communication plugin" @bind-Value="_pluginInstallationId" Variant="Variant.Outlined" Class="mt-3">
+                    @foreach (var plugin in _plugins)
+                    {
+                        <MudSelectItem T="Guid?" Value="@((Guid?)plugin.Id)">@plugin.AgentName (@plugin.AgentVersion)</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudTextField Label="Managed category ID (optional)" @bind-Value="_managedRootExternalId" Variant="Variant.Outlined" Class="mt-3"
+                              HelperText="Use a distinct category root when multiple businesses share one Discord server." />
                 <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@_busy" OnClick="ConnectAsync" Class="mt-4">
                     Save connection
                 </MudButton>
@@ -123,7 +130,9 @@
     private LinkCodeResponse? _linkCode;
     private List<NotificationResponse> _notifications = [];
     private string _guildId = string.Empty;
-    private string _relayPairingId = string.Empty;
+    private Guid? _pluginInstallationId;
+    private string _managedRootExternalId = string.Empty;
+    private List<AgentInstallationResponse> _plugins = [];
     private string _mode = "Contained";
     private bool _loading = true;
     private bool _busy;
@@ -137,11 +146,15 @@
         try
         {
             var connectionResponse = await Http.GetAsync($"{BasePath}/discord");
+            _plugins = (await Http.GetFromJsonAsync<List<AgentInstallationResponse>>("api/plugins/installations") ?? [])
+                .Where(x => x.PluginKind == "CommunicationProvider" && x.InstallationScope == "System" && x.IsEnabled).ToList();
             if (connectionResponse.IsSuccessStatusCode)
             {
                 _connection = await connectionResponse.Content.ReadFromJsonAsync<CommunicationConnectionResponse>();
                 _guildId = _connection?.WorkspaceExternalId ?? string.Empty;
                 _mode = _connection?.WorkspaceMode ?? "Contained";
+                _pluginInstallationId = _connection?.PluginInstallationId;
+                _managedRootExternalId = _connection?.ManagedRootExternalId ?? string.Empty;
             }
             _notifications = await Http.GetFromJsonAsync<List<NotificationResponse>>($"{BasePath}/notifications") ?? [];
             if (_connection is not null) await LoadPreviewAsync();
@@ -151,14 +164,19 @@
 
     private async Task ConnectAsync()
     {
-        if (string.IsNullOrWhiteSpace(_guildId) || string.IsNullOrWhiteSpace(_relayPairingId))
+        if (string.IsNullOrWhiteSpace(_guildId) || !_pluginInstallationId.HasValue)
         {
-            Show("A server ID and relay pairing ID are required.", Severity.Warning);
+            Show("A server ID and installed communication plugin are required.", Severity.Warning);
             return;
         }
         await BusyAsync(async () =>
         {
-            var response = await Http.PostAsJsonAsync($"{BasePath}/discord/connect", new ConnectDiscordWorkspaceRequest(_guildId.Trim(), _mode, _relayPairingId.Trim()));
+            var grant = await Http.PostAsJsonAsync($"api/plugins/installations/{_pluginInstallationId.Value:D}/organizations",
+                new GrantPluginOrganizationRequest(OrganizationId));
+            if (!grant.IsSuccessStatusCode) throw new InvalidOperationException(await grant.Content.ReadAsStringAsync());
+            var response = await Http.PostAsJsonAsync($"{BasePath}/discord/connect", new ConnectDiscordWorkspaceRequest(
+                _guildId.Trim(), _mode, _pluginInstallationId.Value,
+                string.IsNullOrWhiteSpace(_managedRootExternalId) ? null : _managedRootExternalId.Trim()));
             if (!response.IsSuccessStatusCode) throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
             _connection = await response.Content.ReadFromJsonAsync<CommunicationConnectionResponse>();
             await LoadPreviewAsync();

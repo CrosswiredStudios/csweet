@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CSweet.Infrastructure.Setup;
 
-public sealed partial class AgentImportPreviewService : IAgentImportPreviewService
+public sealed partial class AgentImportPreviewService : IPluginImportService
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
@@ -21,15 +21,18 @@ public sealed partial class AgentImportPreviewService : IAgentImportPreviewServi
     private readonly CSweetDbContext _dbContext;
     private readonly IGitHubAgentRepositoryClient _repositoryClient;
     private readonly IAuditEventWriter _auditWriter;
+    private readonly IPluginManifestReader _manifestReader;
 
     public AgentImportPreviewService(
         CSweetDbContext dbContext,
         IGitHubAgentRepositoryClient repositoryClient,
-        IAuditEventWriter auditWriter)
+        IAuditEventWriter auditWriter,
+        IPluginManifestReader? manifestReader = null)
     {
         _dbContext = dbContext;
         _repositoryClient = repositoryClient;
         _auditWriter = auditWriter;
+        _manifestReader = manifestReader ?? new PluginManifestReader();
     }
 
     public async Task<AgentImportPreviewResponse> PreviewAsync(
@@ -52,11 +55,19 @@ public sealed partial class AgentImportPreviewService : IAgentImportPreviewServi
             repository.Name,
             reference,
             cancellationToken);
-        var manifestBytes = await _repositoryClient.GetRootManifestAsync(
+        var manifestSource = await _repositoryClient.GetRootPluginManifestAsync(
             repository.Owner,
             repository.Name,
             commitSha,
             cancellationToken);
+        var manifestBytes = manifestSource.Content;
+
+        PluginManifestEnvelope pluginEnvelope;
+        try { pluginEnvelope = _manifestReader.Read(manifestBytes, manifestSource.FileName); }
+        catch (JsonException exception)
+        {
+            throw new AgentImportPreviewException($"Plugin manifest is not valid: {exception.Message}", exception);
+        }
 
         AgentManifest manifest;
         try
@@ -115,6 +126,8 @@ public sealed partial class AgentImportPreviewService : IAgentImportPreviewServi
                 CommitSha = commitSha,
                 ManifestDigest = digest,
                 ManifestJson = Encoding.UTF8.GetString(manifestBytes),
+                PluginKind = ParsePluginKind(pluginEnvelope.Kind),
+                ManifestFileName = pluginEnvelope.ManifestFileName,
                 AgentId = manifest.Id,
                 AgentName = manifest.Name,
                 Version = manifest.Version,
@@ -146,6 +159,13 @@ public sealed partial class AgentImportPreviewService : IAgentImportPreviewServi
 
         return ToResponse(version, source, manifest, warnings);
     }
+
+    private static PluginKind ParsePluginKind(string value) => value.ToLowerInvariant() switch
+    {
+        "agent" => PluginKind.Agent,
+        "communication-provider" => PluginKind.CommunicationProvider,
+        _ => throw new AgentImportPreviewException($"Unsupported plugin kind '{value}'.")
+    };
 
     private static void ValidateManifest(AgentManifest manifest)
     {
@@ -269,7 +289,7 @@ public sealed partial class AgentImportPreviewService : IAgentImportPreviewServi
         AgentPackageSource source,
         AgentManifest manifest,
         IReadOnlyList<AgentManifestWarningResponse> warnings) =>
-        new(
+        new AgentImportPreviewResponse(
             version.Id,
             source.RepositoryUrl,
             version.CommitSha,
@@ -289,7 +309,22 @@ public sealed partial class AgentImportPreviewService : IAgentImportPreviewServi
             manifest.RequestedPermissions,
             manifest.RequestedNetworkAccess,
             warnings,
-            version.Status.ToString());
+            version.Status.ToString())
+        {
+            PluginKind = version.PluginKind.ToString(),
+            ManifestFileName = version.ManifestFileName,
+            RequestedCapabilities = ReadRequestedCapabilities(version.ManifestJson)
+        };
+
+    private static IReadOnlyList<string> ReadRequestedCapabilities(string manifestJson)
+    {
+        using var document = JsonDocument.Parse(manifestJson);
+        return document.RootElement.TryGetProperty("requestedCapabilities", out var value) &&
+               value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String)
+                .Select(x => x.GetString()!).Distinct(StringComparer.Ordinal).ToArray()
+            : [];
+    }
 
     private static void AddRequiredIdentifierError(string? value, string fieldName, List<string> errors)
     {

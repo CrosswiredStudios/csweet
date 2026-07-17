@@ -2,26 +2,68 @@ using CSweet.Domain.Core;
 
 namespace CSweet.Domain.Communications;
 
-public enum CommunicationProviderKind { Discord, Slack, WhatsApp, InApp }
+public static class CommunicationProviderKeys
+{
+    public const string Discord = "discord";
+    public const string InApp = "in-app";
+}
 public enum CommunicationConnectionStatus { Pending, Connected, Degraded, Paused, Disconnected }
 public enum CommunicationWorkspaceMode { Dedicated, Contained }
 public enum ManagedResourceKind { Category, Channel, Role, Webhook, Command, Thread }
 public enum CommunicationDeliveryStatus { Pending, Leased, Delivered, Failed, DeadLettered, Cancelled }
-public enum CommunicationDeliveryKind { ProvisionEmployee, UpdateEmployee, ArchiveEmployee, SendMessage, ReconcileWorkspace, DisconnectWorkspace, Notification }
+public enum CommunicationDeliveryKind
+{
+    ProvisionEmployee,
+    UpdateEmployee,
+    ArchiveEmployee,
+    SendMessage,
+    ReconcileWorkspace,
+    DisconnectWorkspace,
+    Notification,
+    RegisterLinkCode,
+    AssignIdentity
+}
 public enum NotificationSeverity { Routine, Important, Urgent }
 
 public sealed class CommunicationConnection
 {
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
-    public CommunicationProviderKind Provider { get; set; }
+    public string ProviderKey { get; set; } = string.Empty;
+    public Guid? PluginInstallationId { get; set; }
     public string WorkspaceExternalId { get; set; } = string.Empty;
+    public string? ManagedRootExternalId { get; set; }
     public CommunicationWorkspaceMode WorkspaceMode { get; set; }
     public CommunicationConnectionStatus Status { get; set; }
-    public string? RelayPairingId { get; set; }
     public string ConfigurationJson { get; set; } = "{}";
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>Durable result of accepting a provider message into the platform.</summary>
+public sealed class CommunicationIngressReceipt
+{
+    public Guid Id { get; set; }
+    public Guid PluginInstallationId { get; set; }
+    public Guid OrganizationId { get; set; }
+    public string ProviderKey { get; set; } = string.Empty;
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public bool Succeeded { get; set; }
+    public string? ErrorCode { get; set; }
+    public string ResultMessage { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>A provider identity linked once at the C-Sweet installation boundary.</summary>
+public sealed class ExternalIdentity
+{
+    public Guid Id { get; set; }
+    public Guid PluginInstallationId { get; set; }
+    public string ProviderKey { get; set; } = string.Empty;
+    public string ExternalUserId { get; set; } = string.Empty;
+    public Guid ApplicationUserId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
 }
 
 public sealed class ManagedExternalResource
@@ -125,7 +167,7 @@ public sealed class NotificationPreference
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
     public Guid OrganizationUserId { get; set; }
-    public CommunicationProviderKind Provider { get; set; }
+    public string ProviderKey { get; set; } = string.Empty;
     public bool IsEnabled { get; set; }
     public string? QuietHoursStart { get; set; }
     public string? QuietHoursEnd { get; set; }

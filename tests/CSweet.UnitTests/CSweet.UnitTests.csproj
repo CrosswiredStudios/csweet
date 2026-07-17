@@ -38,7 +38,6 @@
     <ProjectReference Include="..\..\src\CSweet.AI\CSweet.AI.csproj" />
     <ProjectReference Include="..\..\src\CSweet.UI\CSweet.UI.csproj" />
     <ProjectReference Include="..\..\src\CSweet.Infrastructure\CSweet.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\CSweet.Communications.Discord\CSweet.Communications.Discord.csproj" />
   </ItemGroup>
 
 </Project>

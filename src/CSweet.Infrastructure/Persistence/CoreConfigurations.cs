@@ -33,6 +33,8 @@ internal static class CoreConfigurations
         modelBuilder.Entity<ExternalIdentityLinkCode>(ConfigureExternalIdentityLinkCode);
         modelBuilder.Entity<ExternalMessageReference>(ConfigureExternalMessageReference);
         modelBuilder.Entity<CommunicationDelivery>(ConfigureCommunicationDelivery);
+        modelBuilder.Entity<CommunicationIngressReceipt>(ConfigureCommunicationIngressReceipt);
+        modelBuilder.Entity<ExternalIdentity>(ConfigureExternalIdentity);
         modelBuilder.Entity<UserNotification>(ConfigureUserNotification);
         modelBuilder.Entity<NotificationPreference>(ConfigureNotificationPreference);
     }
@@ -337,14 +339,14 @@ internal static class CoreConfigurations
     static void ConfigureCommunicationConnection(EntityTypeBuilder<CommunicationConnection> entity)
     {
         entity.HasKey(x => x.Id);
-        entity.Property(x => x.Provider).HasConversion<string>().HasMaxLength(24).IsRequired();
+        entity.Property(x => x.ProviderKey).HasMaxLength(80).IsRequired();
+        entity.Property(x => x.ManagedRootExternalId).HasMaxLength(128);
         entity.Property(x => x.WorkspaceMode).HasConversion<string>().HasMaxLength(24).IsRequired();
         entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
         entity.Property(x => x.WorkspaceExternalId).HasMaxLength(128).IsRequired();
-        entity.Property(x => x.RelayPairingId).HasMaxLength(256);
         entity.Property(x => x.ConfigurationJson).HasColumnType("jsonb").IsRequired();
-        entity.HasIndex(x => new { x.Provider, x.WorkspaceExternalId }).IsUnique();
-        entity.HasIndex(x => new { x.OrganizationId, x.Provider });
+        entity.HasIndex(x => new { x.PluginInstallationId, x.OrganizationId, x.ProviderKey, x.WorkspaceExternalId }).IsUnique();
+        entity.HasIndex(x => new { x.OrganizationId, x.ProviderKey });
     }
 
     static void ConfigureManagedExternalResource(EntityTypeBuilder<ManagedExternalResource> entity)
@@ -399,6 +401,25 @@ internal static class CoreConfigurations
         entity.HasIndex(x => new { x.Status, x.NextAttemptAt });
     }
 
+    static void ConfigureCommunicationIngressReceipt(EntityTypeBuilder<CommunicationIngressReceipt> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.ProviderKey).HasMaxLength(80).IsRequired();
+        entity.Property(x => x.IdempotencyKey).HasMaxLength(256).IsRequired();
+        entity.Property(x => x.ErrorCode).HasMaxLength(80);
+        entity.Property(x => x.ResultMessage).HasMaxLength(2048).IsRequired();
+        entity.HasIndex(x => new { x.PluginInstallationId, x.IdempotencyKey }).IsUnique();
+    }
+
+    static void ConfigureExternalIdentity(EntityTypeBuilder<ExternalIdentity> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.ProviderKey).HasMaxLength(80).IsRequired();
+        entity.Property(x => x.ExternalUserId).HasMaxLength(128).IsRequired();
+        entity.HasIndex(x => new { x.PluginInstallationId, x.ProviderKey, x.ExternalUserId }).IsUnique();
+        entity.HasIndex(x => new { x.PluginInstallationId, x.ApplicationUserId });
+    }
+
     static void ConfigureUserNotification(EntityTypeBuilder<UserNotification> entity)
     {
         entity.HasKey(x => x.Id);
@@ -415,11 +436,11 @@ internal static class CoreConfigurations
     static void ConfigureNotificationPreference(EntityTypeBuilder<NotificationPreference> entity)
     {
         entity.HasKey(x => x.Id);
-        entity.Property(x => x.Provider).HasConversion<string>().HasMaxLength(24).IsRequired();
+        entity.Property(x => x.ProviderKey).HasMaxLength(80).IsRequired();
         entity.Property(x => x.MinimumSeverity).HasConversion<string>().HasMaxLength(16).IsRequired();
         entity.Property(x => x.QuietHoursStart).HasMaxLength(5);
         entity.Property(x => x.QuietHoursEnd).HasMaxLength(5);
         entity.Property(x => x.TimeZoneId).HasMaxLength(128).IsRequired();
-        entity.HasIndex(x => new { x.OrganizationUserId, x.Provider }).IsUnique();
+        entity.HasIndex(x => new { x.OrganizationUserId, x.ProviderKey }).IsUnique();
     }
 }

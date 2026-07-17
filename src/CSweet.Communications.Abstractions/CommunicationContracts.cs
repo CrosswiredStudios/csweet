@@ -76,13 +76,20 @@ public interface IExternalIdentityProvider
     Task<CommunicationResult> AssignMemberAsync(string workspaceExternalId, string externalUserId, string memberRoleExternalId, CancellationToken cancellationToken = default);
 }
 
-public interface ICommunicationRelayClient
+public static class CommunicationPluginCapabilities
 {
-    IAsyncEnumerable<NormalizedCommunicationEnvelope> ReadInboundAsync(Guid pairingId, CancellationToken cancellationToken = default);
-    Task AcknowledgeAsync(Guid pairingId, Guid envelopeId, CancellationToken cancellationToken = default);
-    Task<CommunicationResult> SendAsync(Guid pairingId, OutboundCommunicationEnvelope envelope, CancellationToken cancellationToken = default);
-    Task<WorkspaceProvisioningResult> ApplyProvisioningAsync(Guid pairingId, WorkspaceProvisioningPlan plan, CancellationToken cancellationToken = default);
-    Task RegisterLinkCodeAsync(Guid pairingId, string code, DateTimeOffset expiresAt, CancellationToken cancellationToken = default);
-    Task<CommunicationResult> AssignMemberAsync(Guid pairingId, string workspaceExternalId, string externalUserId,
+    public const string IngestMessage = "communication.message.ingest.v1";
+    public const string SendMessage = "communication.send.v1";
+    public const string ApplyWorkspace = "communication.workspace.apply.v1";
+    public const string AssignIdentity = "communication.identity.assign.v1";
+    public const string RegisterLinkCode = "communication.link-code.register.v1";
+}
+
+public interface ICommunicationPluginClient
+{
+    Task<CommunicationResult> SendAsync(Guid pluginInstallationId, OutboundCommunicationEnvelope envelope, CancellationToken cancellationToken = default);
+    Task<WorkspaceProvisioningResult> ApplyProvisioningAsync(Guid pluginInstallationId, WorkspaceProvisioningPlan plan, CancellationToken cancellationToken = default);
+    Task RegisterLinkCodeAsync(Guid pluginInstallationId, string code, DateTimeOffset expiresAt, CancellationToken cancellationToken = default);
+    Task<CommunicationResult> AssignMemberAsync(Guid pluginInstallationId, string workspaceExternalId, string externalUserId,
         string memberRoleExternalId, CancellationToken cancellationToken = default);
 }

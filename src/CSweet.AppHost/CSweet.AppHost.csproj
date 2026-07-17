@@ -20,7 +20,6 @@
     <ProjectReference Include="..\CSweet.App\CSweet.App.csproj" IsAspireProjectResource="true" />
     <ProjectReference Include="..\CSweet.Migrator\CSweet.Migrator.csproj" IsAspireProjectResource="true" />
     <ProjectReference Include="..\CSweet.WorkerHost\CSweet.WorkerHost.csproj" IsAspireProjectResource="true" />
-    <ProjectReference Include="..\CSweet.DiscordRelay\CSweet.DiscordRelay.csproj" IsAspireProjectResource="true" />
   </ItemGroup>
 
   <ItemGroup>

@@ -7,7 +7,7 @@ namespace CSweet.Infrastructure.Setup;
 
 public sealed class DockerAgentContainerRunner(
     IDockerCommandExecutor docker,
-    ILogger<DockerAgentContainerRunner> logger) : IAgentContainerRunner
+    ILogger<DockerAgentContainerRunner> logger) : IPluginContainerRunner
 {
     private const int RuntimeUserId = 1654;
 
@@ -39,11 +39,20 @@ public sealed class DockerAgentContainerRunner(
             "--env", $"CSweet__Agent__BrokerEndpoint={request.BrokerEndpoint}",
             "--env", $"CSweet__Agent__WorkloadToken={request.WorkloadToken}",
             "--env", $"CSweet__Agent__ManifestPath={request.ManifestPath}",
+            "--env", $"CSweet__Plugin__InstallationId={request.InstallationId:D}",
+            "--env", $"CSweet__Plugin__BrokerEndpoint={request.BrokerEndpoint}",
             "--env", "DOTNET_CLI_HOME=/tmp/dotnet",
             "--env", "DOTNET_NOLOGO=1",
             request.RuntimeImage,
             "dotnet", $"/app/{request.EntryAssembly}"
         };
+
+        if (!string.IsNullOrWhiteSpace(request.PersistentDataVolumeName))
+        {
+            ValidateVolumeName(request.PersistentDataVolumeName);
+            var imageIndex = args.IndexOf(request.RuntimeImage);
+            args.InsertRange(imageIndex, ["--mount", $"type=volume,source={request.PersistentDataVolumeName},target=/data"]);
+        }
 
         logger.LogInformation(
             "Starting agent container {ContainerName} for runtime {RuntimeInstanceId}, installation {InstallationId}, image {RuntimeImage}, network {NetworkName}, and broker {BrokerEndpoint}",
@@ -169,6 +178,12 @@ public sealed class DockerAgentContainerRunner(
             throw new AgentContainerException("The manifest path must be inside the read-only package mount.");
         if (request.ContainerName.Any(c => !(char.IsLetterOrDigit(c) || c is '-' or '_' or '.')))
             throw new AgentContainerException("The container name contains unsupported characters.");
+    }
+
+    private static void ValidateVolumeName(string volumeName)
+    {
+        if (volumeName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.')))
+            throw new AgentContainerException("The plugin data volume name contains unsupported characters.");
     }
 
     private static void ValidateContainerId(string containerId)

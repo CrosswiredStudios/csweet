@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPlanningApiClient, PlanningApiClient>();
         services.AddScoped<IChatApiClient, ChatApiClient>();
         services.AddScoped<IAgentApiClient, AgentApiClient>();
+        services.AddScoped<IPluginApiClient, PluginApiClient>();
         services.AddScoped<AuthSessionStore>();
         services.AddScoped<IAuthenticationApiClient, AuthenticationApiClient>();
 

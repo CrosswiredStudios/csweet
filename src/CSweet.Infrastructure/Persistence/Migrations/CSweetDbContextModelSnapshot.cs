@@ -35,17 +35,20 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ManagedRootExternalId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasMaxLength(24)
-                        .HasColumnType("character varying(24)");
+                    b.Property<Guid?>("PluginInstallationId")
+                        .HasColumnType("uuid");
 
-                    b.Property<string>("RelayPairingId")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -67,9 +70,9 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("OrganizationId", "Provider");
+                    b.HasIndex("OrganizationId", "ProviderKey");
 
-                    b.HasIndex("Provider", "WorkspaceExternalId")
+                    b.HasIndex("PluginInstallationId", "OrganizationId", "ProviderKey", "WorkspaceExternalId")
                         .IsUnique();
 
                     b.ToTable("CommunicationConnections");
@@ -147,6 +150,89 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.HasIndex("Status", "NextAttemptAt");
 
                     b.ToTable("CommunicationDeliveries");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Communications.CommunicationIngressReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PluginInstallationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("ResultMessage")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<bool>("Succeeded")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PluginInstallationId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.ToTable("CommunicationIngressReceipts");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Communications.ExternalIdentity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ApplicationUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ExternalUserId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid>("PluginInstallationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PluginInstallationId", "ApplicationUserId");
+
+                    b.HasIndex("PluginInstallationId", "ProviderKey", "ExternalUserId")
+                        .IsUnique();
+
+                    b.ToTable("ExternalIdentities");
                 });
 
             modelBuilder.Entity("CSweet.Domain.Communications.ExternalIdentityLink", b =>
@@ -365,10 +451,10 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("OrganizationUserId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("Provider")
+                    b.Property<string>("ProviderKey")
                         .IsRequired()
-                        .HasMaxLength(24)
-                        .HasColumnType("character varying(24)");
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
 
                     b.Property<string>("QuietHoursEnd")
                         .HasMaxLength(5)
@@ -385,7 +471,7 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("OrganizationUserId", "Provider")
+                    b.HasIndex("OrganizationUserId", "ProviderKey")
                         .IsUnique();
 
                     b.ToTable("NotificationPreferences");
@@ -1598,6 +1684,11 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("PackageVersionId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1675,6 +1766,10 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("PublicationsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequestedCapabilitiesJson")
                         .IsRequired()
                         .HasColumnType("text");
 
@@ -1771,6 +1866,11 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<string>("ManifestFileName")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
                     b.Property<string>("ManifestJson")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1785,6 +1885,11 @@ namespace CSweet.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid>("PackageSourceId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("PluginKind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<string>("ProjectPath")
                         .HasMaxLength(1024)
@@ -2388,6 +2493,62 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("OnboardingSteps");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Setup.PluginOrganizationGrant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("GrantedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PluginInstallationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PluginInstallationId", "OrganizationId")
+                        .IsUnique();
+
+                    b.ToTable("PluginOrganizationGrants");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Setup.PluginSecret", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<Guid>("PluginInstallationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProtectedValue")
+                        .IsRequired()
+                        .HasMaxLength(8192)
+                        .HasColumnType("character varying(8192)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PluginInstallationId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("PluginSecrets");
                 });
 
             modelBuilder.Entity("CSweet.Domain.Setup.SystemConfiguration", b =>
@@ -3105,6 +3266,28 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("ProviderProfile");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Setup.PluginOrganizationGrant", b =>
+                {
+                    b.HasOne("CSweet.Domain.Setup.AgentInstallation", "PluginInstallation")
+                        .WithMany()
+                        .HasForeignKey("PluginInstallationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PluginInstallation");
+                });
+
+            modelBuilder.Entity("CSweet.Domain.Setup.PluginSecret", b =>
+                {
+                    b.HasOne("CSweet.Domain.Setup.AgentInstallation", "PluginInstallation")
+                        .WithMany()
+                        .HasForeignKey("PluginInstallationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PluginInstallation");
                 });
 
             modelBuilder.Entity("CSweet.Infrastructure.Auth.RootRecoveryCode", b =>

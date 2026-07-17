@@ -111,7 +111,7 @@ public sealed class AgentSessionRegistryTests
     public async Task RequestCapability_WithInstallationSelector_UsesTargetInstance()
     {
         var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
-        var requester = Register(registry, "requester", "business-1");
+        var requester = Register(registry, "requester", "business-1", requestedCapabilities: new[] { "configure.v1" });
         var target = Register(registry, "same-agent", "business-1", capabilities: new[] { "configure.v1" }, installationId: "target-instance");
         var sibling = Register(registry, "same-agent", "business-1", capabilities: new[] { "configure.v1" }, installationId: "sibling-instance");
 
@@ -131,7 +131,7 @@ public sealed class AgentSessionRegistryTests
     public async Task RequestCapability_WithInstallationRoutePermission_CanTargetAnotherBusiness()
     {
         var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
-        var requester = Register(registry, "platform", "default", permissions: new[] { "installation.route" });
+        var requester = Register(registry, "platform", "default", permissions: new[] { "installation.route" }, requestedCapabilities: new[] { "configure.v1" });
         var target = Register(registry, "agent", "business-2", capabilities: new[] { "configure.v1" }, installationId: "target-instance");
 
         registry.RequestCapability(requester, new RequestCapability
@@ -146,10 +146,31 @@ public sealed class AgentSessionRegistryTests
     }
 
     [Fact]
+    public async Task RequestCapability_DeniesCapabilityNotDeclaredInRequestedGrant()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var requester = Register(registry, "requester", "business-1", requestedCapabilities: new[] { "allowed.v1" });
+        var provider = Register(registry, "provider", "business-1", capabilities: new[] { "denied.v1" });
+
+        registry.RequestCapability(requester, new RequestCapability
+        {
+            RequestId = "undeclared-request",
+            Capability = "denied.v1"
+        }, "undeclared-correlation");
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var response = await requester.Outbound.ReadAsync(timeout.Token);
+        Assert.Equal(BrokerToAgentMessage.PayloadOneofCase.CapabilityResult, response.PayloadCase);
+        Assert.False(response.CapabilityResult.Succeeded);
+        Assert.Contains("may not request", response.CapabilityResult.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.False(provider.Outbound.TryRead(out _));
+    }
+
+    [Fact]
     public async Task CapabilityResult_ReturnsOnlyFromBrokerSelectedProvider()
     {
         var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
-        var requester = Register(registry, "requester", "business-1");
+        var requester = Register(registry, "requester", "business-1", requestedCapabilities: new[] { "example.lookup.v1" });
         var provider = Register(
             registry,
             "provider",
@@ -197,7 +218,7 @@ public sealed class AgentSessionRegistryTests
     public async Task CapabilityResult_FromUnselectedAgent_IsRejectedWithoutConsumingRequest()
     {
         var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
-        var requester = Register(registry, "requester", "business-1");
+        var requester = Register(registry, "requester", "business-1", requestedCapabilities: new[] { "example.lookup.v1" });
         var selectedProvider = Register(
             registry,
             "selected-provider",
@@ -261,6 +282,7 @@ public sealed class AgentSessionRegistryTests
         IEnumerable<string>? subscriptions = null,
         IEnumerable<string>? publications = null,
         IEnumerable<string>? permissions = null,
+        IEnumerable<string>? requestedCapabilities = null,
         string? installationId = null) =>
         registry.Register(
             new RegisterAgent
@@ -274,5 +296,6 @@ public sealed class AgentSessionRegistryTests
                 (capabilities ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
                 (subscriptions ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
                 (publications ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
-                (permissions ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal)));
+                (permissions ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
+                (requestedCapabilities ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal)));
 }

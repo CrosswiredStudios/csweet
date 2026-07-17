@@ -161,7 +161,9 @@ public sealed class OrganizationUserService : IOrganizationUserService
         _dbContext.CoreOrganizationUsers.Add(user);
         if (user.EmployeeType == EmployeeType.Agent)
         {
-            _dbContext.CommunicationDeliveries.Add(CreateEmployeeDelivery(user, CommunicationDeliveryKind.ProvisionEmployee, now));
+            var connectionIds = await ActiveCommunicationConnectionIdsAsync(organizationId, cancellationToken);
+            _dbContext.CommunicationDeliveries.AddRange(connectionIds.Select(connectionId =>
+                CreateEmployeeDelivery(user, connectionId, CommunicationDeliveryKind.ProvisionEmployee, now)));
         }
         foreach (var managedUser in managedUsers)
         {
@@ -211,7 +213,9 @@ public sealed class OrganizationUserService : IOrganizationUserService
         user.AgentInstallationId = null;
         if (user.EmployeeType == EmployeeType.Agent)
         {
-            _dbContext.CommunicationDeliveries.Add(CreateEmployeeDelivery(user, CommunicationDeliveryKind.ArchiveEmployee, now));
+            var connectionIds = await ActiveCommunicationConnectionIdsAsync(user.OrganizationId, cancellationToken);
+            _dbContext.CommunicationDeliveries.AddRange(connectionIds.Select(connectionId =>
+                CreateEmployeeDelivery(user, connectionId, CommunicationDeliveryKind.ArchiveEmployee, now)));
         }
         await _dbContext.SaveChangesAsync(cancellationToken);
 
@@ -268,10 +272,16 @@ public sealed class OrganizationUserService : IOrganizationUserService
     static CoreActionResponse Failure(string errorCode, string message) =>
         new CoreActionResponse(false, errorCode, message);
 
-    static CommunicationDelivery CreateEmployeeDelivery(OrganizationUser user, CommunicationDeliveryKind kind, DateTimeOffset now) => new()
+    private async Task<IReadOnlyList<Guid>> ActiveCommunicationConnectionIdsAsync(Guid organizationId, CancellationToken cancellationToken) =>
+        await _dbContext.CommunicationConnections.Where(x => x.OrganizationId == organizationId &&
+                x.Status != CommunicationConnectionStatus.Disconnected)
+            .Select(x => x.Id).ToListAsync(cancellationToken);
+
+    static CommunicationDelivery CreateEmployeeDelivery(OrganizationUser user, Guid connectionId, CommunicationDeliveryKind kind, DateTimeOffset now) => new()
     {
         Id = Guid.NewGuid(),
         OrganizationId = user.OrganizationId,
+        ConnectionId = connectionId,
         OrganizationUserId = user.Id,
         Kind = kind,
         Status = CommunicationDeliveryStatus.Pending,

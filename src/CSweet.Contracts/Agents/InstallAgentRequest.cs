@@ -12,4 +12,8 @@ public sealed record InstallAgentRequest(
     IReadOnlyList<string> GrantedNetworkAccess,
     int MaxRuntimeSeconds,
     int MemoryMb,
-    int CpuPercent);
+    int CpuPercent)
+{
+    public string PluginScope { get; init; } = "Organization";
+    public IReadOnlyList<string> GrantedRequestedCapabilities { get; init; } = [];
+}

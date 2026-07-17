@@ -15,6 +15,7 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
     private readonly IAgentRuntimeSignalService _runtimeSignals;
     private readonly PlatformLlmCapabilityHandler _platformLlm;
     private readonly PlatformMemoryCapabilityHandler _platformMemory;
+    private readonly PlatformPluginSecretCapabilityHandler _platformSecrets;
 
     public AgentBrokerService(
         IAgentAuthorizationPolicy authorizationPolicy,
@@ -22,6 +23,7 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         IAgentRuntimeSignalService runtimeSignals,
         PlatformLlmCapabilityHandler platformLlm,
         PlatformMemoryCapabilityHandler platformMemory,
+        PlatformPluginSecretCapabilityHandler platformSecrets,
         ILogger<AgentBrokerService> logger)
     {
         _authorizationPolicy = authorizationPolicy;
@@ -29,6 +31,7 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         _runtimeSignals = runtimeSignals;
         _platformLlm = platformLlm;
         _platformMemory = platformMemory;
+        _platformSecrets = platformSecrets;
         _logger = logger;
     }
 
@@ -174,6 +177,17 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                     if (PlatformMemoryCapabilityHandler.IsPlatformMemoryCapability(message.CapabilityRequest.Capability))
                     {
                         var result = await _platformMemory.HandleAsync(session, message.CapabilityRequest, cancellationToken);
+                        session.TrySend(new BrokerToAgentMessage
+                        {
+                            MessageId = Guid.NewGuid().ToString("N"),
+                            CorrelationId = message.CorrelationId,
+                            CapabilityResult = result
+                        });
+                        break;
+                    }
+                    if (message.CapabilityRequest.Capability == PluginPlatformCapabilities.ReadSecret)
+                    {
+                        var result = await _platformSecrets.HandleAsync(session, message.CapabilityRequest, cancellationToken);
                         session.TrySend(new BrokerToAgentMessage
                         {
                             MessageId = Guid.NewGuid().ToString("N"),

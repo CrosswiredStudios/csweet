@@ -26,7 +26,8 @@ public sealed record AgentContainerStartRequest(
     int MemoryMb,
     int CpuPercent,
     int PidsLimit,
-    int MaxRuntimeSeconds);
+    int MaxRuntimeSeconds,
+    string? PersistentDataVolumeName = null);
 
 public sealed record AgentContainerStatus(
     string ContainerId,

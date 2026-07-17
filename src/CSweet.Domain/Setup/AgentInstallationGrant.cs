@@ -5,6 +5,7 @@ public sealed class AgentInstallationGrant
     public Guid Id { get; set; }
     public Guid AgentInstallationId { get; set; }
     public string CapabilitiesJson { get; set; } = "[]";
+    public string RequestedCapabilitiesJson { get; set; } = "[]";
     public string SubscriptionsJson { get; set; } = "[]";
     public string PublicationsJson { get; set; } = "[]";
     public string PermissionsJson { get; set; } = "[]";

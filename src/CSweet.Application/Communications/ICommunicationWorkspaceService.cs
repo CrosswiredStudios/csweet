@@ -5,6 +5,11 @@ namespace CSweet.Application.Communications;
 
 public interface ICommunicationWorkspaceService
 {
+    Task<CommunicationConnectionResponse?> GetAsync(Guid organizationId, string providerKey, CancellationToken cancellationToken = default);
+    Task<CommunicationConnectionResponse> ConnectAsync(Guid organizationId, string providerKey, ConnectCommunicationWorkspaceRequest request, CancellationToken cancellationToken = default);
+    Task<WorkspaceProvisioningPlan?> PreviewAsync(Guid organizationId, string providerKey, CancellationToken cancellationToken = default);
+    Task<CommunicationActionResponse> QueueReconciliationAsync(Guid organizationId, string providerKey, CancellationToken cancellationToken = default);
+    Task<CommunicationActionResponse> DisconnectAsync(Guid organizationId, string providerKey, CancellationToken cancellationToken = default);
     Task<CommunicationConnectionResponse?> GetDiscordAsync(Guid organizationId, CancellationToken cancellationToken = default);
     Task<CommunicationConnectionResponse> ConnectDiscordAsync(Guid organizationId, ConnectDiscordWorkspaceRequest request, CancellationToken cancellationToken = default);
     Task<WorkspaceProvisioningPlan?> PreviewAsync(Guid organizationId, CancellationToken cancellationToken = default);

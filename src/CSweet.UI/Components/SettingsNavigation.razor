@@ -7,6 +7,9 @@
     <MudButton Href="/settings/agents" Variant="@AgentsVariant" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.SmartToy">
         Agents
     </MudButton>
+    <MudButton Href="/settings/plugins" Variant="@PluginsVariant" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Extension">
+        Plugins
+    </MudButton>
     <MudButton Href="/settings/security" Variant="@SecurityVariant" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Security">
         Security
     </MudButton>
@@ -18,6 +21,7 @@
 @code {
     private Variant LlmVariant => VariantFor("/settings/llm-providers");
     private Variant AgentsVariant => VariantFor("/settings/agents");
+    private Variant PluginsVariant => VariantFor("/settings/plugins");
     private Variant SecurityVariant => VariantFor("/settings/security");
     private Variant CommunicationsVariant => VariantFor("/settings/communications");
 

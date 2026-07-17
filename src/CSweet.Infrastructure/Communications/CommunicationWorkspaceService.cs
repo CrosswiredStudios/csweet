@@ -11,7 +11,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CSweet.Infrastructure.Communications;
 
-public sealed class CommunicationWorkspaceService(CSweetDbContext db, IAuditEventWriter audit, ICommunicationRelayClient relay) : ICommunicationWorkspaceService
+public sealed class CommunicationWorkspaceService(
+    CSweetDbContext db,
+    IAuditEventWriter audit,
+    IPluginAuthorizationPolicy pluginAuthorization) : ICommunicationWorkspaceService
 {
     private static readonly (CommunicationResourceKind Kind, string Purpose, string Name)[] BaseResources =
     [
@@ -34,46 +37,63 @@ public sealed class CommunicationWorkspaceService(CSweetDbContext db, IAuditEven
         (CommunicationResourceKind.Role, "role:owner", "C-Sweet Owner")
     ];
 
-    public async Task<CommunicationConnectionResponse?> GetDiscordAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
-        await db.CommunicationConnections.Where(x => x.OrganizationId == organizationId && x.Provider == CommunicationProviderKind.Discord)
+    public async Task<CommunicationConnectionResponse?> GetAsync(Guid organizationId, string providerKey, CancellationToken cancellationToken = default) =>
+        await db.CommunicationConnections.Where(x => x.OrganizationId == organizationId && x.ProviderKey == NormalizeProviderKey(providerKey))
             .Select(x => ToResponse(x)).SingleOrDefaultAsync(cancellationToken);
 
-    public async Task<CommunicationConnectionResponse> ConnectDiscordAsync(Guid organizationId, ConnectDiscordWorkspaceRequest request, CancellationToken cancellationToken = default)
+    public Task<CommunicationConnectionResponse?> GetDiscordAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
+        GetAsync(organizationId, CommunicationProviderKeys.Discord, cancellationToken);
+
+    public async Task<CommunicationConnectionResponse> ConnectAsync(Guid organizationId, string providerKey,
+        ConnectCommunicationWorkspaceRequest request, CancellationToken cancellationToken = default)
     {
-        if (!ulong.TryParse(request.GuildId, out _)) throw new ArgumentException("GuildId must be a Discord snowflake.", nameof(request));
-        if (!Enum.TryParse<CommunicationWorkspaceMode>(request.Mode, true, out var mode)) throw new ArgumentException("Mode must be Dedicated or Contained.", nameof(request));
+        providerKey = NormalizeProviderKey(providerKey);
+        if (string.IsNullOrWhiteSpace(request.WorkspaceExternalId) || request.WorkspaceExternalId.Length > 128)
+            throw new ArgumentException("A provider workspace identifier is required.", nameof(request));
+        if (!Enum.TryParse<CommunicationWorkspaceMode>(request.Mode, true, out var mode))
+            throw new ArgumentException("Mode must be Dedicated or Contained.", nameof(request));
+        if (!await pluginAuthorization.CanAccessOrganizationAsync(request.PluginInstallationId, organizationId, cancellationToken))
+            throw new ArgumentException("The communication plugin is not authorized for this organization.", nameof(request));
         var now = DateTimeOffset.UtcNow;
         var connection = await db.CommunicationConnections.SingleOrDefaultAsync(
-            x => x.OrganizationId == organizationId && x.Provider == CommunicationProviderKind.Discord, cancellationToken);
+            x => x.OrganizationId == organizationId && x.ProviderKey == providerKey, cancellationToken);
         if (connection is null)
         {
             connection = new CommunicationConnection
             {
-                Id = Guid.NewGuid(), OrganizationId = organizationId, Provider = CommunicationProviderKind.Discord,
-                WorkspaceExternalId = request.GuildId, WorkspaceMode = mode, Status = CommunicationConnectionStatus.Pending,
-                RelayPairingId = request.RelayPairingId, CreatedAt = now, UpdatedAt = now
+                Id = Guid.NewGuid(), OrganizationId = organizationId, ProviderKey = providerKey,
+                CreatedAt = now
             };
             db.CommunicationConnections.Add(connection);
         }
-        else
-        {
-            connection.WorkspaceExternalId = request.GuildId;
-            connection.WorkspaceMode = mode;
-            connection.RelayPairingId = request.RelayPairingId;
-            connection.Status = CommunicationConnectionStatus.Pending;
-            connection.UpdatedAt = now;
-        }
-        Queue(connection, CommunicationDeliveryKind.ReconcileWorkspace, $"workspace:{connection.Id:D}:connect:{now.ToUnixTimeMilliseconds()}", "{}");
+        connection.WorkspaceExternalId = request.WorkspaceExternalId.Trim();
+        connection.WorkspaceMode = mode;
+        connection.Status = CommunicationConnectionStatus.Pending;
+        connection.PluginInstallationId = request.PluginInstallationId;
+        connection.ManagedRootExternalId = string.IsNullOrWhiteSpace(request.ManagedRootExternalId) ? null : request.ManagedRootExternalId.Trim();
+        connection.UpdatedAt = now;
+        Queue(connection, CommunicationDeliveryKind.ReconcileWorkspace,
+            $"workspace:{connection.Id:D}:connect:{now.ToUnixTimeMilliseconds()}", "{}");
         await db.SaveChangesAsync(cancellationToken);
-        await audit.WriteAsync("communications.discord.connected", "CommunicationConnection", connection.Id,
-            $"Discord guild {request.GuildId} connected in {mode} mode.", cancellationToken: cancellationToken);
+        await audit.WriteAsync("communications.provider.connected", "CommunicationConnection", connection.Id,
+            $"Provider '{providerKey}' workspace '{connection.WorkspaceExternalId}' connected in {mode} mode.", cancellationToken: cancellationToken);
         return ToResponse(connection);
     }
 
-    public async Task<WorkspaceProvisioningPlan?> PreviewAsync(Guid organizationId, CancellationToken cancellationToken = default)
+    public async Task<CommunicationConnectionResponse> ConnectDiscordAsync(Guid organizationId, ConnectDiscordWorkspaceRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!ulong.TryParse(request.GuildId, out _)) throw new ArgumentException("GuildId must be a Discord snowflake.", nameof(request));
+        return await ConnectAsync(organizationId, CommunicationProviderKeys.Discord,
+            new(request.GuildId, request.Mode, request.PluginInstallationId, request.ManagedRootExternalId), cancellationToken);
+    }
+
+    public Task<WorkspaceProvisioningPlan?> PreviewAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
+        PreviewAsync(organizationId, CommunicationProviderKeys.Discord, cancellationToken);
+
+    public async Task<WorkspaceProvisioningPlan?> PreviewAsync(Guid organizationId, string providerKey, CancellationToken cancellationToken = default)
     {
         var connection = await db.CommunicationConnections.SingleOrDefaultAsync(
-            x => x.OrganizationId == organizationId && x.Provider == CommunicationProviderKind.Discord, cancellationToken);
+            x => x.OrganizationId == organizationId && x.ProviderKey == NormalizeProviderKey(providerKey), cancellationToken);
         if (connection is null) return null;
         var existing = await db.ManagedExternalResources.Where(x => x.ConnectionId == connection.Id)
             .ToDictionaryAsync(x => x.Purpose, cancellationToken);
@@ -113,56 +133,65 @@ public sealed class CommunicationWorkspaceService(CSweetDbContext db, IAuditEven
             .Select(x => new WorkspaceProvisioningChange(CommunicationChangeKind.Archive,
                 Enum.Parse<CommunicationResourceKind>(x.Kind.ToString()), x.Purpose, x.DisplayName, x.ExternalId,
                 "Managed resources are archived, never automatically deleted.")));
-        return new WorkspaceProvisioningPlan(organizationId, "Discord", connection.WorkspaceExternalId, changes, DateTimeOffset.UtcNow);
+        return new WorkspaceProvisioningPlan(organizationId, connection.ProviderKey, connection.WorkspaceExternalId, changes, DateTimeOffset.UtcNow);
     }
 
-    public async Task<CommunicationActionResponse> QueueReconciliationAsync(Guid organizationId, CancellationToken cancellationToken = default)
+    public Task<CommunicationActionResponse> QueueReconciliationAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
+        QueueReconciliationAsync(organizationId, CommunicationProviderKeys.Discord, cancellationToken);
+
+    public async Task<CommunicationActionResponse> QueueReconciliationAsync(Guid organizationId, string providerKey, CancellationToken cancellationToken = default)
     {
         var connection = await db.CommunicationConnections.SingleOrDefaultAsync(
-            x => x.OrganizationId == organizationId && x.Provider == CommunicationProviderKind.Discord, cancellationToken);
-        if (connection is null) return new(false, "not_connected", "Discord is not connected.");
+            x => x.OrganizationId == organizationId && x.ProviderKey == NormalizeProviderKey(providerKey), cancellationToken);
+        if (connection is null) return new(false, "not_connected", "The communication provider is not connected.");
         var now = DateTimeOffset.UtcNow;
         Queue(connection, CommunicationDeliveryKind.ReconcileWorkspace, $"workspace:{connection.Id:D}:reconcile:{now.ToUnixTimeMilliseconds()}", "{}");
         await db.SaveChangesAsync(cancellationToken);
         return new(true, null, "Workspace reconciliation queued.");
     }
 
-    public async Task<CommunicationActionResponse> DisconnectDiscordAsync(Guid organizationId, CancellationToken cancellationToken = default)
+    public Task<CommunicationActionResponse> DisconnectDiscordAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
+        DisconnectAsync(organizationId, CommunicationProviderKeys.Discord, cancellationToken);
+
+    public async Task<CommunicationActionResponse> DisconnectAsync(Guid organizationId, string providerKey, CancellationToken cancellationToken = default)
     {
+        providerKey = NormalizeProviderKey(providerKey);
         var connection = await db.CommunicationConnections.SingleOrDefaultAsync(
-            x => x.OrganizationId == organizationId && x.Provider == CommunicationProviderKind.Discord, cancellationToken);
+            x => x.OrganizationId == organizationId && x.ProviderKey == providerKey, cancellationToken);
         if (connection is null || connection.Status == CommunicationConnectionStatus.Disconnected)
-            return new(false, "not_connected", "Discord is not connected.");
+            return new(false, "not_connected", "The communication provider is not connected.");
         var now = DateTimeOffset.UtcNow;
         connection.Status = CommunicationConnectionStatus.Paused;
         connection.UpdatedAt = now;
         Queue(connection, CommunicationDeliveryKind.DisconnectWorkspace, $"workspace:{connection.Id:D}:disconnect:{now.ToUnixTimeMilliseconds()}", "{}");
         await db.SaveChangesAsync(cancellationToken);
-        await audit.WriteAsync("communications.discord.disconnect_queued", "CommunicationConnection", connection.Id,
-            "Discord workspace disconnection and managed-resource archival queued.", cancellationToken: cancellationToken);
-        return new(true, null, "Discord disconnection queued. C-Sweet conversation history will be preserved.");
+        await audit.WriteAsync("communications.provider.disconnect_queued", "CommunicationConnection", connection.Id,
+            $"Provider '{providerKey}' workspace disconnection and managed-resource archival queued.", cancellationToken: cancellationToken);
+        return new(true, null, "Provider disconnection queued. C-Sweet conversation history will be preserved.");
     }
 
     public async Task<LinkCodeResponse?> CreateLinkCodeAsync(Guid organizationId, Guid applicationUserId, CancellationToken cancellationToken = default)
     {
         var connection = await db.CommunicationConnections.SingleOrDefaultAsync(
-            x => x.OrganizationId == organizationId && x.Provider == CommunicationProviderKind.Discord, cancellationToken);
+            x => x.OrganizationId == organizationId && x.ProviderKey == CommunicationProviderKeys.Discord, cancellationToken);
         var member = await db.CoreOrganizationUsers.SingleOrDefaultAsync(x => x.OrganizationId == organizationId &&
             x.ApplicationUserId == applicationUserId && x.EmployeeType == EmployeeType.Human && x.IsActive, cancellationToken);
         if (connection is null || member is null) return null;
         var bytes = RandomNumberGenerator.GetBytes(6);
         var code = Convert.ToHexString(bytes);
         var now = DateTimeOffset.UtcNow;
+        var expiresAt = now.AddMinutes(10);
         db.ExternalIdentityLinkCodes.Add(new ExternalIdentityLinkCode
         {
             Id = Guid.NewGuid(), ConnectionId = connection.Id, OrganizationId = organizationId,
             ApplicationUserId = applicationUserId, OrganizationUserId = member.Id,
-            CodeHash = HashCodeValue(code), CreatedAt = now, ExpiresAt = now.AddMinutes(10)
+            CodeHash = HashCodeValue(code), CreatedAt = now, ExpiresAt = expiresAt
         });
+        Queue(connection, CommunicationDeliveryKind.RegisterLinkCode,
+            $"link-code:{connection.Id:D}:{HashCodeValue(code)}",
+            System.Text.Json.JsonSerializer.Serialize(new CommunicationPluginLinkCodeRequest(code, expiresAt)));
         await db.SaveChangesAsync(cancellationToken);
-        if (Guid.TryParse(connection.RelayPairingId, out var pairingId))
-            await relay.RegisterLinkCodeAsync(pairingId, code, now.AddMinutes(10), cancellationToken);
-        return new(code, now.AddMinutes(10));
+        return new(code, expiresAt);
     }
 
     public async Task<ExternalIdentityLinkResponse?> RedeemLinkCodeAsync(RedeemExternalIdentityRequest request, CancellationToken cancellationToken = default)
@@ -173,6 +202,26 @@ public sealed class CommunicationWorkspaceService(CSweetDbContext db, IAuditEven
         if (code is null) return null;
         var connection = await db.CommunicationConnections.SingleOrDefaultAsync(x => x.Id == code.ConnectionId && x.WorkspaceExternalId == request.GuildId, cancellationToken);
         if (connection is null) return null;
+        if (connection.PluginInstallationId is Guid pluginId)
+        {
+            var externalIdentity = await db.ExternalIdentities.SingleOrDefaultAsync(x =>
+                x.PluginInstallationId == pluginId && x.ProviderKey == connection.ProviderKey &&
+                x.ExternalUserId == request.ExternalUserId, cancellationToken);
+            if (externalIdentity is null)
+            {
+                db.ExternalIdentities.Add(new ExternalIdentity
+                {
+                    Id = Guid.NewGuid(), PluginInstallationId = pluginId, ProviderKey = connection.ProviderKey,
+                    ExternalUserId = request.ExternalUserId, ApplicationUserId = code.ApplicationUserId,
+                    CreatedAt = now
+                });
+            }
+            else
+            {
+                externalIdentity.ApplicationUserId = code.ApplicationUserId;
+                externalIdentity.RevokedAt = null;
+            }
+        }
         var link = await db.ExternalIdentityLinks.SingleOrDefaultAsync(x => x.ConnectionId == connection.Id && x.OrganizationUserId == code.OrganizationUserId, cancellationToken);
         if (link is null)
         {
@@ -189,13 +238,18 @@ public sealed class CommunicationWorkspaceService(CSweetDbContext db, IAuditEven
             link.ExternalUserId = request.ExternalUserId; link.IsVerified = true; link.RevokedAt = null;
         }
         code.RedeemedAt = now;
-        await db.SaveChangesAsync(cancellationToken);
         var member = await db.CoreOrganizationUsers.SingleAsync(x => x.Id == code.OrganizationUserId, cancellationToken);
         var rolePurpose = member.PermissionLevel == OrganizationPermissionLevel.Owner ? "role:owner" : "role:member";
         var roleId = await db.ManagedExternalResources.Where(x => x.ConnectionId == connection.Id && x.Purpose == rolePurpose && !x.IsArchived)
             .Select(x => x.ExternalId).SingleOrDefaultAsync(cancellationToken);
-        if (roleId is not null && Guid.TryParse(connection.RelayPairingId, out var pairingId))
-            await relay.AssignMemberAsync(pairingId, connection.WorkspaceExternalId, request.ExternalUserId, roleId, cancellationToken);
+        if (roleId is not null)
+        {
+            Queue(connection, CommunicationDeliveryKind.AssignIdentity,
+                $"identity:{connection.Id:D}:{request.ExternalUserId}:{roleId}",
+                System.Text.Json.JsonSerializer.Serialize(new CommunicationPluginIdentityRequest(
+                    connection.WorkspaceExternalId, request.ExternalUserId, roleId)));
+        }
+        await db.SaveChangesAsync(cancellationToken);
         return ToResponse(link);
     }
 
@@ -224,6 +278,14 @@ public sealed class CommunicationWorkspaceService(CSweetDbContext db, IAuditEven
     }
 
     private static string HashCodeValue(string code) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(code.ToUpperInvariant())));
+    private static string NormalizeProviderKey(string providerKey)
+    {
+        var value = providerKey?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 80 ||
+            value.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_')))
+            throw new ArgumentException("Provider keys may contain only letters, digits, '.', '-' and '_'.", nameof(providerKey));
+        return value;
+    }
     private static string Slug(string value)
     {
         var slug = new string(value.Trim().ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray());
@@ -232,8 +294,12 @@ public sealed class CommunicationWorkspaceService(CSweetDbContext db, IAuditEven
         if (slug.Length == 0) slug = "employee";
         return slug[..Math.Min(90, slug.Length)];
     }
-    private static CommunicationConnectionResponse ToResponse(CommunicationConnection x) => new(x.Id, x.OrganizationId, x.Provider.ToString(),
-        x.WorkspaceExternalId, x.WorkspaceMode.ToString(), x.Status.ToString(), x.CreatedAt, x.UpdatedAt);
+    private static CommunicationConnectionResponse ToResponse(CommunicationConnection x) => new(x.Id, x.OrganizationId, x.ProviderKey,
+        x.WorkspaceExternalId, x.WorkspaceMode.ToString(), x.Status.ToString(), x.CreatedAt, x.UpdatedAt)
+    {
+        PluginInstallationId = x.PluginInstallationId,
+        ManagedRootExternalId = x.ManagedRootExternalId
+    };
     private static ExternalIdentityLinkResponse ToResponse(ExternalIdentityLink x) => new(x.Id, x.OrganizationUserId, x.ExternalUserId, x.IsVerified, x.ActiveDirectAgentOrganizationUserId);
 }
 

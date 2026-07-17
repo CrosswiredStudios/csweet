@@ -9,12 +9,13 @@ var builder = Host.CreateApplicationBuilder(args);
 // Add service defaults (health checks, OpenTelemetry, resilience)
 builder.AddServiceDefaults();
 builder.AddCSweetInfrastructure();
+builder.Services.AddCommunicationPluginBroker(builder.Configuration);
 
 builder.Services.AddHostedService<AgentBuildWorker>();
 builder.Services.AddHostedService<AgentScheduleWorker>();
 builder.Services.AddHostedService<AgentRuntimeCleanupWorker>();
+builder.Services.AddHostedService<PluginBootstrapWorker>();
 builder.Services.AddHostedService<CommunicationDeliveryWorker>();
-builder.Services.AddHostedService<CommunicationInboundWorker>();
 
 var host = builder.Build();
 host.Run();

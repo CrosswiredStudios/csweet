@@ -15,7 +15,7 @@ public sealed class AgentRuntimeManager(
     IAgentContainerRunner containers,
     IAuditEventWriter auditWriter,
     IOptions<AgentRuntimeManagerOptions> options,
-    ILogger<AgentRuntimeManager> logger) : IAgentRuntimeManager
+    ILogger<AgentRuntimeManager> logger) : IPluginRuntimeManager
 {
     private const int MaximumAlwaysOnStartupAttempts = 3;
     private static readonly AgentRuntimeStatus[] ContainerActiveStatuses =
@@ -484,7 +484,8 @@ public sealed class AgentRuntimeManager(
                 package.PackagePath, entryAssembly,
                 options.Value.BrokerEndpoint, token, "/app/csweet-agent.json", options.Value.DockerNetworkName,
                 installation.Grant.MemoryMb, installation.Grant.CpuPercent, settings.DefaultContainerPidsLimit,
-                installation.Schedule.MaxRuntimeSeconds), startTimeout.Token);
+                installation.Schedule.MaxRuntimeSeconds,
+                package.PluginKind == PluginKind.CommunicationProvider ? $"csweet-plugin-data-{installation.Id:N}" : null), startTimeout.Token);
             instance.ContainerId = status.ContainerId;
             instance.RuntimeDeadlineAt = now.AddSeconds(installation.Schedule.MaxRuntimeSeconds);
             Transition(instance, AgentRuntimeStatus.WaitingForBrokerRegistration, DateTimeOffset.UtcNow,

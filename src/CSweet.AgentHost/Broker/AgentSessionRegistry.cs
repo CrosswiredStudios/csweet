@@ -230,6 +230,15 @@ public sealed class AgentSessionRegistry
             return;
         }
 
+        var requestedCapabilities = requester.Grant.RequestedCapabilities ?? new HashSet<string>(StringComparer.Ordinal);
+        var legacyCapabilityGrant = requestedCapabilities.Count == 0 && requester.Grant.Permissions.Contains("capability.request");
+        if (!legacyCapabilityGrant && !requestedCapabilities.Contains(request.Capability))
+        {
+            SendCapabilityFailure(requester, request.RequestId, correlationId,
+                $"Agent '{requester.AgentId}' may not request '{request.Capability}'.");
+            return;
+        }
+
         var pending = new PendingCapabilityRequest(
             request.RequestId,
             requester.SessionId,

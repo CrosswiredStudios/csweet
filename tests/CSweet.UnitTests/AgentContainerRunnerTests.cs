@@ -30,7 +30,9 @@ public sealed class AgentContainerRunnerTests
         Assert.DoesNotContain("--privileged", args);
         Assert.DoesNotContain(args, value => value.Contains("docker.sock", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(args, value => value.Contains("ConnectionStrings", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(9, args.Count(value => value == "--env"));
+        Assert.Equal(11, args.Count(value => value == "--env"));
+        Assert.Contains("CSweet__Plugin__InstallationId=22222222-2222-2222-2222-222222222222", args);
+        Assert.Contains(args, value => value.StartsWith("CSweet__Plugin__BrokerEndpoint=", StringComparison.Ordinal));
     }
 
     [Fact]

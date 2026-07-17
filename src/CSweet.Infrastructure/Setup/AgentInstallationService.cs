@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace CSweet.Infrastructure.Setup;
 
-public sealed class AgentInstallationService : IAgentInstallationService
+public sealed class AgentInstallationService : IAgentInstallationService, IPluginInstallationService
 {
     private static readonly TimeSpan RuntimeContainerCleanupTimeout = TimeSpan.FromSeconds(30);
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
@@ -42,6 +42,27 @@ public sealed class AgentInstallationService : IAgentInstallationService
         var packageVersion = await _dbContext.AgentPackageVersions
             .SingleOrDefaultAsync(x => x.Id == importId, cancellationToken)
             ?? throw new AgentInstallationException("The import preview was not found.");
+        if (packageVersion.PluginKind != PluginKind.Agent)
+            throw new AgentInstallationException("Communication providers must be installed through the plugin API.");
+        return await InstallCoreAsync(packageVersion, request, cancellationToken);
+    }
+
+    async Task<AgentInstallationResponse> IPluginInstallationService.InstallAsync(
+        Guid importId,
+        InstallAgentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var packageVersion = await _dbContext.AgentPackageVersions
+            .SingleOrDefaultAsync(x => x.Id == importId, cancellationToken)
+            ?? throw new AgentInstallationException("The import preview was not found.");
+        return await InstallCoreAsync(packageVersion, request, cancellationToken);
+    }
+
+    private async Task<AgentInstallationResponse> InstallCoreAsync(
+        AgentPackageVersion packageVersion,
+        InstallAgentRequest request,
+        CancellationToken cancellationToken)
+    {
         var settings = await GetSettingsAsync(cancellationToken);
         ValidateBusinessId(request.BusinessId);
         var businessId = request.BusinessId.Trim();
@@ -60,7 +81,7 @@ public sealed class AgentInstallationService : IAgentInstallationService
             }
 
         if (await _dbContext.AgentInstallations.AnyAsync(
-                x => x.PackageVersionId == importId && x.BusinessId == businessId,
+                x => x.PackageVersionId == packageVersion.Id && x.BusinessId == businessId,
                 cancellationToken))
         {
             throw new AgentInstallationException("This agent version is already installed for the business.");
@@ -68,10 +89,15 @@ public sealed class AgentInstallationService : IAgentInstallationService
 
         var manifest = DeserializeManifest(packageVersion.ManifestJson);
         var activationMode = ParseActivationMode(request.ActivationMode);
+        var scope = ParsePluginScope(request.PluginScope);
+        if (packageVersion.PluginKind == PluginKind.CommunicationProvider &&
+            (scope != PluginInstallationScope.System || activationMode != ActivationMode.AlwaysOn))
+            throw new AgentInstallationException("Communication providers must be system-scoped and always-on.");
         var overlapPolicy = ParseOverlapPolicy(request.OverlapPolicy);
         ValidateSchedule(request.TickFrequencySeconds, request.MaxRuntimeSeconds, activationMode, settings);
         ValidateResources(request.MemoryMb, request.CpuPercent, settings);
         ValidateGrant("capabilities", request.GrantedCapabilities, manifest.Capabilities);
+        ValidateGrant("requested capabilities", request.GrantedRequestedCapabilities, RequestedCapabilities(packageVersion.ManifestJson));
         ValidateGrant("subscriptions", request.GrantedSubscriptions, manifest.RequestedSubscriptions);
         ValidateGrant("publications", request.GrantedPublications, manifest.RequestedPublications);
         ValidateGrant("permissions", request.GrantedPermissions, manifest.RequestedPermissions);
@@ -83,6 +109,7 @@ public sealed class AgentInstallationService : IAgentInstallationService
             Id = Guid.NewGuid(),
             PackageVersionId = packageVersion.Id,
             BusinessId = businessId,
+            Scope = scope,
             IsEnabled = true,
             CreatedAt = now,
             UpdatedAt = now
@@ -92,6 +119,7 @@ public sealed class AgentInstallationService : IAgentInstallationService
             Id = Guid.NewGuid(),
             AgentInstallationId = installation.Id,
             CapabilitiesJson = SerializeGrant(request.GrantedCapabilities),
+            RequestedCapabilitiesJson = SerializeGrant(request.GrantedRequestedCapabilities),
             SubscriptionsJson = SerializeGrant(request.GrantedSubscriptions),
             PublicationsJson = SerializeGrant(request.GrantedPublications),
             PermissionsJson = SerializeGrant(request.GrantedPermissions),
@@ -153,6 +181,17 @@ public sealed class AgentInstallationService : IAgentInstallationService
         CancellationToken cancellationToken = default)
     {
         var installations = await InstallationQuery()
+            .Where(x => x.PackageVersion!.PluginKind == PluginKind.Agent)
+            .OrderBy(x => x.PackageVersion!.AgentName)
+            .ThenBy(x => x.BusinessId)
+            .ToListAsync(cancellationToken);
+        return installations.Select(ToResponse).ToList();
+    }
+
+    async Task<IReadOnlyList<AgentInstallationResponse>> IPluginInstallationService.ListAsync(
+        CancellationToken cancellationToken)
+    {
+        var installations = await InstallationQuery()
             .OrderBy(x => x.PackageVersion!.AgentName)
             .ThenBy(x => x.BusinessId)
             .ToListAsync(cancellationToken);
@@ -162,6 +201,15 @@ public sealed class AgentInstallationService : IAgentInstallationService
     public async Task<AgentInstallationResponse?> GetAsync(
         Guid installationId,
         CancellationToken cancellationToken = default)
+    {
+        var installation = await InstallationQuery()
+            .SingleOrDefaultAsync(x => x.Id == installationId, cancellationToken);
+        return installation is null ? null : ToResponse(installation);
+    }
+
+    async Task<AgentInstallationResponse?> IPluginInstallationService.GetAsync(
+        Guid installationId,
+        CancellationToken cancellationToken)
     {
         var installation = await InstallationQuery()
             .SingleOrDefaultAsync(x => x.Id == installationId, cancellationToken);
@@ -776,6 +824,21 @@ public sealed class AgentInstallationService : IAgentInstallationService
             ? activationMode
             : throw new AgentInstallationException("Activation mode must be AlwaysOn, Periodic, or Manual.");
 
+    private static PluginInstallationScope ParsePluginScope(string value) =>
+        Enum.TryParse<PluginInstallationScope>(value, ignoreCase: true, out var scope) && Enum.IsDefined(scope)
+            ? scope
+            : throw new AgentInstallationException("Plugin scope must be Organization or System.");
+
+    private static IReadOnlyList<string> RequestedCapabilities(string manifestJson)
+    {
+        using var document = JsonDocument.Parse(manifestJson);
+        return document.RootElement.TryGetProperty("requestedCapabilities", out var values) &&
+               values.ValueKind == JsonValueKind.Array
+            ? values.EnumerateArray().Select(x => x.GetString())
+                .Where(x => !string.IsNullOrWhiteSpace(x)).Cast<string>().ToList()
+            : [];
+    }
+
     private static OverlapPolicy ParseOverlapPolicy(string value) =>
         Enum.TryParse<OverlapPolicy>(value, ignoreCase: false, out var overlapPolicy) &&
         Enum.IsDefined(overlapPolicy)
@@ -847,7 +910,11 @@ public sealed class AgentInstallationService : IAgentInstallationService
             build is null ? null : new AgentBuildSummaryResponse(
                 build.Id, build.Status.ToString(), build.Attempt, build.QueuedAt, build.StartedAt,
                 build.CompletedAt, !string.IsNullOrWhiteSpace(build.LogPath), build.FailureMessage),
-            runtime is null ? null : ToRunResponse(runtime));
+            runtime is null ? null : ToRunResponse(runtime))
+        {
+            PluginKind = package.PluginKind.ToString(),
+            InstallationScope = installation.Scope.ToString()
+        };
     }
 
     private static void ResetAutomaticStartupFailures(AgentSchedule schedule)

@@ -22,6 +22,38 @@ public static class CommunicationEndpoints
         group.MapGet("/discord", async (Guid organizationId, ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
             await service.GetDiscordAsync(organizationId, cancellationToken) is { } connection ? Results.Ok(connection) : Results.NotFound());
 
+        group.MapGet("/providers/{providerKey}", async (Guid organizationId, string providerKey,
+            ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
+            await service.GetAsync(organizationId, providerKey, cancellationToken) is { } connection
+                ? Results.Ok(connection) : Results.NotFound());
+
+        group.MapPost("/providers/{providerKey}/connect", async (Guid organizationId, string providerKey,
+            ConnectCommunicationWorkspaceRequest request, ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
+        {
+            try { return Results.Ok(await service.ConnectAsync(organizationId, providerKey, request, cancellationToken)); }
+            catch (ArgumentException exception) { return Results.BadRequest(new CommunicationActionResponse(false, "validation_error", exception.Message)); }
+        });
+
+        group.MapGet("/providers/{providerKey}/provisioning-preview", async (Guid organizationId, string providerKey,
+            ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
+        {
+            var plan = await service.PreviewAsync(organizationId, providerKey, cancellationToken);
+            return plan is null ? Results.NotFound() : Results.Ok(new ProvisioningPreviewResponse(plan.OrganizationId, plan.Provider,
+                plan.WorkspaceExternalId, plan.Changes.Select(x => new ProvisioningChangeResponse(x.Change.ToString(), x.Kind.ToString(),
+                    x.Purpose, x.DesiredName, x.ExternalId, x.Detail)).ToList(), plan.CreatedAt));
+        });
+
+        group.MapPost("/providers/{providerKey}/reconcile", async (Guid organizationId, string providerKey,
+            ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
+            Results.Accepted(value: await service.QueueReconciliationAsync(organizationId, providerKey, cancellationToken)));
+
+        group.MapDelete("/providers/{providerKey}", async (Guid organizationId, string providerKey,
+            ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
+        {
+            var result = await service.DisconnectAsync(organizationId, providerKey, cancellationToken);
+            return result.Succeeded ? Results.Accepted(value: result) : Results.BadRequest(result);
+        });
+
         group.MapPost("/discord/connect", async (Guid organizationId, ConnectDiscordWorkspaceRequest request,
             ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
         {

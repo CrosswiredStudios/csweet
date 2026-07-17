@@ -1,5 +1,4 @@
 using CSweet.Communications.Abstractions;
-using CSweet.Communications.Discord;
 using CSweet.Domain.Communications;
 using CSweet.Domain.Core;
 using CSweet.Infrastructure.Communications;
@@ -19,9 +18,9 @@ public sealed class CommunicationRouterTests
         var connectionId = Guid.NewGuid();
         db.CommunicationConnections.Add(new CommunicationConnection
         {
-            Id = connectionId, OrganizationId = organizationId, Provider = CommunicationProviderKind.Discord,
+            Id = connectionId, OrganizationId = organizationId, ProviderKey = CommunicationProviderKeys.Discord,
             WorkspaceExternalId = "123", WorkspaceMode = CommunicationWorkspaceMode.Contained,
-            Status = CommunicationConnectionStatus.Connected, RelayPairingId = Guid.NewGuid().ToString(),
+            Status = CommunicationConnectionStatus.Connected, PluginInstallationId = Guid.NewGuid(),
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
         });
         var humanId = Guid.NewGuid();
@@ -72,18 +71,7 @@ public sealed class CommunicationRouterTests
     }
 
     [Fact]
-    public void DiscordFormatting_BoundsResponsesAndSuppressesBroadcastMentions()
-    {
-        var parts = DiscordMessageFormatter.Split(new string('x', 4500));
-        Assert.Equal(3, parts.Count);
-        Assert.All(parts, part => Assert.InRange(part.Length, 1, DiscordConstants.MaxMessageLength));
-        var escaped = DiscordMessageFormatter.EscapeMentions("hello @everyone and @here");
-        Assert.Contains("@\u200beveryone", escaped, StringComparison.Ordinal);
-        Assert.Contains("@\u200bhere", escaped, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void DiscordAdapter_IsOnlyReferencedByTheRelay()
+    public void CoreProjects_DoNotReferenceTheDiscordImplementation()
     {
         var root = FindRepositoryRoot();
         var forbidden = new[]
@@ -95,6 +83,11 @@ public sealed class CommunicationRouterTests
         };
         foreach (var relativePath in forbidden)
             Assert.DoesNotContain("CSweet.Communications.Discord", File.ReadAllText(Path.Combine(root, relativePath)), StringComparison.OrdinalIgnoreCase);
+
+        var appHost = File.ReadAllText(Path.Combine(root, "src/CSweet.AppHost/Program.cs"));
+        Assert.DoesNotContain("discord-relay", appHost, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("relay-postgres", appHost, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DiscordRelay", appHost, StringComparison.OrdinalIgnoreCase);
     }
 
     private static NormalizedCommunicationEnvelope Envelope(bool isDirect = false, bool isBot = false, bool isWebhook = false, string content = "hello") => new(

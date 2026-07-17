@@ -21,7 +21,11 @@ public sealed record AgentInstallationResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     AgentBuildSummaryResponse? Build = null,
-    AgentRuntimeRunResponse? LatestRuntime = null);
+    AgentRuntimeRunResponse? LatestRuntime = null)
+{
+    public string PluginKind { get; init; } = "Agent";
+    public string InstallationScope { get; init; } = "Organization";
+}
 
 public sealed record AgentBuildSummaryResponse(
     Guid BuildJobId,

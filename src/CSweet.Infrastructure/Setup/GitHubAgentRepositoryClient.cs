@@ -5,7 +5,7 @@ using CSweet.Application.Setup;
 
 namespace CSweet.Infrastructure.Setup;
 
-public sealed class GitHubAgentRepositoryClient : IGitHubAgentRepositoryClient
+public sealed class GitHubAgentRepositoryClient : IGitHubAgentRepositoryClient, IPluginSourceResolver
 {
     private const int MaximumManifestBytes = 1024 * 1024;
     private readonly HttpClient _httpClient;
@@ -59,29 +59,60 @@ public sealed class GitHubAgentRepositoryClient : IGitHubAgentRepositoryClient
         return commitSha.ToLowerInvariant();
     }
 
+    async Task<string> IPluginSourceResolver.ResolveCommitShaAsync(
+        string repositoryUrl,
+        string reference,
+        CancellationToken cancellationToken)
+    {
+        var repository = GitHubRepositoryUrlNormalizer.Normalize(repositoryUrl);
+        return await ResolveCommitShaAsync(repository.Owner, repository.Name, reference, cancellationToken);
+    }
+
     public async Task<byte[]> GetRootManifestAsync(
         string repositoryOwner,
         string repositoryName,
         string commitSha,
         CancellationToken cancellationToken)
     {
+        var manifest = await GetManifestAsync(repositoryOwner, repositoryName, commitSha, "csweet-agent.json", cancellationToken);
+        return manifest ?? throw new AgentImportPreviewException(
+            "The repository does not contain a root csweet-agent.json at the resolved commit.");
+    }
+
+    public async Task<PluginManifestSource> GetRootPluginManifestAsync(
+        string repositoryOwner,
+        string repositoryName,
+        string commitSha,
+        CancellationToken cancellationToken)
+    {
+        var plugin = await GetManifestAsync(repositoryOwner, repositoryName, commitSha, "csweet-plugin.json", cancellationToken);
+        if (plugin is not null) return new("csweet-plugin.json", plugin);
+        return new("csweet-agent.json", await GetRootManifestAsync(
+            repositoryOwner, repositoryName, commitSha, cancellationToken));
+    }
+
+    private async Task<byte[]?> GetManifestAsync(
+        string repositoryOwner,
+        string repositoryName,
+        string commitSha,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
-            $"repos/{Escape(repositoryOwner)}/{Escape(repositoryName)}/contents/csweet-agent.json?ref={Escape(commitSha)}");
+            $"repos/{Escape(repositoryOwner)}/{Escape(repositoryName)}/contents/{fileName}?ref={Escape(commitSha)}");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github.raw+json"));
 
         using var response = await _httpClient.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
-        await EnsureSuccessAsync(
-            response,
-            "The repository does not contain a root csweet-agent.json at the resolved commit.",
-            cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        await EnsureSuccessAsync(response, $"The repository does not contain a root {fileName} at the resolved commit.", cancellationToken);
 
         if (response.Content.Headers.ContentLength > MaximumManifestBytes)
         {
-            throw new AgentImportPreviewException("Agent manifest exceeds the 1 MB preview limit.");
+            throw new AgentImportPreviewException("Plugin manifest exceeds the 1 MB preview limit.");
         }
 
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -97,7 +128,7 @@ public sealed class GitHubAgentRepositoryClient : IGitHubAgentRepositoryClient
 
             if (output.Length + count > MaximumManifestBytes)
             {
-                throw new AgentImportPreviewException("Agent manifest exceeds the 1 MB preview limit.");
+                throw new AgentImportPreviewException("Plugin manifest exceeds the 1 MB preview limit.");
             }
 
             await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);

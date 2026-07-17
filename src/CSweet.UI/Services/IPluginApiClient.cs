@@ -1,0 +1,12 @@
+using CSweet.Contracts.Agents;
+
+namespace CSweet.UI.Services;
+
+public interface IPluginApiClient
+{
+    Task<AgentImportPreviewResponse> PreviewAsync(PreviewAgentImportRequest request, CancellationToken cancellationToken = default);
+    Task<AgentInstallationResponse> InstallAsync(Guid importId, InstallAgentRequest request, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AgentInstallationResponse>> ListAsync(CancellationToken cancellationToken = default);
+    Task<AgentInstallationResponse> SetEnabledAsync(Guid installationId, bool enabled, CancellationToken cancellationToken = default);
+    Task<RemoveAgentInstallationResponse> RemoveAsync(Guid installationId, CancellationToken cancellationToken = default);
+}

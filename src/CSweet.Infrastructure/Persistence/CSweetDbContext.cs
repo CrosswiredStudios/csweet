@@ -34,6 +34,8 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
     public DbSet<AgentBuildJob> AgentBuildJobs => Set<AgentBuildJob>();
     public DbSet<AgentRuntimeInstance> AgentRuntimeInstances => Set<AgentRuntimeInstance>();
     public DbSet<AgentRuntimeEvent> AgentRuntimeEvents => Set<AgentRuntimeEvent>();
+    public DbSet<PluginOrganizationGrant> PluginOrganizationGrants => Set<PluginOrganizationGrant>();
+    public DbSet<PluginSecret> PluginSecrets => Set<PluginSecret>();
 
     // Planning entities
     public DbSet<PlanningTask> PlanningTasks => Set<PlanningTask>();
@@ -63,6 +65,8 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
     public DbSet<ExternalIdentityLinkCode> ExternalIdentityLinkCodes => Set<ExternalIdentityLinkCode>();
     public DbSet<ExternalMessageReference> ExternalMessageReferences => Set<ExternalMessageReference>();
     public DbSet<CommunicationDelivery> CommunicationDeliveries => Set<CommunicationDelivery>();
+    public DbSet<CommunicationIngressReceipt> CommunicationIngressReceipts => Set<CommunicationIngressReceipt>();
+    public DbSet<ExternalIdentity> ExternalIdentities => Set<ExternalIdentity>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
     public DbSet<MemoryCaptureOutboxItem> MemoryCaptureOutbox => Set<MemoryCaptureOutboxItem>();
@@ -195,6 +199,8 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
             entity.Property(x => x.CommitSha).HasMaxLength(40).IsRequired();
             entity.Property(x => x.ManifestDigest).HasMaxLength(64).IsRequired();
             entity.Property(x => x.ManifestJson).HasColumnType("text").IsRequired();
+            entity.Property(x => x.PluginKind).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.Property(x => x.ManifestFileName).HasMaxLength(80).IsRequired();
             entity.Property(x => x.AgentId).HasMaxLength(200).IsRequired();
             entity.Property(x => x.AgentName).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Version).HasMaxLength(64).IsRequired();
@@ -219,6 +225,7 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
         {
             entity.HasKey(x => x.Id);
             entity.Property(x => x.BusinessId).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Scope).HasConversion<string>().HasMaxLength(24).IsRequired();
             entity.HasIndex(x => new { x.PackageVersionId, x.BusinessId }).IsUnique();
             entity.HasOne(x => x.PackageVersion)
                 .WithMany()
@@ -230,6 +237,7 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
         {
             entity.HasKey(x => x.Id);
             entity.Property(x => x.CapabilitiesJson).HasColumnType("text").IsRequired();
+            entity.Property(x => x.RequestedCapabilitiesJson).HasColumnType("text").IsRequired();
             entity.Property(x => x.SubscriptionsJson).HasColumnType("text").IsRequired();
             entity.Property(x => x.PublicationsJson).HasColumnType("text").IsRequired();
             entity.Property(x => x.PermissionsJson).HasColumnType("text").IsRequired();
@@ -239,6 +247,24 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
                 .WithOne(x => x.Grant)
                 .HasForeignKey<AgentInstallationGrant>(x => x.AgentInstallationId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PluginOrganizationGrant>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.PluginInstallationId, x.OrganizationId }).IsUnique();
+            entity.HasOne(x => x.PluginInstallation).WithMany()
+                .HasForeignKey(x => x.PluginInstallationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PluginSecret>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Key).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.ProtectedValue).HasMaxLength(8192).IsRequired();
+            entity.HasIndex(x => new { x.PluginInstallationId, x.Key }).IsUnique();
+            entity.HasOne(x => x.PluginInstallation).WithMany()
+                .HasForeignKey(x => x.PluginInstallationId).OnDelete(DeleteBehavior.Cascade);
         });
 
             modelBuilder.Entity<AgentInstallationConfiguration>(entity =>

@@ -6,7 +6,7 @@ using CSweet.Application.Setup;
 
 namespace CSweet.Infrastructure.Setup;
 
-public sealed class DockerAgentBuildExecutor : IAgentBuildExecutor
+public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
 {
     private const int BuilderUserId = 1654;
 
@@ -97,7 +97,8 @@ public sealed class DockerAgentBuildExecutor : IAgentBuildExecutor
             "set -eu; mkdir -p /work/source; cp -a /source/. /work/source/; " +
             "dotnet restore \"/work/source/$PROJECT_PATH\" --nologo --source https://api.nuget.org/v3/index.json; " +
             "dotnet publish \"/work/source/$PROJECT_PATH\" --configuration Release --no-restore --nologo --output /output; " +
-            "cp /source/csweet-agent.json /output/csweet-agent.json"
+            "if [ -f /source/csweet-plugin.json ]; then cp /source/csweet-plugin.json /output/csweet-agent.json; " +
+            "else cp /source/csweet-agent.json /output/csweet-agent.json; fi"
         };
 
         try

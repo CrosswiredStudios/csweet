@@ -3,5 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PackageId>CSweet.Plugin.Contracts</PackageId>
+    <Description>Provider-neutral C-Sweet plugin and communication contracts.</Description>
   </PropertyGroup>
 </Project>
