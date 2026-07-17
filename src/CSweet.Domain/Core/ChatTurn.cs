@@ -18,6 +18,7 @@ public sealed class ChatTurn
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
     public Guid ConversationId { get; set; }
+    public Guid TargetAgentOrganizationUserId { get; set; }
     public Guid UserMessageId { get; set; }
     public Guid? AssistantMessageId { get; set; }
     public Guid? RetryOfTurnId { get; set; }

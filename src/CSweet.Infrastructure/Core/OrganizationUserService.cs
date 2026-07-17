@@ -4,6 +4,8 @@ using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using CSweet.Domain.Communications;
 
 namespace CSweet.Infrastructure.Core;
 
@@ -21,7 +23,7 @@ public sealed class OrganizationUserService : IOrganizationUserService
     public async Task<IReadOnlyList<OrganizationUserResponse>> ListByOrganizationAsync(Guid organizationId, CancellationToken cancellationToken = default)
     {
         var users = await _dbContext.CoreOrganizationUsers
-            .Where(x => x.OrganizationId == organizationId)
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
             .Include(x => x.AgentInstallation!)
                 .ThenInclude(x => x.Grant)
             .OrderBy(x => x.DisplayName)
@@ -157,6 +159,10 @@ public sealed class OrganizationUserService : IOrganizationUserService
         };
 
         _dbContext.CoreOrganizationUsers.Add(user);
+        if (user.EmployeeType == EmployeeType.Agent)
+        {
+            _dbContext.CommunicationDeliveries.Add(CreateEmployeeDelivery(user, CommunicationDeliveryKind.ProvisionEmployee, now));
+        }
         foreach (var managedUser in managedUsers)
         {
             managedUser.ReportsToOrganizationUserId = user.Id;
@@ -199,14 +205,14 @@ public sealed class OrganizationUserService : IOrganizationUserService
             directReport.ReportsToOrganizationUserId = null;
         }
 
-        // Conversations require a live agent user. A hard-fired employee cannot remain
-        // referenced by them, so remove their conversation history in the same save.
-        var conversations = await _dbContext.CoreConversations
-            .Where(x => x.AgentOrganizationUserId == id)
-            .ToListAsync(cancellationToken);
-        _dbContext.CoreConversations.RemoveRange(conversations);
-
-        _dbContext.CoreOrganizationUsers.Remove(user);
+        var now = DateTimeOffset.UtcNow;
+        user.IsActive = false;
+        user.ArchivedAt = now;
+        user.AgentInstallationId = null;
+        if (user.EmployeeType == EmployeeType.Agent)
+        {
+            _dbContext.CommunicationDeliveries.Add(CreateEmployeeDelivery(user, CommunicationDeliveryKind.ArchiveEmployee, now));
+        }
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         await _auditEventWriter.WriteAsync(
@@ -216,7 +222,7 @@ public sealed class OrganizationUserService : IOrganizationUserService
             $"User '{name}' removed from organization.",
             cancellationToken: cancellationToken);
 
-        return new CoreActionResponse(true, null, "User removed successfully.");
+        return new CoreActionResponse(true, null, "User archived successfully.");
     }
 
     public async Task<CoreActionResponse> UpdateRoleAsync(
@@ -261,4 +267,26 @@ public sealed class OrganizationUserService : IOrganizationUserService
 
     static CoreActionResponse Failure(string errorCode, string message) =>
         new CoreActionResponse(false, errorCode, message);
+
+    static CommunicationDelivery CreateEmployeeDelivery(OrganizationUser user, CommunicationDeliveryKind kind, DateTimeOffset now) => new()
+    {
+        Id = Guid.NewGuid(),
+        OrganizationId = user.OrganizationId,
+        OrganizationUserId = user.Id,
+        Kind = kind,
+        Status = CommunicationDeliveryStatus.Pending,
+        IdempotencyKey = $"employee:{user.Id:D}:{kind}:{now.ToUnixTimeMilliseconds()}",
+        PayloadJson = JsonSerializer.Serialize(new
+        {
+            employeeId = user.Id,
+            user.DisplayName,
+            employeeType = user.EmployeeType.ToString(),
+            user.RoleId,
+            user.ReportsToOrganizationUserId,
+            isActive = kind != CommunicationDeliveryKind.ArchiveEmployee
+        }),
+        NextAttemptAt = now,
+        CreatedAt = now,
+        UpdatedAt = now
+    };
 }

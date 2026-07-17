@@ -117,7 +117,7 @@ public sealed class AgentMemoryService(
         var conversation = message.Conversation;
         var partition = EmployeeMemoryNamespaces.UserRelationship(
             conversation.OrganizationId.ToString("D"),
-            conversation.AgentOrganizationUserId.ToString("D"),
+            conversation.AgentOrganizationUserId!.Value.ToString("D"),
             conversation.InitiatedByOrganizationUserId.ToString("D"),
             ApplicationId).Partition;
         var metadata = new Dictionary<string, string>
@@ -151,7 +151,7 @@ public sealed class AgentMemoryService(
             {
                 Id = Guid.NewGuid(),
                 OrganizationId = conversation.OrganizationId,
-                EmployeeId = conversation.AgentOrganizationUserId,
+                EmployeeId = conversation.AgentOrganizationUserId.Value,
                 UserId = conversation.InitiatedByOrganizationUserId,
                 PartitionKey = partition.Key,
                 Scope = MemoryScope.User.ToString(),
@@ -485,9 +485,9 @@ public sealed class AgentMemoryService(
     };
 
     private async Task<ConversationMemoryContext?> LoadConversationContextAsync(Guid conversationId, CancellationToken cancellationToken) =>
-        await db.CoreConversations.Where(x => x.Id == conversationId)
+        await db.CoreConversations.Where(x => x.Id == conversationId && x.AgentOrganizationUserId != null)
             .Select(x => new ConversationMemoryContext(
-                x.OrganizationId.ToString(), x.AgentOrganizationUserId.ToString(), x.InitiatedByOrganizationUserId.ToString()))
+                x.OrganizationId.ToString(), x.AgentOrganizationUserId!.Value.ToString(), x.InitiatedByOrganizationUserId.ToString()))
             .SingleOrDefaultAsync(cancellationToken);
 
     private async Task<MemoryOwner?> LoadOwnerAsync(Guid organizationId, Guid employeeId, CancellationToken cancellationToken) =>

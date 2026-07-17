@@ -8,6 +8,8 @@ using CSweet.Application.Core;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Agents;
 using CSweet.Domain.Core;
+using CSweet.Domain.Communications;
+using CSweet.Communications.Abstractions;
 using CSweet.Infrastructure.Persistence;
 using Google.Protobuf;
 using Microsoft.EntityFrameworkCore;
@@ -123,7 +125,7 @@ public sealed class ChatTurnWorker(
                     exception.Message, cancellationToken: hardTimeout.Token);
             }
 
-            var installationId = await conversations.GetAgentInstallationIdAsync(conversation.Id, hardTimeout.Token)
+            var installationId = await conversations.GetAgentInstallationIdForEmployeeAsync(turn.TargetAgentOrganizationUserId, hardTimeout.Token)
                 ?? throw new InvalidOperationException("The agent employee is not linked to an installation.");
             var configuration = await configurations.GetAsync(installationId, hardTimeout.Token);
             var configuredProviderId = GetConfiguredProviderId(configuration);
@@ -289,6 +291,8 @@ public sealed class ChatTurnWorker(
             var assistant = await conversations.AppendMessageAsync(conversation.Id, ConversationRole.Assistant, output.ToString(), hardTimeout.Token);
             var assistantEntity = await db.CoreConversationMessages.SingleAsync(x => x.Id == assistant.Id, hardTimeout.Token);
             assistantEntity.ChatTurnId = turnId;
+            assistantEntity.SenderOrganizationUserId = turn.TargetAgentOrganizationUserId;
+            await QueueDiscordReplyAsync(db, turn, userMessage, assistantEntity, hardTimeout.Token);
             await db.SaveChangesAsync(hardTimeout.Token);
             await turns.SetStatusAsync(turnId, ChatTurnStatus.FinalizingMemory.ToString(), cancellationToken: hardTimeout.Token);
             var memoryWarning = bypassMemory;
@@ -440,6 +444,8 @@ public sealed class ChatTurnWorker(
         var assistant = await conversations.AppendMessageAsync(conversation.Id, ConversationRole.Assistant, assistantContent, cancellationToken);
         var assistantEntity = await db.CoreConversationMessages.SingleAsync(x => x.Id == assistant.Id, cancellationToken);
         assistantEntity.ChatTurnId = turnId;
+        assistantEntity.SenderOrganizationUserId = current.TargetAgentOrganizationUserId;
+        await QueueDiscordReplyAsync(db, current, current.UserMessage!, assistantEntity, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await MarkMemoryCaptureBypassedAsync(db, assistant.Id, "Deterministic failure responses are excluded from memory.", cancellationToken);
 
@@ -557,6 +563,32 @@ public sealed class ChatTurnWorker(
 
     private static bool IsCapabilityProviderTemporarilyUnavailable(string? error) =>
         error?.StartsWith("No authorized agent", StringComparison.Ordinal) == true;
+
+    private static async Task QueueDiscordReplyAsync(CSweetDbContext db, ChatTurn turn, ConversationMessage? userMessage,
+        ConversationMessage assistantMessage, CancellationToken cancellationToken)
+    {
+        userMessage ??= await db.CoreConversationMessages.SingleAsync(x => x.Id == turn.UserMessageId, cancellationToken);
+        if (!string.Equals(userMessage.SourceProvider, "Discord", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(userMessage.SourceChannelExternalId)) return;
+        var connection = await db.CommunicationConnections.SingleOrDefaultAsync(x => x.OrganizationId == turn.OrganizationId &&
+            x.Provider == CommunicationProviderKind.Discord && x.Status != CommunicationConnectionStatus.Disconnected, cancellationToken);
+        if (connection is null) return;
+        var replyTo = await db.ExternalMessageReferences.Where(x => x.ConnectionId == connection.Id && x.ConversationMessageId == userMessage.Id)
+            .Select(x => x.MessageExternalId).SingleOrDefaultAsync(cancellationToken);
+        var persona = await db.CoreOrganizationUsers.Where(x => x.Id == turn.TargetAgentOrganizationUserId)
+            .Select(x => x.DisplayName).SingleAsync(cancellationToken);
+        var envelope = new OutboundCommunicationEnvelope(Guid.NewGuid(), "Discord", connection.WorkspaceExternalId,
+            userMessage.SourceChannelExternalId, assistantMessage.Content, null, replyTo, persona, null,
+            $"discord-reply:{assistantMessage.Id:D}");
+        var now = DateTimeOffset.UtcNow;
+        db.CommunicationDeliveries.Add(new CommunicationDelivery
+        {
+            Id = Guid.NewGuid(), OrganizationId = turn.OrganizationId, ConnectionId = connection.Id,
+            OrganizationUserId = turn.TargetAgentOrganizationUserId, ConversationMessageId = assistantMessage.Id,
+            Kind = CommunicationDeliveryKind.SendMessage, Status = CommunicationDeliveryStatus.Pending,
+            IdempotencyKey = envelope.IdempotencyKey, PayloadJson = JsonSerializer.Serialize(envelope),
+            NextAttemptAt = now, CreatedAt = now, UpdatedAt = now
+        });
+    }
 
     private sealed class FirstOutputTimeoutException(TimeSpan timeout) : TimeoutException(
         $"The assistant did not produce any response text within {timeout.TotalSeconds:g} seconds.");

@@ -43,7 +43,9 @@ internal static class CoreMappers
             AgentInstallationId = user.AgentInstallationId,
             SupportsAgentConfiguration = user.AgentInstallation?.Grant?.CapabilitiesJson.Contains(
                 "\"agent.configuration.describe.v1\"",
-                StringComparison.Ordinal) == true
+                StringComparison.Ordinal) == true,
+            IsActive = user.IsActive,
+            ArchivedAt = user.ArchivedAt
         };
     }
 
@@ -94,7 +96,10 @@ internal static class CoreMappers
             conversation.InitiatedByOrganizationUserId,
             conversation.Title,
             conversation.CreatedAt,
-            conversation.UpdatedAt);
+            conversation.UpdatedAt)
+        {
+            Kind = conversation.Kind.ToString()
+        };
     }
 
     public static ConversationMessageResponse ToResponse(this ConversationMessage message)
@@ -105,7 +110,15 @@ internal static class CoreMappers
             (int)message.Role,
             message.Content,
             message.CreatedAt,
-            message.ChatTurnId);
+            message.ChatTurnId)
+        {
+            SenderOrganizationUserId = message.SenderOrganizationUserId,
+            ReplyToMessageId = message.ReplyToMessageId,
+            CorrelationId = message.CorrelationId,
+            DeliveryIntent = message.DeliveryIntent.ToString(),
+            SourceProvider = message.SourceProvider,
+            SourceChannelExternalId = message.SourceChannelExternalId
+        };
     }
 
     #endregion

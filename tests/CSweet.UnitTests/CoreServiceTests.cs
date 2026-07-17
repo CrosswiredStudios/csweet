@@ -150,7 +150,7 @@ public class CoreServiceTests
     }
 
     [Fact]
-    public async Task OrganizationUserDeletion_RemovesAgentConversationsAndUnassignsReports()
+    public async Task OrganizationUserDeletion_ArchivesAgentAndConversationsAndUnassignsReports()
     {
         await using var dbContext = CreateDbContext();
         var service = new OrganizationUserService(dbContext, new TestAuditEventWriter());
@@ -193,8 +193,10 @@ public class CoreServiceTests
 
         Assert.True(result.Succeeded);
         Assert.Null((await dbContext.CoreOrganizationUsers.SingleAsync(x => x.Id == report.Id)).ReportsToOrganizationUserId);
-        Assert.False(await dbContext.CoreOrganizationUsers.AnyAsync(x => x.Id == manager.Id));
-        Assert.False(await dbContext.CoreConversations.AnyAsync(x => x.Id == conversation.Id));
+        var archivedManager = await dbContext.CoreOrganizationUsers.SingleAsync(x => x.Id == manager.Id);
+        Assert.False(archivedManager.IsActive);
+        Assert.NotNull(archivedManager.ArchivedAt);
+        Assert.True(await dbContext.CoreConversations.AnyAsync(x => x.Id == conversation.Id));
     }
 
     [Theory]

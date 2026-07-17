@@ -3,8 +3,11 @@ namespace CSweet.Contracts.Core;
 public sealed record ConversationResponse(
     Guid Id,
     Guid OrganizationId,
-    Guid AgentOrganizationUserId,
+    Guid? AgentOrganizationUserId,
     Guid InitiatedByOrganizationUserId,
     string? Title,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt)
+{
+    public string Kind { get; init; } = "DirectHumanAgent";
+}

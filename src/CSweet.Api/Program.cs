@@ -2,6 +2,7 @@ using CSweet.Api.Agents;
 using CSweet.Api.BusinessOnboarding;
 using CSweet.Api.Auth;
 using CSweet.Api.Chat;
+using CSweet.Api.Communications;
 using CSweet.Api.Core;
 using CSweet.Api.Llm;
 using CSweet.Api.Planning;
@@ -134,6 +135,7 @@ app.MapConversationEndpoints();
 app.MapAgentMemoryEndpoints();
 app.MapChatMessageEndpoints();
 app.MapChatTurnEndpoints();
+app.MapCommunicationEndpoints();
 app.MapAgentManagementEndpoints();
 
 app.MapControllers();

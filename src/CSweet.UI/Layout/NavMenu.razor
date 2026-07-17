@@ -27,6 +27,9 @@
                     <MudNavLink Href="@EmployeesHref" Icon="@Icons.Material.Outlined.Groups" Class="@EmployeesClass">
                         Employees
                     </MudNavLink>
+                    <MudNavLink Href="@CommunicationsHref" Icon="@Icons.Material.Outlined.Forum" Class="business-nav-link">
+                        Communications
+                    </MudNavLink>
                 }
                 else
                 {
@@ -63,6 +66,10 @@
 
     private string? EmployeesHref => BusinessContext.SelectedBusiness is { } business
         ? $"/organizations/{business.Id}/employees"
+        : null;
+
+    private string? CommunicationsHref => BusinessContext.SelectedBusiness is { } business
+        ? $"/organizations/{business.Id}/communications"
         : null;
 
     private string EmployeesClass => BusinessNavigation.IsEmployeePath(CurrentPath())

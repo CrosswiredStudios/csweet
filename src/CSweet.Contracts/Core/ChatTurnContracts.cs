@@ -20,7 +20,10 @@ public sealed record ChatTurnResponse(
     DateTimeOffset? FirstOutputAt,
     DateTimeOffset? ResponseReadyAt,
     DateTimeOffset? CompletedAt,
-    long LastSequence);
+    long LastSequence)
+{
+    public Guid TargetAgentOrganizationUserId { get; init; }
+}
 
 public sealed record ChatTurnTraceEventResponse(
     Guid Id,

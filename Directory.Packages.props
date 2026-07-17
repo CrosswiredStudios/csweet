@@ -38,6 +38,7 @@
     <PackageVersion Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
     <PackageVersion Include="MudBlazor" Version="9.7.0" />
+    <PackageVersion Include="NetCord.Hosting" Version="1.0.0-beta.11" />
     <PackageVersion Include="Markdig" Version="0.41.3" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
     <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.4.6" />

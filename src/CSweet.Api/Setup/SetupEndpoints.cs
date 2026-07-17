@@ -37,6 +37,13 @@ public static class SetupEndpoints
             CancellationToken cancellationToken) =>
             Results.Ok(await service.GetAsync(cancellationToken)));
 
+        group.MapGet("/communications/options", (IConfiguration configuration) =>
+        {
+            var installUrl = configuration["Communications:Discord:InstallUrl"]
+                ?? configuration["Communications:Relay:PublicInstallUrl"];
+            return Results.Ok(new CommunicationSetupOptionsResponse(installUrl, !string.IsNullOrWhiteSpace(installUrl)));
+        });
+
         group.MapPut("/email-delivery", async (
             UpdateEmailDeliverySettingsRequest request,
             IEmailDeliverySettingsService service,

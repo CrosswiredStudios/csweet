@@ -2,6 +2,7 @@ using Microsoft.Extensions.Hosting;
 using CSweet.WorkerHost;
 using CSweet.Infrastructure;
 using CSweet.Infrastructure.Setup;
+using CSweet.Infrastructure.Communications;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -12,6 +13,8 @@ builder.AddCSweetInfrastructure();
 builder.Services.AddHostedService<AgentBuildWorker>();
 builder.Services.AddHostedService<AgentScheduleWorker>();
 builder.Services.AddHostedService<AgentRuntimeCleanupWorker>();
+builder.Services.AddHostedService<CommunicationDeliveryWorker>();
+builder.Services.AddHostedService<CommunicationInboundWorker>();
 
 var host = builder.Build();
 host.Run();

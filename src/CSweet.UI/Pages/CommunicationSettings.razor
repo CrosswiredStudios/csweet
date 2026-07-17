@@ -1,0 +1,123 @@
+@page "/settings/communications"
+@using CSweet.Contracts.Communications
+@inject IBusinessContext BusinessContext
+@inject HttpClient Http
+@implements IDisposable
+
+<PageTitle>Communications - C-Sweet Settings</PageTitle>
+<SettingsNavigation />
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="py-7">
+    <MudText Typo="Typo.h4">Communication surfaces</MudText>
+    <MudText Color="Color.Secondary" Class="mb-6">
+        C-Sweet's in-app inbox is always available. Connect additional surfaces for each company or disconnect them without deleting C-Sweet conversation history.
+    </MudText>
+
+    @if (!string.IsNullOrWhiteSpace(_message))
+    {
+        <MudAlert Severity="@_severity" Variant="Variant.Outlined" Class="mb-4">@_message</MudAlert>
+    }
+
+    @if (BusinessContext.IsLoading)
+    {
+        <MudProgressLinear Indeterminate="true" />
+    }
+    else if (BusinessContext.SelectedBusiness is null)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">Create or select a company before connecting an external communication surface.</MudAlert>
+    }
+    else
+    {
+        <MudText Typo="Typo.subtitle1" Class="mb-3">Settings for <strong>@BusinessContext.SelectedBusiness.Name</strong></MudText>
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudPaper Outlined="true" Class="pa-5 h-100">
+                    <MudIcon Icon="@Icons.Material.Outlined.Chat" Color="Color.Primary" Size="Size.Large" />
+                    <MudText Typo="Typo.h6" Class="mt-2">C-Sweet app</MudText>
+                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Always active</MudChip>
+                    <MudText Typo="Typo.body2" Class="mt-3">The authoritative inbox for messages, notifications, approvals, and agent activity. This surface cannot be disconnected.</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudPaper Outlined="true" Class="pa-5 h-100">
+                    <MudIcon Icon="@Icons.Material.Outlined.Forum" Color="Color.Primary" Size="Size.Large" />
+                    <MudText Typo="Typo.h6" Class="mt-2">Discord</MudText>
+                    @if (_loading)
+                    {
+                        <MudProgressLinear Indeterminate="true" Class="my-3" />
+                    }
+                    else if (_discord is null || _discord.Status == "Disconnected")
+                    {
+                        <MudChip T="string" Size="Size.Small">Not connected</MudChip>
+                        <MudText Typo="Typo.body2" Class="my-3">Authorize C-Sweet and review the server layout before any managed resources are created.</MudText>
+                        <MudButton Href="@DiscordSetupHref" Variant="Variant.Filled" Color="Color.Primary">Set up Discord</MudButton>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="@(_discord.Status == "Connected" ? Color.Success : Color.Warning)" Size="Size.Small">@_discord.Status</MudChip>
+                        <MudText Typo="Typo.body2" Class="mt-3">Server ID: @_discord.WorkspaceExternalId</MudText>
+                        <MudText Typo="Typo.body2">Mode: @_discord.WorkspaceMode</MudText>
+                        <MudStack Row="true" Class="mt-4">
+                            <MudButton Href="@DiscordSetupHref" Variant="Variant.Outlined" Color="Color.Primary">Manage setup</MudButton>
+                            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="@(() => _showDisconnect = true)">Disconnect</MudButton>
+                        </MudStack>
+                    }
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="6"><MudPaper Outlined="true" Class="pa-5"><MudText Typo="Typo.h6">Slack</MudText><MudChip T="string" Size="Size.Small">Coming soon</MudChip></MudPaper></MudItem>
+            <MudItem xs="12" md="6"><MudPaper Outlined="true" Class="pa-5"><MudText Typo="Typo.h6">WhatsApp</MudText><MudChip T="string" Size="Size.Small">Coming soon</MudChip></MudPaper></MudItem>
+        </MudGrid>
+
+        @if (_showDisconnect && _discord is not null)
+        {
+            <MudPaper Outlined="true" Class="pa-5 mt-5">
+                <MudText Typo="Typo.h6" Color="Color.Error">Disconnect Discord?</MudText>
+                <MudText Typo="Typo.body2" Class="my-3">New Discord messages will stop immediately. Managed channels and roles will be archived, webhooks revoked, linked identities disconnected, and C-Sweet conversation history preserved.</MudText>
+                <MudCheckBox T="bool" @bind-Value="_disconnectConfirmed" Label="I understand that Discord communication will stop" />
+                <MudStack Row="true" Class="mt-3">
+                    <MudButton Variant="Variant.Text" OnClick="CancelDisconnect">Cancel</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Error" Disabled="@(!_disconnectConfirmed || _busy)" OnClick="DisconnectAsync">Confirm disconnect</MudButton>
+                </MudStack>
+            </MudPaper>
+        }
+    }
+</MudContainer>
+
+@code {
+    private CommunicationConnectionResponse? _discord;
+    private bool _loading = true, _busy, _showDisconnect, _disconnectConfirmed;
+    private string? _message;
+    private Severity _severity = Severity.Info;
+    private Guid? OrganizationId => BusinessContext.SelectedBusiness?.Id;
+    private string DiscordSetupHref => $"/organizations/{OrganizationId}/communications";
+
+    protected override async Task OnInitializedAsync()
+    {
+        BusinessContext.Changed += OnBusinessChanged;
+        await BusinessContext.InitializeAsync();
+        await LoadAsync();
+    }
+    private async Task LoadAsync()
+    {
+        _loading = true; _discord = null;
+        if (OrganizationId.HasValue)
+        {
+            var response = await Http.GetAsync($"api/organizations/{OrganizationId}/communications/discord");
+            if (response.IsSuccessStatusCode) _discord = await response.Content.ReadFromJsonAsync<CommunicationConnectionResponse>();
+        }
+        _loading = false;
+    }
+    private void OnBusinessChanged() => _ = InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+    private void CancelDisconnect() { _showDisconnect = false; _disconnectConfirmed = false; }
+    private async Task DisconnectAsync()
+    {
+        if (!OrganizationId.HasValue) return;
+        _busy = true;
+        var response = await Http.DeleteAsync($"api/organizations/{OrganizationId}/communications/discord");
+        _severity = response.IsSuccessStatusCode ? Severity.Success : Severity.Error;
+        _message = response.IsSuccessStatusCode ? "Discord disconnection was queued. History remains available in C-Sweet." : await response.Content.ReadAsStringAsync();
+        CancelDisconnect(); _busy = false;
+        await LoadAsync();
+    }
+    public void Dispose() => BusinessContext.Changed -= OnBusinessChanged;
+}

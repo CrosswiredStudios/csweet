@@ -15,23 +15,52 @@ public sealed class ChatTurnService(CSweetDbContext db) : IChatTurnService
 
     public async Task<ChatTurnStartResponse?> StartAsync(Guid organizationId, Guid conversationId, string message, Guid? retryOfTurnId = null, CancellationToken cancellationToken = default)
     {
+        var target = await db.CoreConversations
+            .Where(x => x.Id == conversationId && x.OrganizationId == organizationId)
+            .Select(x => x.AgentOrganizationUserId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (!target.HasValue) return null;
+        return await StartCoreAsync(organizationId, conversationId, target.Value, message, null, "InApp", null, null, retryOfTurnId, cancellationToken);
+    }
+
+    public Task<ChatTurnStartResponse?> StartForAgentAsync(
+        Guid organizationId, Guid conversationId, Guid targetAgentOrganizationUserId, string message,
+        Guid? senderOrganizationUserId = null, string sourceProvider = "InApp", string? sourceChannelExternalId = null,
+        string? idempotencyKey = null, CancellationToken cancellationToken = default) =>
+        StartCoreAsync(organizationId, conversationId, targetAgentOrganizationUserId, message, senderOrganizationUserId,
+            sourceProvider, sourceChannelExternalId, idempotencyKey, null, cancellationToken);
+
+    private async Task<ChatTurnStartResponse?> StartCoreAsync(
+        Guid organizationId, Guid conversationId, Guid targetAgentOrganizationUserId, string message,
+        Guid? senderOrganizationUserId, string sourceProvider, string? sourceChannelExternalId,
+        string? idempotencyKey, Guid? retryOfTurnId, CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(message)) return null;
         var conversation = await db.CoreConversations.SingleOrDefaultAsync(
             x => x.Id == conversationId && x.OrganizationId == organizationId, cancellationToken);
         if (conversation is null) return null;
-        if (await db.ChatTurns.AnyAsync(x => x.ConversationId == conversationId && ActiveStatuses.Contains(x.Status), cancellationToken))
-            throw new InvalidOperationException("This conversation already has an active turn.");
+        if (!await db.CoreOrganizationUsers.AnyAsync(x => x.Id == targetAgentOrganizationUserId &&
+            x.OrganizationId == organizationId && x.EmployeeType == EmployeeType.Agent && x.IsActive, cancellationToken)) return null;
+        if (idempotencyKey is not null && await db.CoreConversationMessages.AnyAsync(x => x.IdempotencyKey == idempotencyKey, cancellationToken)) return null;
+        if (await db.ChatTurns.AnyAsync(x => x.ConversationId == conversationId &&
+            x.TargetAgentOrganizationUserId == targetAgentOrganizationUserId && ActiveStatuses.Contains(x.Status), cancellationToken))
+            throw new InvalidOperationException("This employee already has an active turn in the conversation.");
 
         var now = DateTimeOffset.UtcNow;
         var turnId = Guid.NewGuid();
         var userMessage = new ConversationMessage
         {
             Id = Guid.NewGuid(), ConversationId = conversationId, ChatTurnId = turnId,
-            Role = ConversationRole.User, Content = message.Trim(), CreatedAt = now
+            Role = ConversationRole.User, Content = message.Trim(), CreatedAt = now,
+            SenderOrganizationUserId = senderOrganizationUserId,
+            CorrelationId = Guid.NewGuid(), DeliveryIntent = CommunicationDeliveryIntent.RequestResponse,
+            SourceProvider = sourceProvider, SourceChannelExternalId = sourceChannelExternalId,
+            IdempotencyKey = idempotencyKey
         };
         var turn = new ChatTurn
         {
             Id = turnId, OrganizationId = organizationId, ConversationId = conversationId,
+            TargetAgentOrganizationUserId = targetAgentOrganizationUserId,
             UserMessageId = userMessage.Id, RetryOfTurnId = retryOfTurnId, Status = ChatTurnStatus.Queued,
             CreatedAt = now, UpdatedAt = now, LastActivityAt = now
         };
@@ -72,7 +101,10 @@ public sealed class ChatTurnService(CSweetDbContext db) : IChatTurnService
         var original = await db.ChatTurns.Include(x => x.UserMessage)
             .SingleOrDefaultAsync(x => x.Id == turnId && x.OrganizationId == organizationId, cancellationToken);
         if (original is null || original.Status is not (ChatTurnStatus.Failed or ChatTurnStatus.Cancelled or ChatTurnStatus.CompletedWithWarnings)) return null;
-        return await StartAsync(organizationId, original.ConversationId, original.UserMessage!.Content, original.Id, cancellationToken);
+        return await StartCoreAsync(organizationId, original.ConversationId, original.TargetAgentOrganizationUserId,
+            original.UserMessage!.Content, original.UserMessage.SenderOrganizationUserId,
+            original.UserMessage.SourceProvider, original.UserMessage.SourceChannelExternalId,
+            null, original.Id, cancellationToken);
     }
 
     public async Task<Guid?> ClaimNextAsync(string leaseOwner, CancellationToken cancellationToken = default)
@@ -156,7 +188,10 @@ public sealed class ChatTurnService(CSweetDbContext db) : IChatTurnService
     private static ChatTurnResponse ToResponse(ChatTurn x) => new(
         x.Id, x.OrganizationId, x.ConversationId, x.UserMessageId, x.AssistantMessageId,
         x.Status.ToString(), x.Attempt, x.PartialResponse, x.ErrorCode, x.ErrorMessage,
-        x.CreatedAt, x.StartedAt, x.FirstOutputAt, x.ResponseReadyAt, x.CompletedAt, x.NextTraceSequence - 1);
+        x.CreatedAt, x.StartedAt, x.FirstOutputAt, x.ResponseReadyAt, x.CompletedAt, x.NextTraceSequence - 1)
+    {
+        TargetAgentOrganizationUserId = x.TargetAgentOrganizationUserId
+    };
 
     private static ChatTurnTraceEventResponse ToResponse(ChatTurnTraceEvent x)
     {

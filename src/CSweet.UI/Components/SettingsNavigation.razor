@@ -10,12 +10,16 @@
     <MudButton Href="/settings/security" Variant="@SecurityVariant" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Security">
         Security
     </MudButton>
+    <MudButton Href="/settings/communications" Variant="@CommunicationsVariant" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Forum">
+        Communications
+    </MudButton>
 </nav>
 
 @code {
     private Variant LlmVariant => VariantFor("/settings/llm-providers");
     private Variant AgentsVariant => VariantFor("/settings/agents");
     private Variant SecurityVariant => VariantFor("/settings/security");
+    private Variant CommunicationsVariant => VariantFor("/settings/communications");
 
     private Variant VariantFor(string path)
     {

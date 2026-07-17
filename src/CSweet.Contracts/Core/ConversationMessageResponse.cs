@@ -6,4 +6,12 @@ public sealed record ConversationMessageResponse(
     int Role,          // 0 = User, 1 = Assistant (matches ConversationRole)
     string Content,
     DateTimeOffset CreatedAt,
-    Guid? ChatTurnId = null);
+    Guid? ChatTurnId = null)
+{
+    public Guid? SenderOrganizationUserId { get; init; }
+    public Guid? ReplyToMessageId { get; init; }
+    public Guid CorrelationId { get; init; }
+    public string DeliveryIntent { get; init; } = "Inform";
+    public string SourceProvider { get; init; } = "InApp";
+    public string? SourceChannelExternalId { get; init; }
+}

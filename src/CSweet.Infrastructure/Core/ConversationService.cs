@@ -75,6 +75,10 @@ public sealed class ConversationService : IConversationService
             .Select(x => x.AgentOrganizationUser!.AgentInstallationId)
             .SingleOrDefaultAsync(cancellationToken);
 
+    public Task<Guid?> GetAgentInstallationIdForEmployeeAsync(Guid organizationUserId, CancellationToken cancellationToken = default) =>
+        _dbContext.CoreOrganizationUsers.Where(x => x.Id == organizationUserId && x.IsActive)
+            .Select(x => x.AgentInstallationId).SingleOrDefaultAsync(cancellationToken);
+
     public async Task<ConversationActionResponse> StartAsync(
         Guid organizationId,
         StartConversationRequest request,
@@ -82,7 +86,7 @@ public sealed class ConversationService : IConversationService
     {
         var agent = await _dbContext.CoreOrganizationUsers
             .SingleOrDefaultAsync(
-                x => x.Id == request.AgentOrganizationUserId && x.OrganizationId == organizationId,
+                x => x.Id == request.AgentOrganizationUserId && x.OrganizationId == organizationId && x.IsActive,
                 cancellationToken);
 
         if (agent is null)
@@ -116,10 +120,19 @@ public sealed class ConversationService : IConversationService
             OrganizationId = organizationId,
             AgentOrganizationUserId = agent.Id,
             InitiatedByOrganizationUserId = self.Id,
+            Kind = ConversationKind.DirectHumanAgent,
             Title = null,
             CreatedAt = now,
             UpdatedAt = now
         };
+        conversation.Participants.Add(new ConversationParticipant
+        {
+            Id = Guid.NewGuid(), OrganizationUserId = self.Id, Role = ConversationParticipantRole.Member, JoinedAt = now
+        });
+        conversation.Participants.Add(new ConversationParticipant
+        {
+            Id = Guid.NewGuid(), OrganizationUserId = agent.Id, Role = ConversationParticipantRole.Member, JoinedAt = now
+        });
 
         _dbContext.CoreConversations.Add(conversation);
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -152,7 +165,11 @@ public sealed class ConversationService : IConversationService
             ConversationId = conversationId,
             Role = role,
             Content = content,
-            CreatedAt = now
+            CreatedAt = now,
+            SenderOrganizationUserId = role == ConversationRole.Assistant ? conversation.AgentOrganizationUserId : conversation.InitiatedByOrganizationUserId,
+            CorrelationId = Guid.NewGuid(),
+            DeliveryIntent = role == ConversationRole.Assistant ? CommunicationDeliveryIntent.Response : CommunicationDeliveryIntent.RequestResponse,
+            SourceProvider = "InApp"
         };
 
         conversation.UpdatedAt = now;

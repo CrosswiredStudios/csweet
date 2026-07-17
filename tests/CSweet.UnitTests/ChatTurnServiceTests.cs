@@ -12,12 +12,14 @@ public sealed class ChatTurnServiceTests
     {
         await using var db = CreateDb();
         var organizationId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
         var conversation = new Conversation
         {
             Id = Guid.NewGuid(), OrganizationId = organizationId,
-            AgentOrganizationUserId = Guid.NewGuid(), InitiatedByOrganizationUserId = Guid.NewGuid(),
+            AgentOrganizationUserId = agentId, InitiatedByOrganizationUserId = Guid.NewGuid(),
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
         };
+        db.CoreOrganizationUsers.Add(CreateAgent(organizationId, agentId));
         db.CoreConversations.Add(conversation);
         await db.SaveChangesAsync();
         var service = new ChatTurnService(db);
@@ -56,12 +58,14 @@ public sealed class ChatTurnServiceTests
     {
         await using var db = CreateDb();
         var organizationId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
         var conversation = new Conversation
         {
             Id = Guid.NewGuid(), OrganizationId = organizationId,
-            AgentOrganizationUserId = Guid.NewGuid(), InitiatedByOrganizationUserId = Guid.NewGuid(),
+            AgentOrganizationUserId = agentId, InitiatedByOrganizationUserId = Guid.NewGuid(),
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
         };
+        db.CoreOrganizationUsers.Add(CreateAgent(organizationId, agentId));
         db.CoreConversations.Add(conversation);
         await db.SaveChangesAsync();
         var service = new ChatTurnService(db);
@@ -78,4 +82,15 @@ public sealed class ChatTurnServiceTests
 
     private static CSweetDbContext CreateDb() => new(new DbContextOptionsBuilder<CSweetDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+    private static OrganizationUser CreateAgent(Guid organizationId, Guid agentId) => new()
+    {
+        Id = agentId,
+        OrganizationId = organizationId,
+        DisplayName = "Test agent",
+        EmployeeType = EmployeeType.Agent,
+        PermissionLevel = OrganizationPermissionLevel.Viewer,
+        IsActive = true,
+        CreatedAt = DateTimeOffset.UtcNow
+    };
 }

@@ -16,6 +16,8 @@ public sealed class OrganizationUser
     public EmployeeType EmployeeType { get; set; }
     public OrganizationPermissionLevel PermissionLevel { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset? ArchivedAt { get; set; }
 
     // Navigation
     public Organization? Organization { get; set; }

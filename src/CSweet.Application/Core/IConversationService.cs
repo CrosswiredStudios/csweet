@@ -23,6 +23,7 @@ public interface IConversationService
         CancellationToken cancellationToken = default);
 
     Task<Guid?> GetAgentInstallationIdAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<Guid?> GetAgentInstallationIdForEmployeeAsync(Guid organizationUserId, CancellationToken cancellationToken = default);
 
     /// <summary>Creates a conversation with the given agent employee, or returns a failure.</summary>
     Task<ConversationActionResponse> StartAsync(

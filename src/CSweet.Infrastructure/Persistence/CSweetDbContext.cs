@@ -1,4 +1,5 @@
 using CSweet.Domain.Core;
+using CSweet.Domain.Communications;
 using CSweet.Domain.Planning;
 using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Auth;
@@ -55,6 +56,15 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
     public DbSet<ConversationMessage> CoreConversationMessages => Set<ConversationMessage>();
     public DbSet<ChatTurn> ChatTurns => Set<ChatTurn>();
     public DbSet<ChatTurnTraceEvent> ChatTurnTraceEvents => Set<ChatTurnTraceEvent>();
+    public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
+    public DbSet<CommunicationConnection> CommunicationConnections => Set<CommunicationConnection>();
+    public DbSet<ManagedExternalResource> ManagedExternalResources => Set<ManagedExternalResource>();
+    public DbSet<ExternalIdentityLink> ExternalIdentityLinks => Set<ExternalIdentityLink>();
+    public DbSet<ExternalIdentityLinkCode> ExternalIdentityLinkCodes => Set<ExternalIdentityLinkCode>();
+    public DbSet<ExternalMessageReference> ExternalMessageReferences => Set<ExternalMessageReference>();
+    public DbSet<CommunicationDelivery> CommunicationDeliveries => Set<CommunicationDelivery>();
+    public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
+    public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
     public DbSet<MemoryCaptureOutboxItem> MemoryCaptureOutbox => Set<MemoryCaptureOutboxItem>();
     public DbSet<AgentMemoryNamespaceRegistration> AgentMemoryNamespaces => Set<AgentMemoryNamespaceRegistration>();
     public DbSet<AgentMemoryRecallUse> AgentMemoryRecallUses => Set<AgentMemoryRecallUse>();

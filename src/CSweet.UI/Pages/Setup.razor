@@ -80,7 +80,8 @@
         new(2, "llm-provider", "LLM Provider", "Chat model"),
         new(3, "model-capability-test", "Capability Test", "Provider checks"),
         new(4, "email-delivery", "Email Delivery", "Optional"),
-        new(5, "finish", "Finish", "Unlock app")
+        new(5, "communications", "Communications", "Optional"),
+        new(6, "finish", "Finish", "Unlock app")
     ];
 
     private SetupStatusResponse? _status;
@@ -100,6 +101,9 @@
     private string _smtpFromAddress = string.Empty;
     private string _smtpFromName = "C-Sweet";
     private string _publicAppUrl = string.Empty;
+    private CommunicationSetupOptionsResponse? _communicationOptions;
+    private string _selectedCommunicationAdapter = "builtin";
+    private bool _discordAuthorizationConfirmed;
 
     private Guid? _providerProfileId;
     private LlmProviderType _providerType = LlmProviderType.LmStudio;
@@ -168,6 +172,7 @@
             _status = await SetupApi.GetStatusAsync();
             _profiles = await LlmProviderApi.ListAsync();
             _emailSettings = await Http.GetFromJsonAsync<EmailDeliverySettingsResponse>("api/setup/email-delivery");
+            _communicationOptions = await Http.GetFromJsonAsync<CommunicationSetupOptionsResponse>("api/setup/communications/options");
             ApplyEmailSettings();
             _providerProfileId ??= _status.DefaultChatProviderId ?? _profiles.LastOrDefault()?.Id;
 
@@ -198,6 +203,7 @@
     private void BackToProvider() => SelectStep("llm-provider");
     private void BackToCapabilityTest() => SelectStep("model-capability-test");
     private void BackToEmailDelivery() => SelectStep("email-delivery");
+    private void BackToCommunications() => SelectStep("communications");
 
     private RenderFragment RenderActiveStep() => _activeStepKey switch
     {
@@ -205,6 +211,7 @@
         "llm-provider" => LlmProviderStep,
         "model-capability-test" => CapabilityTestStep,
         "email-delivery" => EmailDeliveryStep,
+        "communications" => CommunicationsStep,
         "finish" => FinishStep,
         _ => WelcomeStep
     };
@@ -358,9 +365,82 @@
         </MudStack>
     </div>;
 
-    private RenderFragment FinishStep => @<div>
+    private RenderFragment CommunicationsStep => @<div>
         <div class="setup-step-heading">
             <MudText Typo="Typo.overline" Color="Color.Primary">Step 5</MudText>
+            <MudText Typo="Typo.h5">How should C-Sweet reach you? <MudChip T="string" Size="Size.Small">Optional</MudChip></MudText>
+            <MudText Color="Color.Secondary">
+                C-Sweet includes its own secure inbox and chat in the web and companion apps. You can also connect another communication surface and let C-Sweet create and maintain the workspace for you.
+            </MudText>
+        </div>
+
+        <MudGrid Class="mb-5">
+            <MudItem xs="12" md="4">
+                <MudPaper Outlined="true" Class="pa-4 h-100">
+                    <MudIcon Icon="@Icons.Material.Outlined.Chat" Color="Color.Primary" Size="Size.Large" />
+                    <MudText Typo="Typo.h6" Class="mt-2">C-Sweet app</MudText>
+                    <MudText Typo="Typo.body2">Always available. Conversations, notifications, and approvals stay synchronized here.</MudText>
+                    <MudButton Variant="@(_selectedCommunicationAdapter == "builtin" ? Variant.Filled : Variant.Outlined)" Color="Color.Primary"
+                               OnClick="@(() => _selectedCommunicationAdapter = "builtin")" Class="mt-3">Use built-in messaging</MudButton>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudPaper Outlined="true" Class="pa-4 h-100">
+                    <MudIcon Icon="@Icons.Material.Outlined.Forum" Color="Color.Primary" Size="Size.Large" />
+                    <MudText Typo="Typo.h6" Class="mt-2">Discord</MudText>
+                    <MudText Typo="Typo.body2">C-Sweet can build employee, team, project, approval, and archive channels and keep them synchronized.</MudText>
+                    <MudButton Variant="@(_selectedCommunicationAdapter == "discord" ? Variant.Filled : Variant.Outlined)" Color="Color.Primary"
+                               OnClick="@(() => _selectedCommunicationAdapter = "discord")" Class="mt-3">Set up Discord</MudButton>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudPaper Outlined="true" Class="pa-4 h-100">
+                    <MudText Typo="Typo.h6">Slack &amp; WhatsApp</MudText>
+                    <MudText Typo="Typo.body2">These adapters are planned but are not available in this release.</MudText>
+                    <MudChip T="string" Size="Size.Small" Class="mt-3">Coming soon</MudChip>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        @if (_selectedCommunicationAdapter == "discord")
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
+                <strong>What happens:</strong> you sign in to Discord, choose a server where you can manage channels and roles, and approve only the permissions C-Sweet needs. C-Sweet never gives your instance the official bot token and never requests Administrator access.
+            </MudAlert>
+            <MudText Typo="Typo.h6">Connect Discord</MudText>
+            <ol>
+                <li>Use a Discord account that can manage the server you want to connect.</li>
+                <li>Click the authorization button and sign in to Discord in the new window.</li>
+                <li>Select the server, review the requested channel, role, webhook, message, and thread permissions, then authorize.</li>
+                <li>Return here after Discord confirms the connection.</li>
+            </ol>
+            @if (_communicationOptions?.DiscordIsConfigured == true)
+            {
+                <MudButton Href="@_communicationOptions.DiscordInstallUrl" Target="_blank" Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Outlined.OpenInNew">Sign in to Discord and authorize C-Sweet</MudButton>
+                <MudCheckBox T="bool" @bind-Value="_discordAuthorizationConfirmed" Class="mt-3"
+                             Label="Discord confirmed that C-Sweet was authorized" />
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                    The administrator must configure <code>Communications:Discord:InstallUrl</code> before Discord authorization is available. You may skip this step and connect it later under Communications.
+                </MudAlert>
+            }
+        }
+
+        @StepMessage()
+        <MudStack Row="true" Class="setup-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToEmailDelivery">Back</MudButton>
+            <MudButton Variant="Variant.Text" Disabled="@_isBusy" OnClick="SkipCommunicationsAsync">Skip for now</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_isBusy || (_selectedCommunicationAdapter == "discord" && !_discordAuthorizationConfirmed))"
+                       OnClick="CompleteCommunicationsAsync">Continue</MudButton>
+        </MudStack>
+    </div>;
+
+    private RenderFragment FinishStep => @<div>
+        <div class="setup-step-heading">
+            <MudText Typo="Typo.overline" Color="Color.Primary">Step 6</MudText>
             <MudText Typo="Typo.h5">Finish Setup</MudText>
             <MudText Color="Color.Secondary">Complete first-run setup and unlock business onboarding.</MudText>
         </div>
@@ -370,11 +450,12 @@
             @CapabilityRow("Default chat provider selected", _status?.DefaultChatProviderId is not null, required: true)
             @CapabilityRow("Last capability test had chat success", IsStepComplete("model-capability-test"), required: true)
             @CapabilityRow("Email delivery tested", _emailSettings?.IsReady, required: false)
+            @CapabilityRow("Communication surface selected", IsStepComplete("communications"), required: false)
         </div>
 
         @StepMessage()
         <MudStack Row="true" Class="setup-actions">
-            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToEmailDelivery">Back</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToCommunications">Back</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Success" Disabled="@(_isBusy || !CanFinish)" OnClick="FinishSetupAsync">
                 @(_isBusy ? "Finishing..." : "Complete Setup")
             </MudButton>
@@ -581,7 +662,7 @@
                     await AuthenticationApi.ResendConfirmationAsync(AuthSession.Current.Email);
                     _stepMessage += " A verification email was also sent.";
                 }
-                await CompleteStepAsync("email-delivery", "finish");
+                await CompleteStepAsync("email-delivery", "communications");
             }
         }
         finally { _isBusy = false; }
@@ -589,8 +670,23 @@
 
     private async Task SkipEmailDeliveryAsync()
     {
-        await CompleteStepAsync("email-delivery", "finish");
+        await CompleteStepAsync("email-delivery", "communications");
         _stepMessage = "Email delivery skipped. Root recovery codes remain available, and SMTP can be configured later.";
+    }
+
+    private async Task CompleteCommunicationsAsync()
+    {
+        await CompleteStepAsync("communications", "finish");
+        _stepMessage = _selectedCommunicationAdapter == "discord"
+            ? "Discord authorization recorded. The connection will be available from the Communications workspace."
+            : "C-Sweet's built-in messaging will be used. You can add Discord later.";
+    }
+
+    private async Task SkipCommunicationsAsync()
+    {
+        _selectedCommunicationAdapter = "builtin";
+        await CompleteStepAsync("communications", "finish");
+        _stepMessage = "Using C-Sweet messaging for now. Additional surfaces can be connected later.";
     }
 
     private async Task FinishSetupAsync()

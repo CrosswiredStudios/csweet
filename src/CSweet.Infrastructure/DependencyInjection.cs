@@ -1,4 +1,5 @@
 using CSweet.Application.Core;
+using CSweet.Application.Communications;
 using CSweet.Application.Auth;
 using CSweet.Application.BusinessOnboarding;
 using CSweet.Application.Llm;
@@ -9,6 +10,7 @@ using CSweet.AI.Providers;
 using CSweet.Infrastructure.BusinessOnboarding;
 using CSweet.Infrastructure.Auth;
 using CSweet.Infrastructure.Core;
+using CSweet.Infrastructure.Communications;
 using CSweet.Infrastructure.Llm;
 using CSweet.Infrastructure.Persistence;
 using CSweet.Infrastructure.Planning;
@@ -21,6 +23,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using CSweet.Memory;
+using CSweet.Communications.Abstractions;
 
 namespace CSweet.Infrastructure;
 
@@ -148,6 +151,17 @@ public static class DependencyInjection
         builder.Services.AddScoped<IOrganizationUserService, OrganizationUserService>();
         builder.Services.AddScoped<IConversationService, ConversationService>();
         builder.Services.AddScoped<IChatTurnService, ChatTurnService>();
+        builder.Services.AddScoped<ICommunicationWorkspaceService, CommunicationWorkspaceService>();
+        builder.Services.AddScoped<ICommunicationRouter, CommunicationRouter>();
+        builder.Services.AddScoped<INotificationService, NotificationService>();
+        builder.Services.AddHttpClient<ICommunicationRelayClient, HttpCommunicationRelayClient>(client =>
+        {
+            var endpoint = builder.Configuration["Communications:Relay:BaseUrl"]
+                ?? builder.Configuration["services:discord-relay:http:0"]
+                ?? (builder.Environment.IsDevelopment() ? "http://localhost:5190/" : "https://discord-relay.csweet.ai/");
+            client.BaseAddress = new Uri(endpoint.EndsWith('/') ? endpoint : endpoint + "/");
+            client.Timeout = TimeSpan.FromSeconds(60);
+        });
         if (builder.Environment.IsEnvironment("Testing"))
         {
             builder.Services.TryAddSingleton<IMemoryStore>(_ => new SqliteMemoryStore(
