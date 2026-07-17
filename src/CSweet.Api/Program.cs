@@ -56,6 +56,11 @@ builder.Services.ConfigureApplicationCookie(options =>
     };
 });
 var authorization = builder.Services.AddAuthorizationBuilder();
+authorization.AddPolicy("PluginAdministration", policy =>
+{
+    if (builder.Environment.IsEnvironment("Testing")) policy.RequireAssertion(_ => true);
+    else policy.RequireRole(CSweet.Infrastructure.Auth.AuthenticationService.AdministratorRole);
+});
 authorization.SetFallbackPolicy(builder.Environment.IsEnvironment("Testing")
     ? new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
         .RequireAssertion(_ => true)

@@ -482,14 +482,14 @@ public sealed class AgentRuntimeManager(
                     settings.DotNetRuntimeBaseImage,
                     package.TargetFramework),
                 package.PackagePath, entryAssembly,
-                options.Value.BrokerEndpoint, token, "/app/csweet-agent.json", options.Value.DockerNetworkName,
+                options.Value.BrokerEndpoint, token, "/app/csweet-plugin.json", $"{options.Value.DockerNetworkName}-{instance.Id:N}",
                 installation.Grant.MemoryMb, installation.Grant.CpuPercent, settings.DefaultContainerPidsLimit,
                 installation.Schedule.MaxRuntimeSeconds,
-                package.PluginKind == PluginKind.CommunicationProvider ? $"csweet-plugin-data-{installation.Id:N}" : null), startTimeout.Token);
+                null, options.Value.BrokerGatewayContainer), startTimeout.Token);
             instance.ContainerId = status.ContainerId;
             instance.RuntimeDeadlineAt = now.AddSeconds(installation.Schedule.MaxRuntimeSeconds);
             Transition(instance, AgentRuntimeStatus.WaitingForBrokerRegistration, DateTimeOffset.UtcNow,
-                $"Container {status.ContainerId} started on network {options.Value.DockerNetworkName}; awaiting broker registration at {options.Value.BrokerEndpoint}.");
+                $"Container {status.ContainerId} started on isolated runtime network; awaiting broker registration at {options.Value.BrokerEndpoint}.");
             AgentRuntimeMetrics.ContainerStarted();
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

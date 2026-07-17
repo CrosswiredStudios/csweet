@@ -10,7 +10,7 @@ public sealed class PluginOrganizationGrantService(CSweetDbContext db) : IPlugin
     public async Task GrantAsync(Guid installationId, Guid organizationId, CancellationToken cancellationToken = default)
     {
         var valid = await db.AgentInstallations.AnyAsync(x => x.Id == installationId && x.IsEnabled &&
-            x.Scope == PluginInstallationScope.System && x.PackageVersion!.PluginKind == PluginKind.CommunicationProvider,
+            x.Scope == PluginInstallationScope.System && x.PackageVersion!.PluginKind == PluginKind.Service,
             cancellationToken);
         if (!valid) throw new InvalidOperationException("An enabled system communication plugin is required.");
         if (!await db.CoreOrganizations.AnyAsync(x => x.Id == organizationId, cancellationToken))

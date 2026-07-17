@@ -17,6 +17,7 @@ public sealed class DockerAgentContainerRunner(
     {
         ValidateStartRequest(request);
         await EnsureNetworkAsync(request.NetworkName, cancellationToken);
+        await ConnectBrokerGatewayAsync(request, cancellationToken);
         var cpus = (request.CpuPercent / 100m).ToString("0.##", CultureInfo.InvariantCulture);
         var args = new List<string>
         {
@@ -154,12 +155,25 @@ public sealed class DockerAgentContainerRunner(
         }
 
         logger.LogWarning("Docker network {NetworkName} was missing; creating a bridge network for agent runtimes.", networkName);
-        var create = await docker.ExecuteAsync(["network", "create", "--driver", "bridge", networkName], cancellationToken);
+        var create = await docker.ExecuteAsync(["network", "create", "--driver", "bridge", "--internal", networkName], cancellationToken);
         if (create.ExitCode != 0 && !create.StandardError.Contains("already exists", StringComparison.OrdinalIgnoreCase))
         {
             throw new AgentContainerException(
                 $"Docker failed to create agent runtime network '{networkName}': {SanitizeError(create.StandardError)}");
         }
+    }
+
+    private async Task ConnectBrokerGatewayAsync(AgentContainerStartRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.BrokerGatewayContainer) ||
+            request.BrokerGatewayContainer.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')))
+            throw new AgentContainerException("A valid broker gateway container is required for the isolated runtime network.");
+        var brokerHost = new Uri(request.BrokerEndpoint).Host;
+        var connect = await docker.ExecuteAsync([
+            "network", "connect", "--alias", brokerHost, request.NetworkName, request.BrokerGatewayContainer
+        ], cancellationToken);
+        if (connect.ExitCode != 0 && !connect.StandardError.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+            throw new AgentContainerException($"Docker could not attach the broker gateway to the isolated runtime network: {SanitizeError(connect.StandardError)}");
     }
 
     private static void ValidateStartRequest(AgentContainerStartRequest request)

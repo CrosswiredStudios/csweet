@@ -7,12 +7,24 @@ public static class PluginManagementEndpoints
 {
     public static IEndpointRouteBuilder MapPluginManagementEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var group = endpoints.MapGroup("/api/plugins");
+        var group = endpoints.MapGroup("/api/plugins")
+            .RequireAuthorization("PluginAdministration");
 
         group.MapPost("/imports/preview", async (PreviewAgentImportRequest request,
             IPluginImportService imports, CancellationToken cancellationToken) =>
         {
             try { return Results.Ok(await imports.PreviewAsync(request, cancellationToken)); }
+            catch (AgentImportPreviewException exception) { return Results.BadRequest(new { error = exception.Message }); }
+        }).RequireRateLimiting(AgentRateLimiting.ImportPolicy);
+
+        group.MapPost("/imports/preview/archive", async (IFormFile file,
+            IPluginArchiveImportService imports, CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await using var stream = file.OpenReadStream();
+                return Results.Ok(await imports.PreviewSourceArchiveAsync(stream, file.FileName, cancellationToken));
+            }
             catch (AgentImportPreviewException exception) { return Results.BadRequest(new { error = exception.Message }); }
         }).RequireRateLimiting(AgentRateLimiting.ImportPolicy);
 
@@ -37,6 +49,12 @@ public static class PluginManagementEndpoints
         group.MapPost("/installations/{installationId:guid}/update", async (Guid installationId,
             UpdateAgentInstallationRequest request, IPluginInstallationService installations, CancellationToken cancellationToken) =>
             Results.Ok(await installations.UpdateAsync(installationId, request, cancellationToken)));
+        group.MapPost("/installations/{stagedRevisionId:guid}/update/approve", async (Guid stagedRevisionId,
+            InstallAgentRequest request, IPluginInstallationService installations, CancellationToken cancellationToken) =>
+        {
+            try { return Results.Ok(await installations.ApproveUpdateAsync(stagedRevisionId, request, cancellationToken)); }
+            catch (AgentInstallationException exception) { return Results.BadRequest(new { error = exception.Message }); }
+        }).RequireRateLimiting(AgentRateLimiting.BuildPolicy);
         group.MapGet("/installations/{installationId:guid}/runs", async (Guid installationId,
             IPluginInstallationService installations, CancellationToken cancellationToken) =>
             Results.Ok(await installations.ListRunsAsync(installationId, cancellationToken)));

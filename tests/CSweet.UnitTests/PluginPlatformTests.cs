@@ -16,24 +16,22 @@ namespace CSweet.UnitTests;
 public sealed class PluginPlatformTests
 {
     [Fact]
-    public void ManifestReader_DefaultsLegacyManifestToAgent()
+    public void ManifestReader_RejectsLegacyManifest()
     {
         var manifest = """{"id":"com.example.agent","name":"Example","version":"1.0.0"}"""u8.ToArray();
 
-        var result = new PluginManifestReader().Read(manifest, "csweet-agent.json");
-
-        Assert.Equal("agent", result.Kind);
-        Assert.Equal("csweet-agent.json", result.ManifestFileName);
+        Assert.Throws<System.Text.Json.JsonException>(() =>
+            new PluginManifestReader().Read(manifest, "csweet-agent.json"));
     }
 
     [Fact]
-    public void ManifestReader_ReadsCommunicationProviderKind()
+    public void ManifestReader_ReadsServiceKind()
     {
-        var manifest = """{"kind":"communication-provider","id":"com.example.chat","name":"Chat","version":"1.0.0"}"""u8.ToArray();
+        var manifest = """{"manifestVersion":"1.0","kind":"service","id":"com.example.chat","name":"Chat","version":"1.0.0"}"""u8.ToArray();
 
         var result = new PluginManifestReader().Read(manifest, "csweet-plugin.json");
 
-        Assert.Equal("communication-provider", result.Kind);
+        Assert.Equal("service", result.Kind);
     }
 
     [Fact]

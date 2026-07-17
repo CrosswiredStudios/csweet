@@ -1,5 +1,7 @@
 namespace CSweet.Contracts.Agents;
 
+using CSweet.Contracts.Plugins;
+
 public sealed record AgentImportPreviewResponse(
     Guid ImportId,
     string RepositoryUrl,
@@ -23,6 +25,7 @@ public sealed record AgentImportPreviewResponse(
     string Status)
 {
     public string PluginKind { get; init; } = "Agent";
-    public string ManifestFileName { get; init; } = "csweet-agent.json";
+    public string ManifestFileName { get; init; } = "csweet-plugin.json";
     public IReadOnlyList<string> RequestedCapabilities { get; init; } = [];
+    public PluginWebAccess WebAccess { get; init; } = new();
 }

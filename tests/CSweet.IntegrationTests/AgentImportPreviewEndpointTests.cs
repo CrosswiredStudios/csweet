@@ -234,6 +234,7 @@ public class AgentImportPreviewEndpointTests
         private static readonly byte[] Manifest = Encoding.UTF8.GetBytes("""
             {
               "manifestVersion": "1.0",
+              "kind": "agent",
               "id": "com.example.research-agent",
               "name": "Research Agent",
               "version": "1.2.3",
@@ -245,7 +246,13 @@ public class AgentImportPreviewEndpointTests
                 "defaultActivationMode": "Periodic"
               },
               "protocol": { "minimumVersion": "1.0", "maximumVersion": "1.x" },
-              "capabilities": ["research.execute.v1"]
+              "provides": [{ "name": "research.execute.v1" }],
+              "requires": [],
+              "events": { "publishes": [], "subscribes": [] },
+              "configuration": [],
+              "credentials": [],
+              "webAccess": { "mode": "None", "rules": [] },
+              "ui": []
             }
             """);
 

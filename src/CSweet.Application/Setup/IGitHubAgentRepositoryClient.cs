@@ -24,7 +24,7 @@ public interface IGitHubAgentRepositoryClient
         string repositoryName,
         string commitSha,
         CancellationToken cancellationToken) =>
-        new("csweet-agent.json", await GetRootManifestAsync(
+        new("csweet-plugin.json", await GetRootManifestAsync(
             repositoryOwner, repositoryName, commitSha, cancellationToken));
 }
 

@@ -10,6 +10,7 @@ public interface IPluginInstallationService
     Task<AgentInstallationResponse> DisableAsync(Guid installationId, CancellationToken cancellationToken = default);
     Task<AgentInstallationResponse> EnableAsync(Guid installationId, CancellationToken cancellationToken = default);
     Task<AgentInstallationResponse> UpdateAsync(Guid installationId, UpdateAgentInstallationRequest request, CancellationToken cancellationToken = default);
+    Task<AgentInstallationResponse> ApproveUpdateAsync(Guid stagedRevisionId, InstallAgentRequest request, CancellationToken cancellationToken = default);
     Task<RemoveAgentInstallationResponse> RemoveAsync(Guid installationId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AgentRuntimeRunResponse>> ListRunsAsync(Guid installationId, CancellationToken cancellationToken = default);
     Task<AgentBuildLogResponse?> GetBuildLogAsync(Guid installationId, CancellationToken cancellationToken = default);

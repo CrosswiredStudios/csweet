@@ -11,6 +11,7 @@ public sealed class AgentContainerRunnerTests
     {
         var docker = new FakeDockerCommandExecutor(
             new DockerCommandResult(0, "[]", string.Empty),
+            new DockerCommandResult(0, string.Empty, string.Empty),
             new DockerCommandResult(0, "container-id\n", string.Empty),
             new DockerCommandResult(0, InspectJson, string.Empty));
         var runner = new DockerAgentContainerRunner(docker, NullLogger<DockerAgentContainerRunner>.Instance);
@@ -19,7 +20,8 @@ public sealed class AgentContainerRunnerTests
 
         Assert.Equal(AgentContainerState.Running, status.State);
         Assert.Equal(["network", "inspect", "csweet-broker"], docker.Commands[0]);
-        var args = docker.Commands[1];
+        Assert.Equal(["network", "connect", "--alias", "agenthost", "csweet-broker", "agenthost"], docker.Commands[1]);
+        var args = docker.Commands[2];
         Assert.Contains("--read-only", args);
         Assert.Contains("ALL", args);
         Assert.Contains("no-new-privileges=true", args);
@@ -41,14 +43,16 @@ public sealed class AgentContainerRunnerTests
         var docker = new FakeDockerCommandExecutor(
             new DockerCommandResult(1, string.Empty, "network csweet-broker not found"),
             new DockerCommandResult(0, "network-id", string.Empty),
+            new DockerCommandResult(0, string.Empty, string.Empty),
             new DockerCommandResult(0, "container-id\n", string.Empty),
             new DockerCommandResult(0, InspectJson, string.Empty));
         var runner = new DockerAgentContainerRunner(docker, NullLogger<DockerAgentContainerRunner>.Instance);
 
         await runner.StartAsync(CreateRequest());
 
-        Assert.Equal(["network", "create", "--driver", "bridge", "csweet-broker"], docker.Commands[1]);
-        Assert.Equal("run", docker.Commands[2][0]);
+        Assert.Equal(["network", "create", "--driver", "bridge", "--internal", "csweet-broker"], docker.Commands[1]);
+        Assert.Equal(["network", "connect", "--alias", "agenthost", "csweet-broker", "agenthost"], docker.Commands[2]);
+        Assert.Equal("run", docker.Commands[3][0]);
     }
 
     [Fact]
@@ -103,7 +107,7 @@ public sealed class AgentContainerRunnerTests
         "com.example.agent", "business-1",
         "csweet-agent-test", "mcr.microsoft.com/dotnet/runtime:9.0",
         "C:\\packages\\agent", "Example.Agent.dll", "http://agenthost:8080", "bounded-token",
-        "/app/csweet-agent.json", "csweet-broker", 512, 50, 100, 600);
+        "/app/csweet-plugin.json", "csweet-broker", 512, 50, 100, 600);
 
     private const string InspectJson = """
         {"Id":"container-id","Name":"/csweet-agent-test","State":{"Status":"running","ExitCode":0,"StartedAt":"2026-07-14T01:02:03Z","FinishedAt":"0001-01-01T00:00:00Z","Error":""}}

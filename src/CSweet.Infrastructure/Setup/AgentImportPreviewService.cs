@@ -2,9 +2,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using CSweet.Agent.Contracts.Packaging;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Agents;
+using CSweet.Contracts.Plugins;
 using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -69,16 +69,16 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
             throw new AgentImportPreviewException($"Plugin manifest is not valid: {exception.Message}", exception);
         }
 
-        AgentManifest manifest;
+        PluginManifest manifest;
         try
         {
-            manifest = JsonSerializer.Deserialize<AgentManifest>(manifestBytes, SerializerOptions)
-                ?? throw new AgentImportPreviewException("Agent manifest is empty.");
+            manifest = JsonSerializer.Deserialize<PluginManifest>(manifestBytes, SerializerOptions)
+                ?? throw new AgentImportPreviewException("Plugin manifest is empty.");
         }
         catch (JsonException exception)
         {
             throw new AgentImportPreviewException(
-                $"Agent manifest is not valid JSON: {exception.Message}",
+                $"Plugin manifest is not valid JSON: {exception.Message}",
                 exception);
         }
 
@@ -163,11 +163,11 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
     private static PluginKind ParsePluginKind(string value) => value.ToLowerInvariant() switch
     {
         "agent" => PluginKind.Agent,
-        "communication-provider" => PluginKind.CommunicationProvider,
+        "service" => PluginKind.Service,
         _ => throw new AgentImportPreviewException($"Unsupported plugin kind '{value}'.")
     };
 
-    private static void ValidateManifest(AgentManifest manifest)
+    public static void ValidateManifest(PluginManifest manifest)
     {
         var errors = new List<string>();
         AddRequiredIdentifierError(manifest.Id, "id", errors);
@@ -175,7 +175,7 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
 
         if (string.IsNullOrWhiteSpace(manifest.Version) || !SemanticVersionRegex().IsMatch(manifest.Version))
         {
-            errors.Add("Agent manifest version must be a semantic version such as 1.2.3.");
+            errors.Add("Plugin manifest version must be a semantic version such as 1.2.3.");
         }
 
         if (manifest.Publisher is null)
@@ -196,7 +196,7 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
         {
             if (!string.Equals(manifest.Runtime.Type, "dotnet-project", StringComparison.OrdinalIgnoreCase))
             {
-                errors.Add("Imported GitHub agents must use runtime.type 'dotnet-project'.");
+                errors.Add("Imported GitHub plugins must use runtime.type 'dotnet-project'.");
             }
 
             ValidateProjectPath(manifest.Runtime.ProjectPath, errors);
@@ -226,11 +226,11 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
             errors.Add("Agent manifest protocol minimumVersion and maximumVersion are required.");
         }
 
-        AddListError(manifest.Capabilities, "capabilities", errors);
-        AddListError(manifest.RequestedSubscriptions, "requestedSubscriptions", errors);
-        AddListError(manifest.RequestedPublications, "requestedPublications", errors);
-        AddListError(manifest.RequestedPermissions, "requestedPermissions", errors);
-        AddListError(manifest.RequestedNetworkAccess, "requestedNetworkAccess", errors);
+        AddListError(manifest.Provides.Select(x => x.Name).ToArray(), "provides", errors);
+        AddListError(manifest.Requires.Select(x => x.Name).ToArray(), "requires", errors);
+        AddListError(manifest.Events.Subscribes, "events.subscribes", errors);
+        AddListError(manifest.Events.Publishes, "events.publishes", errors);
+        ValidateWebAccess(manifest, errors);
 
         if (errors.Count > 0)
         {
@@ -257,28 +257,30 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
         }
     }
 
-    private static IReadOnlyList<AgentManifestWarningResponse> CreateWarnings(AgentManifest manifest)
+    private static IReadOnlyList<AgentManifestWarningResponse> CreateWarnings(PluginManifest manifest)
     {
         var warnings = new List<AgentManifestWarningResponse>();
-        if (manifest.RequestedNetworkAccess.Count > 0)
+        if (manifest.WebAccess.Mode != PluginWebAccessMode.None)
         {
             warnings.Add(new AgentManifestWarningResponse(
                 "network_access_requested",
-                "This agent requests network access. Access remains denied until explicitly approved."));
+                manifest.WebAccess.Mode == PluginWebAccessMode.AllPublic
+                    ? "This plugin requests broker-proxied access to the entire public web and requires a separate high-risk acknowledgement."
+                    : "This plugin requests broker-proxied access to specific external destinations."));
         }
 
-        if (manifest.RequestedPermissions.Count > 0)
+        if (manifest.Requires.Count > 0)
         {
             warnings.Add(new AgentManifestWarningResponse(
-                "permissions_requested",
-                "Requested permissions are declarations only and must be approved during installation."));
+                "capabilities_requested",
+                "Required capabilities are declarations only and must be approved during installation."));
         }
 
         if (manifest.Runtime.DefaultActivationMode == "AlwaysOn")
         {
             warnings.Add(new AgentManifestWarningResponse(
                 "always_on_requested",
-                "Always-on activation for community agents is subject to global policy."));
+                "Always-on activation for community plugins is subject to global policy."));
         }
 
         return warnings;
@@ -287,7 +289,7 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
     private static AgentImportPreviewResponse ToResponse(
         AgentPackageVersion version,
         AgentPackageSource source,
-        AgentManifest manifest,
+        PluginManifest manifest,
         IReadOnlyList<AgentManifestWarningResponse> warnings) =>
         new AgentImportPreviewResponse(
             version.Id,
@@ -303,34 +305,84 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
             manifest.Runtime.ProjectPath,
             manifest.Runtime.TargetFramework,
             manifest.Runtime.DefaultActivationMode,
-            manifest.Capabilities,
-            manifest.RequestedSubscriptions,
-            manifest.RequestedPublications,
-            manifest.RequestedPermissions,
-            manifest.RequestedNetworkAccess,
+            manifest.Provides.Select(x => x.Name).ToArray(),
+            manifest.Events.Subscribes,
+            manifest.Events.Publishes,
+            [],
+            WebGrantTokens(manifest),
             warnings,
             version.Status.ToString())
         {
             PluginKind = version.PluginKind.ToString(),
             ManifestFileName = version.ManifestFileName,
-            RequestedCapabilities = ReadRequestedCapabilities(version.ManifestJson)
+            RequestedCapabilities = manifest.Requires.Select(x => x.Name).ToArray(),
+            WebAccess = manifest.WebAccess
         };
 
-    private static IReadOnlyList<string> ReadRequestedCapabilities(string manifestJson)
+    public static IReadOnlyList<string> WebGrantTokens(PluginManifest manifest) => manifest.WebAccess.Mode switch
     {
-        using var document = JsonDocument.Parse(manifestJson);
-        return document.RootElement.TryGetProperty("requestedCapabilities", out var value) &&
-               value.ValueKind == JsonValueKind.Array
-            ? value.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String)
-                .Select(x => x.GetString()!).Distinct(StringComparer.Ordinal).ToArray()
-            : [];
+        PluginWebAccessMode.None => [],
+        PluginWebAccessMode.AllPublic => ["all-public"],
+        _ => manifest.WebAccess.Rules.Select(WebGrantToken).ToArray()
+    };
+
+    public static string WebGrantToken(PluginWebAccessRule rule)
+    {
+        var port = rule.Port is null ? string.Empty : $":{rule.Port}";
+        var methods = string.Join(',', rule.Methods.Select(x => x.ToUpperInvariant()).Order(StringComparer.Ordinal));
+        return $"{rule.Protocol.ToLowerInvariant()}|{rule.Scheme.ToLowerInvariant()}://{rule.Host.ToLowerInvariant()}{port}{rule.PathPrefix}|{methods}|{rule.Credential ?? string.Empty}";
+    }
+
+    private static void ValidateWebAccess(PluginManifest manifest, List<string> errors)
+    {
+        if (manifest.WebAccess.Mode == PluginWebAccessMode.None && manifest.WebAccess.Rules.Count > 0)
+            errors.Add("webAccess.rules must be empty when mode is None.");
+        if (manifest.WebAccess.Mode == PluginWebAccessMode.Allowlist && manifest.WebAccess.Rules.Count == 0)
+            errors.Add("webAccess.rules is required when mode is Allowlist.");
+        if (manifest.WebAccess.Mode == PluginWebAccessMode.AllPublic && manifest.WebAccess.Rules.Count > 0)
+            errors.Add("webAccess.rules must be empty when mode is AllPublic.");
+
+        var credentials = manifest.Credentials
+            .Where(x => !string.IsNullOrWhiteSpace(x.Name))
+            .GroupBy(x => x.Name, StringComparer.Ordinal)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.Ordinal);
+        if (credentials.Count != manifest.Credentials.Count)
+            errors.Add("credentials must have unique, non-empty names.");
+        foreach (var rule in manifest.WebAccess.Rules)
+        {
+            if (rule.Protocol is not ("http" or "websocket")) errors.Add("webAccess rule protocol must be http or websocket.");
+            if (rule.Scheme is not ("http" or "https" or "wss")) errors.Add("webAccess rule scheme must be http, https, or wss.");
+            if (rule.Protocol == "http" && rule.Scheme is not ("http" or "https"))
+                errors.Add("HTTP webAccess rules must use http or https.");
+            if (rule.Protocol == "websocket" && (rule.Scheme != "wss" || rule.Methods.Count != 1 || rule.Methods[0] != "GET"))
+                errors.Add("WebSocket webAccess rules must use wss and GET.");
+            if (string.IsNullOrWhiteSpace(rule.Host) || Uri.CheckHostName(rule.Host) == UriHostNameType.Unknown)
+                errors.Add("webAccess rule host must be a DNS hostname.");
+            if (!rule.PathPrefix.StartsWith('/')) errors.Add("webAccess rule pathPrefix must start with '/'.");
+            if (rule.PathPrefix.Contains("..", StringComparison.Ordinal)) errors.Add("webAccess rule pathPrefix cannot contain parent traversal.");
+            if (string.IsNullOrWhiteSpace(rule.Purpose)) errors.Add("webAccess rule purpose is required.");
+            if (rule.Methods.Count == 0 || rule.Methods.Any(x => x is not ("GET" or "HEAD" or "POST" or "PUT" or "PATCH" or "DELETE")))
+                errors.Add("webAccess rule methods contains an unsupported HTTP method.");
+            if (rule.Credential is not null)
+            {
+                if (!credentials.TryGetValue(rule.Credential, out var credential))
+                    errors.Add($"webAccess rule references unknown credential '{rule.Credential}'.");
+                else
+                {
+                    var port = rule.Port is null ? string.Empty : $":{rule.Port}";
+                    var origin = $"{rule.Scheme}://{rule.Host}{port}";
+                    if (!credential.AllowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
+                        errors.Add($"Credential '{rule.Credential}' is not bound to webAccess origin '{origin}'.");
+                }
+            }
+        }
     }
 
     private static void AddRequiredIdentifierError(string? value, string fieldName, List<string> errors)
     {
         if (string.IsNullOrWhiteSpace(value) || !IdentifierRegex().IsMatch(value))
         {
-            errors.Add($"Agent manifest {fieldName} must contain letters, numbers, dots, underscores, or hyphens.");
+            errors.Add($"Plugin manifest {fieldName} must contain letters, numbers, dots, underscores, or hyphens.");
         }
     }
 
@@ -338,7 +390,7 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            errors.Add($"Agent manifest {fieldName} is required.");
+            errors.Add($"Plugin manifest {fieldName} is required.");
         }
     }
 
@@ -346,7 +398,7 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
     {
         if (values is null || values.Any(string.IsNullOrWhiteSpace))
         {
-            errors.Add($"Agent manifest {fieldName} must be an array of non-empty strings.");
+            errors.Add($"Plugin manifest {fieldName} must be an array of non-empty strings.");
         }
     }
 

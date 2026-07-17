@@ -13,8 +13,7 @@ public sealed record PluginRegistration(
     IReadOnlyList<string> ProvidedCapabilities,
     IReadOnlyList<string> RequestedCapabilities,
     IReadOnlyList<string> RequestedPublications,
-    IReadOnlyList<string> RequestedSubscriptions,
-    IReadOnlyList<string> RequestedPermissions);
+    IReadOnlyList<string> RequestedSubscriptions);
 
 /// <summary>
 /// Provider-neutral facade over the legacy agent transport. Plugins depend on this SDK while
@@ -31,12 +30,14 @@ public sealed class PluginBrokerClient(IAgentBrokerClient transport) : IAsyncDis
             AgentId = registration.PluginId,
             AgentVersion = registration.Version,
             InstallationId = registration.InstallationId.ToString("D"),
-            BusinessId = registration.InstallationScope
+            BusinessId = Environment.GetEnvironmentVariable("CSweet__Agent__BusinessId") ?? registration.InstallationScope,
+            RuntimeInstanceId = Environment.GetEnvironmentVariable("CSweet__Agent__RuntimeInstanceId") ?? string.Empty,
+            TickId = Environment.GetEnvironmentVariable("CSweet__Agent__TickId") ?? string.Empty,
+            WorkloadToken = Environment.GetEnvironmentVariable("CSweet__Agent__WorkloadToken") ?? string.Empty
         };
         request.DeclaredCapabilities.Add(registration.ProvidedCapabilities);
         request.RequestedSubscriptions.Add(registration.RequestedSubscriptions);
         request.RequestedPublications.Add(registration.RequestedPublications);
-        request.RequestedPermissions.Add(registration.RequestedPermissions);
         return transport.StartAsync(request, cancellationToken);
     }
 

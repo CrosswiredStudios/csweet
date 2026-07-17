@@ -27,7 +27,8 @@ public sealed record AgentContainerStartRequest(
     int CpuPercent,
     int PidsLimit,
     int MaxRuntimeSeconds,
-    string? PersistentDataVolumeName = null);
+    string? PersistentDataVolumeName = null,
+    string BrokerGatewayContainer = "agenthost");
 
 public sealed record AgentContainerStatus(
     string ContainerId,

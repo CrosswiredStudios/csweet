@@ -15,7 +15,7 @@ public class GitHubAgentRepositoryClientTests
             "/repos/example/research-agent" => Json("{\"default_branch\":\"main\"}"),
             "/repos/example/research-agent/commits/main" =>
                 Json("{\"sha\":\"0123456789abcdef0123456789abcdef01234567\"}"),
-            "/repos/example/research-agent/contents/csweet-agent.json" =>
+            "/repos/example/research-agent/contents/csweet-plugin.json" =>
                 new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent("{\"manifestVersion\":\"1.0\"}")
@@ -32,7 +32,7 @@ public class GitHubAgentRepositoryClientTests
         Assert.Equal("0123456789abcdef0123456789abcdef01234567", sha);
         Assert.Contains("manifestVersion", Encoding.UTF8.GetString(manifest));
         Assert.Equal(
-            "/repos/example/research-agent/contents/csweet-agent.json?ref=0123456789abcdef0123456789abcdef01234567",
+            "/repos/example/research-agent/contents/csweet-plugin.json?ref=0123456789abcdef0123456789abcdef01234567",
             handler.Requests[2]);
     }
 

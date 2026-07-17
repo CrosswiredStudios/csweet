@@ -5,6 +5,10 @@ namespace CSweet.Application.Setup;
 // These generic ports deliberately extend the legacy agent ports. Existing agents keep their
 // API while new plugin kinds depend only on plugin terminology.
 public interface IPluginImportService : IAgentImportPreviewService;
+public interface IPluginArchiveImportService
+{
+    Task<AgentImportPreviewResponse> PreviewSourceArchiveAsync(Stream archive, string fileName, CancellationToken cancellationToken = default);
+}
 public interface IPluginBuildExecutor : IAgentBuildExecutor;
 public interface IPluginRuntimeManager : IAgentRuntimeManager;
 public interface IPluginContainerRunner : IAgentContainerRunner;
@@ -37,8 +41,8 @@ public interface IPluginAuthorizationPolicy
 
 public static class PluginPlatformCapabilities
 {
-    public const string ReadSecret = "plugin.secret.read.v1";
+    public const string WebFetch = "web.fetch.v1";
+    public const string WebRequest = "web.request.v1";
+    public const string WebRender = "web.render.v1";
+    public const string WebSocket = "web.socket.v1";
 }
-
-public sealed record PluginSecretReadRequest(string Key);
-public sealed record PluginSecretReadResponse(string Value);

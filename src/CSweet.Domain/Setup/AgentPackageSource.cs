@@ -8,6 +8,8 @@ public sealed class AgentPackageSource
     public string RepositoryOwner { get; set; } = string.Empty;
     public string RepositoryName { get; set; } = string.Empty;
     public string DefaultBranch { get; set; } = string.Empty;
+    public string SourceType { get; set; } = "GitHub";
+    public string? SourceArchivePath { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

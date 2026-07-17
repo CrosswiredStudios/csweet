@@ -116,7 +116,8 @@ public sealed class AgentBuildService : IAgentBuildService
             settings.BuildCpuPercent,
             settings.DefaultContainerPidsLimit,
             settings.MaximumRepositorySizeMb,
-            settings.MaximumBuildLogMb);
+            settings.MaximumBuildLogMb,
+            source.SourceArchivePath);
 
         AgentBuildWorkspace? workspace = null;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

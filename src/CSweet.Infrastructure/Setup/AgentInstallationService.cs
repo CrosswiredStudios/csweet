@@ -1,7 +1,7 @@
 using System.Text.Json;
-using CSweet.Agent.Contracts.Packaging;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Agents;
+using CSweet.Contracts.Plugins;
 using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -90,18 +90,23 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
         var manifest = DeserializeManifest(packageVersion.ManifestJson);
         var activationMode = ParseActivationMode(request.ActivationMode);
         var scope = ParsePluginScope(request.PluginScope);
-        if (packageVersion.PluginKind == PluginKind.CommunicationProvider &&
+        if (packageVersion.PluginKind == PluginKind.Service &&
             (scope != PluginInstallationScope.System || activationMode != ActivationMode.AlwaysOn))
             throw new AgentInstallationException("Communication providers must be system-scoped and always-on.");
         var overlapPolicy = ParseOverlapPolicy(request.OverlapPolicy);
         ValidateSchedule(request.TickFrequencySeconds, request.MaxRuntimeSeconds, activationMode, settings);
         ValidateResources(request.MemoryMb, request.CpuPercent, settings);
-        ValidateGrant("capabilities", request.GrantedCapabilities, manifest.Capabilities);
-        ValidateGrant("requested capabilities", request.GrantedRequestedCapabilities, RequestedCapabilities(packageVersion.ManifestJson));
-        ValidateGrant("subscriptions", request.GrantedSubscriptions, manifest.RequestedSubscriptions);
-        ValidateGrant("publications", request.GrantedPublications, manifest.RequestedPublications);
-        ValidateGrant("permissions", request.GrantedPermissions, manifest.RequestedPermissions);
-        ValidateGrant("network access", request.GrantedNetworkAccess, manifest.RequestedNetworkAccess);
+        ValidateGrant("provided capabilities", request.GrantedCapabilities, manifest.Provides.Select(x => x.Name).ToArray());
+        ValidateGrant("required capabilities", request.GrantedRequestedCapabilities, manifest.Requires.Select(x => x.Name).ToArray());
+        ValidateGrant("subscriptions", request.GrantedSubscriptions, manifest.Events.Subscribes);
+        ValidateGrant("publications", request.GrantedPublications, manifest.Events.Publishes);
+        if (request.GrantedPermissions.Count > 0)
+            throw new AgentInstallationException("Legacy permission grants are not supported; grant typed required capabilities instead.");
+        ValidateGrant("web access", request.GrantedNetworkAccess, AgentImportPreviewService.WebGrantTokens(manifest));
+        if (manifest.WebAccess.Mode == PluginWebAccessMode.AllPublic &&
+            request.GrantedNetworkAccess.Contains("all-public", StringComparer.Ordinal) &&
+            !request.AllPublicWebAccessAcknowledged)
+            throw new AgentInstallationException("All-public web access requires a separate explicit acknowledgement.");
 
         var now = DateTimeOffset.UtcNow;
         var installation = new AgentInstallation
@@ -114,6 +119,7 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
             CreatedAt = now,
             UpdatedAt = now
         };
+        installation.InstallationKey = installation.Id;
         var grant = new AgentInstallationGrant
         {
             Id = Guid.NewGuid(),
@@ -291,24 +297,8 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
             throw new AgentInstallationException("The selected agent update is not available for installation.");
         }
 
-        var manifest = DeserializeManifest(nextPackage.ManifestJson);
-        var grant = installation.Grant!;
-        grant.CapabilitiesJson = RetainRequestedGrants(grant.CapabilitiesJson, manifest.Capabilities);
-        grant.SubscriptionsJson = RetainRequestedGrants(grant.SubscriptionsJson, manifest.RequestedSubscriptions);
-        grant.PublicationsJson = RetainRequestedGrants(grant.PublicationsJson, manifest.RequestedPublications);
-        grant.PermissionsJson = RetainRequestedGrants(grant.PermissionsJson, manifest.RequestedPermissions);
-        grant.NetworkAccessJson = RetainRequestedGrants(grant.NetworkAccessJson, manifest.RequestedNetworkAccess);
-
-        await RemoveRuntimeContainersAsync(installation, cancellationToken);
-
+        _ = DeserializeManifest(nextPackage.ManifestJson);
         var now = DateTimeOffset.UtcNow;
-        foreach (var runtime in installation.RuntimeInstances.Where(x => AgentRuntimeInstance.IsActive(x.Status)))
-        {
-            var terminalStatus = runtime.Status == AgentRuntimeStatus.CompletionReported
-                ? AgentRuntimeStatus.Failed
-                : AgentRuntimeStatus.Cancelled;
-            runtime.TransitionTo(terminalStatus, now, "Agent installation updated to a newer package version.");
-        }
         var latestBuild = nextPackage.BuildJobs.OrderByDescending(x => x.Attempt).FirstOrDefault();
         var shouldQueueBuild = nextPackage.Status != AgentPackageVersionStatus.Built &&
             latestBuild?.Status is not (
@@ -330,10 +320,45 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
             });
         }
 
-        installation.PackageVersionId = nextPackage.Id;
-        installation.PackageVersion = nextPackage;
-        ResetAutomaticStartupFailures(installation.Schedule!);
-        installation.UpdatedAt = now;
+        var installationKey = installation.InstallationKey == Guid.Empty ? installation.Id : installation.InstallationKey;
+        var nextRevisionNumber = await _dbContext.AgentInstallations
+            .Where(x => x.InstallationKey == installationKey || x.Id == installationKey)
+            .MaxAsync(x => (int?)x.RevisionNumber, cancellationToken) ?? installation.RevisionNumber;
+        var staged = new AgentInstallation
+        {
+            Id = Guid.NewGuid(),
+            InstallationKey = installationKey,
+            RevisionNumber = nextRevisionNumber + 1,
+            RevisionStatus = PluginRevisionStatus.Staged,
+            SupersedesInstallationId = installation.Id,
+            PackageVersionId = nextPackage.Id,
+            PackageVersion = nextPackage,
+            BusinessId = installation.BusinessId,
+            Scope = installation.Scope,
+            IsEnabled = false,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        staged.Grant = new AgentInstallationGrant
+        {
+            Id = Guid.NewGuid(), AgentInstallationId = staged.Id,
+            CapabilitiesJson = "[]", RequestedCapabilitiesJson = "[]", SubscriptionsJson = "[]",
+            PublicationsJson = "[]", PermissionsJson = "[]", NetworkAccessJson = "[]",
+            MaxRuntimeSeconds = installation.Grant!.MaxRuntimeSeconds,
+            MemoryMb = installation.Grant.MemoryMb, CpuPercent = installation.Grant.CpuPercent
+        };
+        staged.Schedule = new AgentSchedule
+        {
+            Id = Guid.NewGuid(), AgentInstallationId = staged.Id,
+            ActivationMode = installation.Schedule!.ActivationMode,
+            TickFrequencySeconds = installation.Schedule.TickFrequencySeconds,
+            MaxRuntimeSeconds = installation.Schedule.MaxRuntimeSeconds,
+            MaxRetriesPerTick = installation.Schedule.MaxRetriesPerTick,
+            OverlapPolicy = installation.Schedule.OverlapPolicy,
+            IsEnabled = false,
+            NextTickAt = null
+        };
+        _dbContext.AgentInstallations.Add(staged);
         try
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
@@ -343,7 +368,7 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
             _logger.LogError(
                 exception,
                 "Could not update agent installation {AgentInstallationId} to package {PackageVersionId}.",
-                installation.Id,
+                staged.Id,
                 nextPackage.Id);
             throw new AgentInstallationException(
                 "The agent update could not be saved. Refresh the Agents page and try again; the installed version was not changed.",
@@ -351,15 +376,78 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
         }
 
         await _auditWriter.WriteAsync(
-            "agent-installation.updated",
+            "plugin-update.staged",
             nameof(AgentInstallation),
-            installation.Id,
-            $"Updated {currentPackage.AgentId} for business {installation.BusinessId} from " +
-            $"{currentPackage.Version} ({currentPackage.CommitSha}) to {nextPackage.Version} ({nextPackage.CommitSha}).",
+            staged.Id,
+            $"Staged {currentPackage.AgentId} revision {staged.RevisionNumber} for business {installation.BusinessId}; all grants are empty pending approval.",
             null,
             cancellationToken);
 
-        return ToResponse(installation);
+        return ToResponse(staged);
+    }
+
+    public async Task<AgentInstallationResponse> ApproveUpdateAsync(
+        Guid stagedRevisionId,
+        InstallAgentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var staged = await GetInstallationAsync(stagedRevisionId, cancellationToken);
+        if (staged.RevisionStatus != PluginRevisionStatus.Staged || staged.SupersedesInstallationId is null)
+            throw new AgentInstallationException("Only a staged plugin revision can be approved.");
+        if (staged.PackageVersion!.Status != AgentPackageVersionStatus.Built)
+            throw new AgentInstallationException("The staged package must finish verification and build before approval.");
+        if (!string.Equals(request.BusinessId.Trim(), staged.BusinessId, StringComparison.Ordinal))
+            throw new AgentInstallationException("The approval business must match the staged revision.");
+
+        var manifest = DeserializeManifest(staged.PackageVersion.ManifestJson);
+        var settings = await GetSettingsAsync(cancellationToken);
+        var activation = ParseActivationMode(request.ActivationMode);
+        var overlap = ParseOverlapPolicy(request.OverlapPolicy);
+        ValidateSchedule(request.TickFrequencySeconds, request.MaxRuntimeSeconds, activation, settings);
+        ValidateResources(request.MemoryMb, request.CpuPercent, settings);
+        ValidateGrant("provided capabilities", request.GrantedCapabilities, manifest.Provides.Select(x => x.Name).ToArray());
+        ValidateGrant("required capabilities", request.GrantedRequestedCapabilities, manifest.Requires.Select(x => x.Name).ToArray());
+        ValidateGrant("subscriptions", request.GrantedSubscriptions, manifest.Events.Subscribes);
+        ValidateGrant("publications", request.GrantedPublications, manifest.Events.Publishes);
+        if (request.GrantedPermissions.Count > 0)
+            throw new AgentInstallationException("Legacy permission grants are not supported.");
+        ValidateGrant("web access", request.GrantedNetworkAccess, AgentImportPreviewService.WebGrantTokens(manifest));
+        if (request.GrantedNetworkAccess.Contains("all-public", StringComparer.Ordinal) && !request.AllPublicWebAccessAcknowledged)
+            throw new AgentInstallationException("All-public web access requires a separate explicit acknowledgement.");
+
+        var previous = await GetInstallationAsync(staged.SupersedesInstallationId.Value, cancellationToken);
+        await RemoveRuntimeContainersAsync(previous, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        previous.IsEnabled = false;
+        previous.RevisionStatus = PluginRevisionStatus.Retired;
+        previous.Schedule!.IsEnabled = false;
+        previous.Schedule.NextTickAt = null;
+        previous.UpdatedAt = now;
+
+        var grant = staged.Grant!;
+        grant.CapabilitiesJson = SerializeGrant(request.GrantedCapabilities);
+        grant.RequestedCapabilitiesJson = SerializeGrant(request.GrantedRequestedCapabilities);
+        grant.SubscriptionsJson = SerializeGrant(request.GrantedSubscriptions);
+        grant.PublicationsJson = SerializeGrant(request.GrantedPublications);
+        grant.PermissionsJson = "[]";
+        grant.NetworkAccessJson = SerializeGrant(request.GrantedNetworkAccess);
+        grant.MaxRuntimeSeconds = request.MaxRuntimeSeconds;
+        grant.MemoryMb = request.MemoryMb;
+        grant.CpuPercent = request.CpuPercent;
+        grant.ApprovedAt = now;
+        staged.Schedule!.ActivationMode = activation;
+        staged.Schedule.TickFrequencySeconds = request.TickFrequencySeconds;
+        staged.Schedule.MaxRuntimeSeconds = request.MaxRuntimeSeconds;
+        staged.Schedule.OverlapPolicy = overlap;
+        staged.Schedule.IsEnabled = true;
+        staged.Schedule.NextTickAt = ComputeNextTick(activation, request.TickFrequencySeconds, now);
+        staged.IsEnabled = true;
+        staged.RevisionStatus = PluginRevisionStatus.Active;
+        staged.UpdatedAt = now;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await _auditWriter.WriteAsync("plugin-update.approved", nameof(AgentInstallation), staged.Id,
+            $"Activated plugin revision {staged.RevisionNumber} after complete grant reapproval.", null, cancellationToken);
+        return ToResponse(staged);
     }
 
     public async Task<AgentInstallationResponse> RunNowAsync(
@@ -736,16 +824,16 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
             null,
             cancellationToken);
 
-    private static AgentManifest DeserializeManifest(string manifestJson)
+    private static PluginManifest DeserializeManifest(string manifestJson)
     {
         try
         {
-            return JsonSerializer.Deserialize<AgentManifest>(manifestJson, SerializerOptions)
-                ?? throw new AgentInstallationException("The stored agent manifest is empty.");
+            return JsonSerializer.Deserialize<PluginManifest>(manifestJson, SerializerOptions)
+                ?? throw new AgentInstallationException("The stored plugin manifest is empty.");
         }
         catch (JsonException exception)
         {
-            throw new AgentInstallationException($"The stored agent manifest is invalid: {exception.Message}");
+            throw new AgentInstallationException($"The stored plugin manifest is invalid: {exception.Message}");
         }
     }
 
@@ -829,16 +917,6 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
             ? scope
             : throw new AgentInstallationException("Plugin scope must be Organization or System.");
 
-    private static IReadOnlyList<string> RequestedCapabilities(string manifestJson)
-    {
-        using var document = JsonDocument.Parse(manifestJson);
-        return document.RootElement.TryGetProperty("requestedCapabilities", out var values) &&
-               values.ValueKind == JsonValueKind.Array
-            ? values.EnumerateArray().Select(x => x.GetString())
-                .Where(x => !string.IsNullOrWhiteSpace(x)).Cast<string>().ToList()
-            : [];
-    }
-
     private static OverlapPolicy ParseOverlapPolicy(string value) =>
         Enum.TryParse<OverlapPolicy>(value, ignoreCase: false, out var overlapPolicy) &&
         Enum.IsDefined(overlapPolicy)
@@ -913,7 +991,10 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
             runtime is null ? null : ToRunResponse(runtime))
         {
             PluginKind = package.PluginKind.ToString(),
-            InstallationScope = installation.Scope.ToString()
+            InstallationScope = installation.Scope.ToString(),
+            InstallationKey = installation.InstallationKey == Guid.Empty ? installation.Id : installation.InstallationKey,
+            RevisionNumber = installation.RevisionNumber,
+            RevisionStatus = installation.RevisionStatus.ToString()
         };
     }
 

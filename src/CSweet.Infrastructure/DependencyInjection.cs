@@ -81,6 +81,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<AgentImportPreviewService>();
         builder.Services.AddScoped<IAgentImportPreviewService>(sp => sp.GetRequiredService<AgentImportPreviewService>());
         builder.Services.AddScoped<IPluginImportService>(sp => sp.GetRequiredService<AgentImportPreviewService>());
+        builder.Services.AddScoped<IPluginArchiveImportService, PluginArchiveImportService>();
         builder.Services.AddSingleton<IPluginManifestReader, PluginManifestReader>();
         builder.Services.AddScoped<IAgentUpdateService, AgentUpdateService>();
         builder.Services.AddScoped<AgentInstallationService>();

@@ -16,4 +16,5 @@ public sealed record InstallAgentRequest(
 {
     public string PluginScope { get; init; } = "Organization";
     public IReadOnlyList<string> GrantedRequestedCapabilities { get; init; } = [];
+    public bool AllPublicWebAccessAcknowledged { get; init; }
 }

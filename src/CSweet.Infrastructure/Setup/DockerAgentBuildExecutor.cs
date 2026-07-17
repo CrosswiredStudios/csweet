@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using CSweet.Application.Setup;
@@ -28,28 +29,21 @@ public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
         Directory.CreateDirectory(stagingPath);
 
         var log = new CappedBuildLog(logPath, MegabytesToBytes(request.MaximumBuildLogMb));
-        await log.AppendAsync(
-            $"Materializing commit {request.CommitSha} from {request.RepositoryUrl}.{Environment.NewLine}",
-            cancellationToken);
-        await RunRequiredAsync("git", ["init", "--template=", sourcePath], null, log, cancellationToken);
-        await RunRequiredAsync(
-            "git",
-            ["-C", sourcePath, "remote", "add", "origin", request.RepositoryUrl],
-            null,
-            log,
-            cancellationToken);
-        await RunRequiredAsync(
-            "git",
-            ["-C", sourcePath, "fetch", "--depth", "1", "--no-tags", "origin", request.CommitSha],
-            null,
-            log,
-            cancellationToken);
-        await RunRequiredAsync(
-            "git",
-            ["-C", sourcePath, "checkout", "--detach", "FETCH_HEAD"],
-            null,
-            log,
-            cancellationToken);
+        if (!string.IsNullOrWhiteSpace(request.SourceArchivePath))
+        {
+            await log.AppendAsync($"Materializing approved source archive {request.CommitSha}.{Environment.NewLine}", cancellationToken);
+            ExtractApprovedArchive(request.SourceArchivePath, sourcePath, request.MaximumRepositorySizeMb);
+        }
+        else
+        {
+            await log.AppendAsync(
+                $"Materializing commit {request.CommitSha} from {request.RepositoryUrl}.{Environment.NewLine}",
+                cancellationToken);
+            await RunRequiredAsync("git", ["init", "--template=", sourcePath], null, log, cancellationToken);
+            await RunRequiredAsync("git", ["-C", sourcePath, "remote", "add", "origin", request.RepositoryUrl], null, log, cancellationToken);
+            await RunRequiredAsync("git", ["-C", sourcePath, "fetch", "--depth", "1", "--no-tags", "origin", request.CommitSha], null, log, cancellationToken);
+            await RunRequiredAsync("git", ["-C", sourcePath, "checkout", "--detach", "FETCH_HEAD"], null, log, cancellationToken);
+        }
 
         EnsureRepositorySize(sourcePath, request.MaximumRepositorySizeMb);
         EnsureProjectExistsInsideWorkspace(sourcePath, request.ProjectPath);
@@ -97,8 +91,7 @@ public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
             "set -eu; mkdir -p /work/source; cp -a /source/. /work/source/; " +
             "dotnet restore \"/work/source/$PROJECT_PATH\" --nologo --source https://api.nuget.org/v3/index.json; " +
             "dotnet publish \"/work/source/$PROJECT_PATH\" --configuration Release --no-restore --nologo --output /output; " +
-            "if [ -f /source/csweet-plugin.json ]; then cp /source/csweet-plugin.json /output/csweet-agent.json; " +
-            "else cp /source/csweet-agent.json /output/csweet-agent.json; fi"
+            "cp /source/csweet-plugin.json /output/csweet-plugin.json"
         };
 
         try
@@ -284,6 +277,29 @@ public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
         if (!File.Exists(fullProjectPath))
         {
             throw new AgentBuildException($"The approved project path '{projectPath}' was not found at the recorded commit.");
+        }
+    }
+
+    private static void ExtractApprovedArchive(string archivePath, string destination, int maximumSizeMb)
+    {
+        if (!Path.IsPathFullyQualified(archivePath) || !File.Exists(archivePath))
+            throw new AgentBuildException("The approved source archive is unavailable.");
+        using var archive = System.IO.Compression.ZipFile.OpenRead(archivePath);
+        long total = 0;
+        foreach (var entry in archive.Entries)
+        {
+            var relative = entry.FullName.Replace('\\', '/');
+            var segments = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (relative.StartsWith('/') || Path.IsPathRooted(relative) || segments.Contains("..", StringComparer.Ordinal))
+                throw new AgentBuildException("The source archive contains a path traversal entry.");
+            if (string.IsNullOrEmpty(entry.Name)) continue;
+            total = checked(total + entry.Length);
+            if (total > MegabytesToBytes(maximumSizeMb)) throw new AgentBuildException("The source archive exceeds the approved size limit.");
+            var target = Path.GetFullPath(Path.Combine(destination, Path.Combine(segments)));
+            var root = Path.GetFullPath(destination) + Path.DirectorySeparatorChar;
+            if (!target.StartsWith(root, PathComparison)) throw new AgentBuildException("The source archive escapes its workspace.");
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            entry.ExtractToFile(target, overwrite: false);
         }
     }
 

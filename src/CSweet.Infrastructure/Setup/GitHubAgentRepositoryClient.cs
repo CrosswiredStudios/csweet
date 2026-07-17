@@ -74,9 +74,9 @@ public sealed class GitHubAgentRepositoryClient : IGitHubAgentRepositoryClient, 
         string commitSha,
         CancellationToken cancellationToken)
     {
-        var manifest = await GetManifestAsync(repositoryOwner, repositoryName, commitSha, "csweet-agent.json", cancellationToken);
+        var manifest = await GetManifestAsync(repositoryOwner, repositoryName, commitSha, "csweet-plugin.json", cancellationToken);
         return manifest ?? throw new AgentImportPreviewException(
-            "The repository does not contain a root csweet-agent.json at the resolved commit.");
+            "The repository does not contain a root csweet-plugin.json at the resolved commit.");
     }
 
     public async Task<PluginManifestSource> GetRootPluginManifestAsync(
@@ -85,9 +85,7 @@ public sealed class GitHubAgentRepositoryClient : IGitHubAgentRepositoryClient, 
         string commitSha,
         CancellationToken cancellationToken)
     {
-        var plugin = await GetManifestAsync(repositoryOwner, repositoryName, commitSha, "csweet-plugin.json", cancellationToken);
-        if (plugin is not null) return new("csweet-plugin.json", plugin);
-        return new("csweet-agent.json", await GetRootManifestAsync(
+        return new("csweet-plugin.json", await GetRootManifestAsync(
             repositoryOwner, repositoryName, commitSha, cancellationToken));
     }
 

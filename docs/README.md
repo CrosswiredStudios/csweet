@@ -2,6 +2,8 @@
 
 This directory captures the current product, architecture, marketplace, security, and delivery plan.
 
+The normative plugin contract, grant lifecycle, proxy policy, administrator runbook, and readiness checklist are in [`plugin-platform/README.md`](plugin-platform/README.md).
+
 ## Recommended reading order
 
 1. `00-product-vision.md`

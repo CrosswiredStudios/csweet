@@ -118,7 +118,7 @@ public sealed class AgentInstallationServiceTests
     }
 
     [Fact]
-    public async Task UpdateAsync_FailedPreviousBuildSwitchesVersionRevokesGrantsAndQueuesRetry()
+    public async Task UpdateAsync_StagesZeroGrantRevisionAndKeepsActiveRevisionRunning()
     {
         await using var dbContext = CreateDbContext();
         var current = await SeedAsync(dbContext);
@@ -141,18 +141,20 @@ public sealed class AgentInstallationServiceTests
             ManifestDigest = new string('b', 64),
             ManifestJson = JsonSerializer.Serialize(new
             {
+                manifestVersion = "1.0",
+                kind = "agent",
                 id = current.AgentId,
                 name = current.AgentName,
                 version = "2.0.0",
                 publisher = new { id = "com.example", name = "Example" },
                 runtime = new { type = "dotnet-project" },
                 protocol = new { minimumVersion = "1.0", maximumVersion = "1.x" },
-                capabilities = Array.Empty<string>(),
-                requestedSubscriptions = Array.Empty<string>(),
-                requestedPublications = Array.Empty<string>(),
-                requestedPermissions = Array.Empty<string>(),
-                requestedNetworkAccess = Array.Empty<string>()
+                provides = Array.Empty<object>(),
+                requires = Array.Empty<object>(),
+                events = new { subscribes = Array.Empty<string>(), publishes = Array.Empty<string>() },
+                webAccess = new { mode = "None", rules = Array.Empty<object>() }
             }),
+            ManifestFileName = "csweet-plugin.json",
             AgentId = current.AgentId,
             AgentName = current.AgentName,
             Version = "2.0.0",
@@ -183,6 +185,8 @@ public sealed class AgentInstallationServiceTests
         Assert.Empty(result.GrantedCapabilities);
         Assert.Empty(result.GrantedSubscriptions);
         Assert.Empty(result.GrantedPublications);
+        Assert.Equal("Staged", result.RevisionStatus);
+        Assert.False(result.IsEnabled);
         Assert.Equal(3, await dbContext.AgentBuildJobs.CountAsync());
         var retry = await dbContext.AgentBuildJobs
             .Where(x => x.PackageVersionId == update.Id)
@@ -190,10 +194,9 @@ public sealed class AgentInstallationServiceTests
             .FirstAsync();
         Assert.Equal(2, retry.Attempt);
         Assert.Equal(AgentBuildStatus.Queued, retry.Status);
-        Assert.Contains("old-version-container", containers.Removed);
-        Assert.Equal(
-            AgentRuntimeStatus.Cancelled,
-            (await dbContext.AgentRuntimeInstances.SingleAsync()).Status);
+        Assert.DoesNotContain("old-version-container", containers.Removed);
+        Assert.True((await dbContext.AgentInstallations.SingleAsync(x => x.Id == installed.Id)).IsEnabled);
+        Assert.Equal(AgentRuntimeStatus.Queued, (await dbContext.AgentRuntimeInstances.SingleAsync()).Status);
     }
 
     [Fact]
@@ -410,16 +413,23 @@ public sealed class AgentInstallationServiceTests
             ManifestJson = JsonSerializer.Serialize(new
             {
                 manifestVersion = "1.0",
+                kind = "agent",
                 id = "com.example.research-agent",
                 name = "Research Agent",
                 version = "1.2.3",
                 publisher = new { id = "com.example", name = "Example" },
                 runtime = new { type = "dotnet-project" },
                 protocol = new { minimumVersion = "1.0", maximumVersion = "1.x" },
-                capabilities = new[] { "research.execute.v1" },
-                requestedSubscriptions = new[] { "research.requested.v1" },
-                requestedPublications = new[] { "research.completed.v1" }
+                provides = new[] { new { name = "research.execute.v1" } },
+                requires = Array.Empty<object>(),
+                events = new
+                {
+                    subscribes = new[] { "research.requested.v1" },
+                    publishes = new[] { "research.completed.v1" }
+                },
+                webAccess = new { mode = "None", rules = Array.Empty<object>() }
             }),
+            ManifestFileName = "csweet-plugin.json",
             AgentId = "com.example.research-agent",
             AgentName = "Research Agent",
             Version = "1.2.3",

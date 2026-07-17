@@ -190,6 +190,8 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
             entity.Property(x => x.RepositoryOwner).HasMaxLength(100).IsRequired();
             entity.Property(x => x.RepositoryName).HasMaxLength(100).IsRequired();
             entity.Property(x => x.DefaultBranch).HasMaxLength(255).IsRequired();
+            entity.Property(x => x.SourceType).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.SourceArchivePath).HasMaxLength(2048);
             entity.HasIndex(x => x.RepositoryUrl).IsUnique();
         });
 
@@ -224,6 +226,8 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
         modelBuilder.Entity<AgentInstallation>(entity =>
         {
             entity.HasKey(x => x.Id);
+            entity.Property(x => x.RevisionStatus).HasConversion<string>().HasMaxLength(24).IsRequired();
+            entity.HasIndex(x => new { x.InstallationKey, x.RevisionNumber }).IsUnique();
             entity.Property(x => x.BusinessId).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Scope).HasConversion<string>().HasMaxLength(24).IsRequired();
             entity.HasIndex(x => new { x.PackageVersionId, x.BusinessId }).IsUnique();

@@ -25,6 +25,9 @@ public sealed record AgentInstallationResponse(
 {
     public string PluginKind { get; init; } = "Agent";
     public string InstallationScope { get; init; } = "Organization";
+    public Guid InstallationKey { get; init; }
+    public int RevisionNumber { get; init; } = 1;
+    public string RevisionStatus { get; init; } = "Active";
 }
 
 public sealed record AgentBuildSummaryResponse(

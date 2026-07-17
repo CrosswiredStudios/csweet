@@ -1,0 +1,231 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Text.Json;
+using CSweet.Agent.Contracts.Grpc;
+using CSweet.Application.Setup;
+using CSweet.Contracts.Plugins;
+using CSweet.Infrastructure.Persistence;
+using Google.Protobuf;
+using Microsoft.EntityFrameworkCore;
+
+namespace CSweet.AgentHost.Broker;
+
+public sealed class PlatformWebProxyCapabilityHandler(
+    CSweetDbContext db,
+    IPluginSecretStore secrets,
+    IAuditEventWriter audit,
+    ILogger<PlatformWebProxyCapabilityHandler> logger)
+{
+    private const int MaximumResponseBytes = 4 * 1024 * 1024;
+    private const int MaximumRedirects = 5;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly HashSet<string> ForwardedHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Accept", "Accept-Language", "If-Modified-Since", "If-None-Match", "User-Agent"
+    };
+
+    public async Task<CapabilityResult> HandleAsync(
+        AgentSession session,
+        RequestCapability request,
+        CancellationToken cancellationToken)
+    {
+        if (request.Capability is not (PluginPlatformCapabilities.WebFetch or PluginPlatformCapabilities.WebRequest))
+            return Failure(request.RequestId, "Unsupported web proxy capability.");
+        if (request.Payload.Length > 64 * 1024)
+            return Failure(request.RequestId, "The web proxy request exceeds the 64 KB limit.");
+        if (session.Grant.RequestedCapabilities?.Contains(request.Capability) != true)
+            return Failure(request.RequestId, $"The installation is not granted {request.Capability}.");
+        if (!Guid.TryParse(session.InstallationId, out var installationId))
+            return Failure(request.RequestId, "The plugin installation identity is invalid.");
+
+        BrokerWebFetchRequest? input;
+        try { input = JsonSerializer.Deserialize<BrokerWebFetchRequest>(request.Payload.Span, JsonOptions); }
+        catch (JsonException) { return Failure(request.RequestId, "The web proxy request is not valid JSON."); }
+        if (input is null || !Uri.TryCreate(input.Url, UriKind.Absolute, out var initialUri))
+            return Failure(request.RequestId, "An absolute HTTP(S) URL is required.");
+        var fetch = request.Capability == PluginPlatformCapabilities.WebFetch;
+        if (fetch && input.Method is not ("GET" or "HEAD"))
+            return Failure(request.RequestId, "web.fetch.v1 permits only GET and HEAD requests.");
+        if (!fetch && input.Method is not ("POST" or "PUT" or "PATCH" or "DELETE"))
+            return Failure(request.RequestId, "web.request.v1 permits only POST, PUT, PATCH, and DELETE requests.");
+        if (input.Body?.Length > 1024 * 1024)
+            return Failure(request.RequestId, "The web request body exceeds the 1 MB limit.");
+
+        var installation = await db.AgentInstallations.AsNoTracking()
+            .Include(x => x.PackageVersion).Include(x => x.Grant)
+            .SingleOrDefaultAsync(x => x.Id == installationId && x.IsEnabled, cancellationToken);
+        if (installation?.PackageVersion is null || installation.Grant is null)
+            return Failure(request.RequestId, "The plugin installation is unavailable.");
+
+        PluginManifest manifest;
+        IReadOnlySet<string> grantedWeb;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<PluginManifest>(installation.PackageVersion.ManifestJson, JsonOptions)
+                ?? throw new JsonException();
+            grantedWeb = (JsonSerializer.Deserialize<IReadOnlyList<string>>(installation.Grant.NetworkAccessJson, JsonOptions) ?? [])
+                .ToHashSet(StringComparer.Ordinal);
+        }
+        catch (JsonException) { return Failure(request.RequestId, "The approved web access policy is invalid."); }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        var current = initialUri;
+        try
+        {
+            for (var redirect = 0; redirect <= MaximumRedirects; redirect++)
+            {
+                var rule = Authorize(current, input.Method, input.Credential, manifest, grantedWeb);
+                if (rule is null)
+                    return await DeniedAsync(request.RequestId, installationId, current, "Destination is outside the approved web grant.", cancellationToken);
+
+                var addresses = await Dns.GetHostAddressesAsync(current.DnsSafeHost, timeout.Token);
+                if (addresses.Length == 0 || addresses.Any(IsForbiddenAddress))
+                    return await DeniedAsync(request.RequestId, installationId, current, "Destination resolves to a private or reserved address.", cancellationToken);
+
+                using var handler = CreatePinnedHandler(current, addresses[0]);
+                using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+                using var outbound = new HttpRequestMessage(new HttpMethod(input.Method), current);
+                if (input.Body is { Length: > 0 })
+                {
+                    outbound.Content = new ByteArrayContent(input.Body);
+                    outbound.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(input.ContentType ?? "application/json");
+                }
+                if (input.Headers is not null)
+                {
+                    foreach (var header in input.Headers.Where(x => ForwardedHeaders.Contains(x.Key)))
+                        outbound.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
+                if (!string.IsNullOrWhiteSpace(input.Credential))
+                {
+                    var credential = manifest.Credentials.SingleOrDefault(x => x.Name == input.Credential);
+                    if (credential is null || !credential.AllowedOrigins.Contains(current.GetLeftPart(UriPartial.Authority), StringComparer.OrdinalIgnoreCase))
+                        return Failure(request.RequestId, "The requested credential is not bound to this origin.");
+                    var value = await secrets.GetAsync(installationId, input.Credential, timeout.Token);
+                    if (string.IsNullOrWhiteSpace(value)) return Failure(request.RequestId, "The requested credential is not configured.");
+                    outbound.Headers.TryAddWithoutValidation("Authorization", value);
+                }
+
+                using var response = await client.SendAsync(outbound, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                if (IsRedirect(response.StatusCode) && response.Headers.Location is { } location)
+                {
+                    if (redirect == MaximumRedirects) return Failure(request.RequestId, "The web proxy redirect limit was exceeded.");
+                    current = location.IsAbsoluteUri ? location : new Uri(current, location);
+                    continue;
+                }
+
+                var body = input.Method == "HEAD"
+                    ? (Bytes: Array.Empty<byte>(), Truncated: false)
+                    : await ReadBoundedAsync(response.Content, timeout.Token);
+                var result = new BrokerWebFetchResponse(
+                    (int)response.StatusCode,
+                    current.GetLeftPart(UriPartial.Path),
+                    response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream",
+                    body.Bytes,
+                    body.Truncated);
+                await audit.WriteAsync("plugin.web.fetch", "PluginInstallation", installationId,
+                    $"Plugin fetched {current.Scheme}://{current.Host}{current.AbsolutePath} with status {(int)response.StatusCode}.",
+                    JsonSerializer.Serialize(new { installationId, host = current.Host, path = current.AbsolutePath, method = input.Method, status = (int)response.StatusCode, bytes = body.Bytes.Length }),
+                    cancellationToken);
+                return Success(request.RequestId, result);
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Failure(request.RequestId, "The web proxy request timed out.");
+        }
+        catch (Exception exception) when (exception is HttpRequestException or SocketException or IOException)
+        {
+            logger.LogWarning(exception, "Brokered web request failed for plugin {PluginId}.", session.AgentId);
+            return Failure(request.RequestId, "The remote web request failed.");
+        }
+        return Failure(request.RequestId, "The web proxy request failed.");
+    }
+
+    private static PluginWebAccessRule? Authorize(Uri uri, string method, string? credential, PluginManifest manifest, IReadOnlySet<string> grants)
+    {
+        if (uri.Scheme is not ("http" or "https") || !string.IsNullOrEmpty(uri.UserInfo) || uri.IsLoopback)
+            return null;
+        if (manifest.WebAccess.Mode == PluginWebAccessMode.AllPublic && grants.Contains("all-public"))
+            return new PluginWebAccessRule { Scheme = uri.Scheme, Host = uri.Host, PathPrefix = "/", Methods = [method], Credential = credential };
+        foreach (var rule in manifest.WebAccess.Rules)
+        {
+            if (!grants.Contains(CSweet.Infrastructure.Setup.AgentImportPreviewService.WebGrantToken(rule))) continue;
+            if (!string.Equals(rule.Protocol, "http", StringComparison.Ordinal) ||
+                !string.Equals(rule.Scheme, uri.Scheme, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(rule.Host, uri.DnsSafeHost, StringComparison.OrdinalIgnoreCase) ||
+                rule.Port is not null && rule.Port != uri.Port ||
+                !uri.AbsolutePath.StartsWith(rule.PathPrefix, StringComparison.Ordinal) ||
+                !rule.Methods.Contains(method, StringComparer.Ordinal) ||
+                !string.Equals(rule.Credential, credential, StringComparison.Ordinal)) continue;
+            return rule;
+        }
+        return null;
+    }
+
+    private async Task<CapabilityResult> DeniedAsync(string requestId, Guid installationId, Uri uri, string reason, CancellationToken token)
+    {
+        await audit.WriteAsync("plugin.web.denied", "PluginInstallation", installationId,
+            $"Denied plugin web request to {uri.Scheme}://{uri.Host}{uri.AbsolutePath}: {reason}",
+            JsonSerializer.Serialize(new { installationId, host = uri.Host, path = uri.AbsolutePath, reason }), token);
+        return Failure(requestId, reason);
+    }
+
+    private static SocketsHttpHandler CreatePinnedHandler(Uri uri, IPAddress address) => new()
+    {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+        ConnectCallback = async (context, token) =>
+        {
+            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            try
+            {
+                await socket.ConnectAsync(new IPEndPoint(address, uri.Port), token);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch { socket.Dispose(); throw; }
+        }
+    };
+
+    private static bool IsForbiddenAddress(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any)) return true;
+        var bytes = address.GetAddressBytes();
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+            return bytes[0] is 0 or 10 or 127 || bytes[0] == 169 && bytes[1] == 254 ||
+                   bytes[0] == 172 && bytes[1] is >= 16 and <= 31 || bytes[0] == 192 && bytes[1] == 168 ||
+                   bytes[0] >= 224 || bytes[0] == 100 && bytes[1] is >= 64 and <= 127;
+        return address.IsIPv6LinkLocal || address.IsIPv6Multicast ||
+               (bytes[0] & 0xfe) == 0xfc || address.Equals(IPAddress.IPv6Loopback);
+    }
+
+    private static bool IsRedirect(HttpStatusCode status) => (int)status is 301 or 302 or 303 or 307 or 308;
+
+    private static async Task<(byte[] Bytes, bool Truncated)> ReadBoundedAsync(HttpContent content, CancellationToken token)
+    {
+        await using var stream = await content.ReadAsStreamAsync(token);
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        while (output.Length <= MaximumResponseBytes)
+        {
+            var read = await stream.ReadAsync(buffer, token);
+            if (read == 0) return (output.ToArray(), false);
+            var allowed = (int)Math.Min(read, MaximumResponseBytes - output.Length);
+            if (allowed > 0) output.Write(buffer, 0, allowed);
+            if (allowed < read || output.Length == MaximumResponseBytes) return (output.ToArray(), true);
+        }
+        return (output.ToArray(), true);
+    }
+
+    private static CapabilityResult Success(string requestId, BrokerWebFetchResponse response) => new()
+    {
+        RequestId = requestId, Succeeded = true, ContentType = "application/json",
+        Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(response, JsonOptions))
+    };
+
+    private static CapabilityResult Failure(string requestId, string error) => new()
+    {
+        RequestId = requestId, Succeeded = false, ContentType = "application/json", Error = error
+    };
+}

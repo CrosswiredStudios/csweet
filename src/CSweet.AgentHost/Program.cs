@@ -28,7 +28,8 @@ builder.Services.AddSingleton<IMemoryStore>(_ => new PostgreSqlMemoryStore(
     ?? builder.Configuration.GetConnectionString("csweet")
     ?? throw new InvalidOperationException("A PostgreSQL connection is required for platform memory.")));
 builder.Services.AddScoped<PlatformMemoryCapabilityHandler>();
-builder.Services.AddScoped<PlatformPluginSecretCapabilityHandler>();
+builder.Services.AddScoped<PlatformWebProxyCapabilityHandler>();
+builder.Services.AddScoped<PlatformWebSocketCapabilityHandler>();
 builder.Services.AddScoped<IAgentMemoryIdentityResolver, AgentMemoryIdentityResolver>();
 
 var app = builder.Build();
@@ -39,7 +40,7 @@ app.MapGet("/", () => Results.Ok(new
 {
     service = "CSweet.AgentHost",
     status = "ok",
-    protocol = "csweet-agent-v1"
+    protocol = "csweet-plugin-v1"
 }));
 
 app.Run();

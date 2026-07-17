@@ -15,7 +15,8 @@ public sealed record AgentBuildExecutionRequest(
     int CpuPercent,
     int PidsLimit,
     int MaximumRepositorySizeMb,
-    int MaximumBuildLogMb);
+    int MaximumBuildLogMb,
+    string? SourceArchivePath = null);
 
 public sealed record AgentBuildWorkspace(
     string SourcePath,

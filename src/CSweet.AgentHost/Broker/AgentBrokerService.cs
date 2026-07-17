@@ -15,7 +15,8 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
     private readonly IAgentRuntimeSignalService _runtimeSignals;
     private readonly PlatformLlmCapabilityHandler _platformLlm;
     private readonly PlatformMemoryCapabilityHandler _platformMemory;
-    private readonly PlatformPluginSecretCapabilityHandler _platformSecrets;
+    private readonly PlatformWebProxyCapabilityHandler _platformWeb;
+    private readonly PlatformWebSocketCapabilityHandler _platformWebSocket;
 
     public AgentBrokerService(
         IAgentAuthorizationPolicy authorizationPolicy,
@@ -23,7 +24,8 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         IAgentRuntimeSignalService runtimeSignals,
         PlatformLlmCapabilityHandler platformLlm,
         PlatformMemoryCapabilityHandler platformMemory,
-        PlatformPluginSecretCapabilityHandler platformSecrets,
+        PlatformWebProxyCapabilityHandler platformWeb,
+        PlatformWebSocketCapabilityHandler platformWebSocket,
         ILogger<AgentBrokerService> logger)
     {
         _authorizationPolicy = authorizationPolicy;
@@ -31,7 +33,8 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         _runtimeSignals = runtimeSignals;
         _platformLlm = platformLlm;
         _platformMemory = platformMemory;
-        _platformSecrets = platformSecrets;
+        _platformWeb = platformWeb;
+        _platformWebSocket = platformWebSocket;
         _logger = logger;
     }
 
@@ -185,9 +188,20 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                         });
                         break;
                     }
-                    if (message.CapabilityRequest.Capability == PluginPlatformCapabilities.ReadSecret)
+                    if (message.CapabilityRequest.Capability is PluginPlatformCapabilities.WebFetch or PluginPlatformCapabilities.WebRequest)
                     {
-                        var result = await _platformSecrets.HandleAsync(session, message.CapabilityRequest, cancellationToken);
+                        var result = await _platformWeb.HandleAsync(session, message.CapabilityRequest, cancellationToken);
+                        session.TrySend(new BrokerToAgentMessage
+                        {
+                            MessageId = Guid.NewGuid().ToString("N"),
+                            CorrelationId = message.CorrelationId,
+                            CapabilityResult = result
+                        });
+                        break;
+                    }
+                    if (message.CapabilityRequest.Capability == PluginPlatformCapabilities.WebSocket)
+                    {
+                        var result = await _platformWebSocket.HandleAsync(session, message.CapabilityRequest, cancellationToken);
                         session.TrySend(new BrokerToAgentMessage
                         {
                             MessageId = Guid.NewGuid().ToString("N"),

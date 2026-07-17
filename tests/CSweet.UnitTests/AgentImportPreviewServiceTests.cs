@@ -107,6 +107,7 @@ public class AgentImportPreviewServiceTests
     private static string ValidManifest() => """
         {
           "manifestVersion": "1.0",
+          "kind": "agent",
           "id": "com.example.research-agent",
           "name": "Research Agent",
           "version": "1.2.3",
@@ -118,11 +119,16 @@ public class AgentImportPreviewServiceTests
             "defaultActivationMode": "Periodic"
           },
           "protocol": { "minimumVersion": "1.0", "maximumVersion": "1.x" },
-          "capabilities": ["research.execute.v1"],
-          "requestedSubscriptions": ["research.requested.v1"],
-          "requestedPublications": ["research.completed.v1"],
-          "requestedPermissions": ["documents.read"],
-          "requestedNetworkAccess": ["api.example.com"]
+          "provides": [{"name":"research.execute.v1"}],
+          "requires": [{"name":"documents.read.v1","scope":"organization"}],
+          "events": {
+            "subscribes": ["research.requested.v1"],
+            "publishes": ["research.completed.v1"]
+          },
+          "webAccess": {
+            "mode": "Allowlist",
+            "rules": [{"scheme":"https","host":"api.example.com","pathPrefix":"/","methods":["GET"],"protocol":"http","purpose":"Research"}]
+          }
         }
         """;
 
