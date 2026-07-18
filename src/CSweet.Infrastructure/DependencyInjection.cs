@@ -163,6 +163,8 @@ public static class DependencyInjection
         builder.Services.AddScoped<IConversationService, ConversationService>();
         builder.Services.AddScoped<IChatTurnService, ChatTurnService>();
         builder.Services.AddScoped<ICommunicationWorkspaceService, CommunicationWorkspaceService>();
+        builder.Services.AddScoped<ICommunicationHubService, CommunicationHubService>();
+        builder.Services.AddScoped<ICommunicationEventOutboxDispatcher, CommunicationEventOutboxDispatcher>();
         builder.Services.AddScoped<ICommunicationRouter, CommunicationRouter>();
         builder.Services.AddScoped<ICommunicationIngressHandler, CommunicationIngressHandler>();
         builder.Services.AddScoped<INotificationService, NotificationService>();

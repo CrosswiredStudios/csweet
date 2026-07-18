@@ -22,6 +22,65 @@ public static class CommunicationEndpoints
         group.MapGet("/discord", async (Guid organizationId, ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
             await service.GetDiscordAsync(organizationId, cancellationToken) is { } connection ? Results.Ok(connection) : Results.NotFound());
 
+        group.MapGet("/hub", async (Guid organizationId, HttpContext http,
+            ICommunicationHubService service, CancellationToken cancellationToken) =>
+        {
+            var actorId = await ResolveActorAsync(organizationId, http, service, cancellationToken);
+            return actorId is null ? Results.Forbid() :
+                await service.GetAsync(organizationId, actorId.Value, cancellationToken) is { } hub
+                    ? Results.Ok(hub) : Results.Forbid();
+        });
+
+        group.MapGet("/hub/chats/{chatId:guid}/messages", async (Guid organizationId, Guid chatId, HttpContext http,
+            ICommunicationHubService service, CancellationToken cancellationToken) =>
+        {
+            var actorId = await ResolveActorAsync(organizationId, http, service, cancellationToken);
+            if (actorId is null) return Results.Forbid();
+            var messages = await service.ListMessagesAsync(organizationId, chatId, actorId.Value, cancellationToken);
+            return messages is null ? Results.NotFound() : Results.Ok(messages);
+        });
+
+        group.MapPost("/hub/chats", async (Guid organizationId, CreateCommunicationChatRequest request, HttpContext http,
+            ICommunicationHubService service, CancellationToken cancellationToken) =>
+        {
+            var actorId = await ResolveActorAsync(organizationId, http, service, cancellationToken);
+            if (actorId is null) return Results.Forbid();
+            var result = await service.CreateAsync(organizationId, actorId.Value, request, cancellationToken);
+            return result.Succeeded
+                ? Results.Created($"/api/organizations/{organizationId}/communications/hub/chats/{result.Chat!.Id}", result.Chat)
+                : HubFailure(result);
+        });
+
+        group.MapPut("/hub/chats/{chatId:guid}", async (Guid organizationId, Guid chatId,
+            UpdateCommunicationChatRequest request, HttpContext http, ICommunicationHubService service,
+            CancellationToken cancellationToken) =>
+        {
+            var actorId = await ResolveActorAsync(organizationId, http, service, cancellationToken);
+            if (actorId is null) return Results.Forbid();
+            var result = await service.UpdateAsync(organizationId, chatId, actorId.Value, request, cancellationToken);
+            return result.Succeeded ? Results.Ok(result.Chat) : HubFailure(result);
+        });
+
+        group.MapDelete("/hub/chats/{chatId:guid}", async (Guid organizationId, Guid chatId, HttpContext http,
+            ICommunicationHubService service, CancellationToken cancellationToken) =>
+        {
+            var actorId = await ResolveActorAsync(organizationId, http, service, cancellationToken);
+            if (actorId is null) return Results.Forbid();
+            var result = await service.ArchiveAsync(organizationId, chatId, actorId.Value, cancellationToken);
+            return result.Succeeded ? Results.Ok(result) : HubFailure(result);
+        });
+
+        group.MapPost("/hub/chats/{chatId:guid}/messages", async (Guid organizationId, Guid chatId,
+            SendCommunicationMessageRequest request, HttpContext http, ICommunicationHubService service,
+            CancellationToken cancellationToken) =>
+        {
+            var actorId = await ResolveActorAsync(organizationId, http, service, cancellationToken);
+            if (actorId is null) return Results.Forbid();
+            var message = await service.SendAsync(organizationId, chatId, actorId.Value, request, cancellationToken);
+            return message is null ? Results.BadRequest(new CommunicationHubActionResponse(false, "message_rejected",
+                "The message was empty or you are not an active member of this chat.")) : Results.Ok(message);
+        });
+
         group.MapGet("/providers/{providerKey}", async (Guid organizationId, string providerKey,
             ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
             await service.GetAsync(organizationId, providerKey, cancellationToken) is { } connection
@@ -94,4 +153,20 @@ public static class CommunicationEndpoints
             await service.MarkReadAsync(organizationId, http.User.GetApplicationUserId()!.Value, notificationId, cancellationToken) ? Results.NoContent() : Results.NotFound());
         return endpoints;
     }
+
+    private static async Task<Guid?> ResolveActorAsync(Guid organizationId, HttpContext http,
+        ICommunicationHubService service, CancellationToken cancellationToken)
+    {
+        var applicationUserId = http.User.GetApplicationUserId();
+        return applicationUserId.HasValue
+            ? await service.ResolveOrganizationUserIdAsync(organizationId, applicationUserId.Value, cancellationToken)
+            : null;
+    }
+
+    private static IResult HubFailure(CommunicationHubActionResponse result) => result.ErrorCode switch
+    {
+        "not_authorized" => Results.Json(result, statusCode: StatusCodes.Status403Forbidden),
+        "chat_not_found" or "actor_not_found" => Results.NotFound(result),
+        _ => Results.BadRequest(result)
+    };
 }

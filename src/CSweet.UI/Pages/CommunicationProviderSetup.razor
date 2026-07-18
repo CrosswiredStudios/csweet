@@ -1,0 +1,85 @@
+@page "/organizations/{OrganizationId:guid}/communications/providers/discord"
+@using CSweet.Contracts.Communications
+@using CSweet.Contracts.Agents
+@inject HttpClient Http
+
+<PageTitle>Discord connection - C-Sweet</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="py-8">
+    <MudButton Href="/settings/communications" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Class="mb-3">Connected apps</MudButton>
+    <MudText Typo="Typo.h4">Discord connection</MudText>
+    <MudText Color="Color.Secondary" Class="mb-6">Configure Discord as an optional mirror of C-Sweet communications. The in-app hub remains authoritative.</MudText>
+
+    @if (!string.IsNullOrWhiteSpace(_message)) { <MudAlert Severity="@_severity" Variant="Variant.Outlined" Class="mb-4">@_message</MudAlert> }
+    @if (_loading) { <MudProgressLinear Indeterminate="true" /> }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="12" md="5">
+                <MudPaper Outlined="true" Class="pa-5">
+                    <MudText Typo="Typo.h6">Workspace</MudText>
+                    @if (_connection is not null)
+                    {
+                        <MudChip T="string" Color="@(_connection.Status == "Connected" ? Color.Success : Color.Warning)" Size="Size.Small" Class="my-3">@_connection.Status</MudChip>
+                    }
+                    <MudTextField Label="Discord server (guild) ID" @bind-Value="_guildId" Variant="Variant.Outlined" Class="mt-3" />
+                    <MudSelect T="string" Label="Workspace mode" @bind-Value="_mode" Variant="Variant.Outlined" Class="mt-3">
+                        <MudSelectItem Value="@("Dedicated")">Dedicated server</MudSelectItem><MudSelectItem Value="@("Contained")">Existing server</MudSelectItem>
+                    </MudSelect>
+                    <MudSelect T="Guid?" Label="Communication plugin" @bind-Value="_pluginId" Variant="Variant.Outlined" Class="mt-3">
+                        @foreach (var plugin in _plugins) { <MudSelectItem T="Guid?" Value="@((Guid?)plugin.Id)">@plugin.AgentName (@plugin.AgentVersion)</MudSelectItem> }
+                    </MudSelect>
+                    <MudTextField Label="Managed category ID (optional)" @bind-Value="_managedRoot" Variant="Variant.Outlined" Class="mt-3" />
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="ConnectAsync" Class="mt-4">Save connection</MudButton>
+                </MudPaper>
+                @if (_connection is not null)
+                {
+                    <MudPaper Outlined="true" Class="pa-5 mt-4">
+                        <MudText Typo="Typo.h6">Link your identity</MudText><MudText Typo="Typo.body2" Class="my-2">Generate a code, then send <code>/link CODE</code> to the C-Sweet bot.</MudText>
+                        <MudButton Variant="Variant.Outlined" Disabled="_busy" OnClick="CreateLinkCodeAsync">Generate code</MudButton>
+                        @if (_linkCode is not null) { <MudAlert Severity="Severity.Info" Class="mt-3"><strong>@_linkCode.Code</strong> · expires @_linkCode.ExpiresAt.ToLocalTime().ToString("t")</MudAlert> }
+                    </MudPaper>
+                }
+            </MudItem>
+            <MudItem xs="12" md="7">
+                <MudPaper Outlined="true" Class="pa-5">
+                    <div class="d-flex justify-space-between align-center mb-3"><div><MudText Typo="Typo.h6">Provisioning preview</MudText><MudText Typo="Typo.body2" Color="Color.Secondary">Review managed changes before applying them.</MudText></div><MudButton Variant="Variant.Text" Disabled="@(_connection is null || _busy)" OnClick="LoadPreviewAsync">Refresh</MudButton></div>
+                    @if (_preview?.Changes.Count > 0)
+                    {
+                        <MudTable Items="_preview.Changes" Dense="true" Hover="true"><HeaderContent><MudTh>Change</MudTh><MudTh>Resource</MudTh><MudTh>Name</MudTh></HeaderContent><RowTemplate><MudTd>@context.Change</MudTd><MudTd>@context.Kind</MudTd><MudTd>@context.DesiredName</MudTd></RowTemplate></MudTable>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="ReconcileAsync" Class="mt-4">Apply approved changes</MudButton>
+                    }
+                    else { <MudText Typo="Typo.body2">@(_connection is null ? "Save a connection to preview its resources." : "No managed changes are required.")</MudText> }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+</MudContainer>
+
+@code {
+    [Parameter] public Guid OrganizationId { get; set; }
+    private CommunicationConnectionResponse? _connection; private ProvisioningPreviewResponse? _preview; private LinkCodeResponse? _linkCode;
+    private List<AgentInstallationResponse> _plugins = []; private Guid? _pluginId; private string _guildId = string.Empty, _mode = "Contained", _managedRoot = string.Empty;
+    private bool _loading = true, _busy; private string? _message; private Severity _severity = Severity.Info;
+    private string BasePath => $"api/organizations/{OrganizationId}/communications";
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        var response = await Http.GetAsync($"{BasePath}/discord");
+        if (response.IsSuccessStatusCode) { _connection = await response.Content.ReadFromJsonAsync<CommunicationConnectionResponse>(); _guildId = _connection?.WorkspaceExternalId ?? ""; _mode = _connection?.WorkspaceMode ?? "Contained"; _pluginId = _connection?.PluginInstallationId; _managedRoot = _connection?.ManagedRootExternalId ?? ""; }
+        _plugins = (await Http.GetFromJsonAsync<List<AgentInstallationResponse>>("api/plugins/installations") ?? []).Where(x => x.PluginKind == "CommunicationProvider" && x.InstallationScope == "System" && x.IsEnabled).ToList();
+        if (_connection is not null) await LoadPreviewAsync(); _loading = false;
+    }
+    private Task ConnectAsync() => BusyAsync(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(_guildId) || !_pluginId.HasValue) throw new InvalidOperationException("A server ID and installed communication plugin are required.");
+        var grant = await Http.PostAsJsonAsync($"api/plugins/installations/{_pluginId.Value:D}/organizations", new GrantPluginOrganizationRequest(OrganizationId)); grant.EnsureSuccessStatusCode();
+        var response = await Http.PostAsJsonAsync($"{BasePath}/discord/connect", new ConnectDiscordWorkspaceRequest(_guildId.Trim(), _mode, _pluginId.Value, string.IsNullOrWhiteSpace(_managedRoot) ? null : _managedRoot.Trim())); response.EnsureSuccessStatusCode();
+        _connection = await response.Content.ReadFromJsonAsync<CommunicationConnectionResponse>(); await LoadPreviewAsync(); Show("Discord connection saved.", Severity.Success);
+    });
+    private async Task LoadPreviewAsync() { var response = await Http.GetAsync($"{BasePath}/discord/provisioning-preview"); _preview = response.IsSuccessStatusCode ? await response.Content.ReadFromJsonAsync<ProvisioningPreviewResponse>() : null; }
+    private Task ReconcileAsync() => BusyAsync(async () => { var response = await Http.PostAsync($"{BasePath}/discord/reconcile", null); response.EnsureSuccessStatusCode(); Show("Provisioning queued.", Severity.Success); });
+    private Task CreateLinkCodeAsync() => BusyAsync(async () => { var response = await Http.PostAsync($"{BasePath}/discord/link-code", null); response.EnsureSuccessStatusCode(); _linkCode = await response.Content.ReadFromJsonAsync<LinkCodeResponse>(); });
+    private async Task BusyAsync(Func<Task> action) { _busy = true; try { await action(); } catch (Exception ex) { Show(ex.Message, Severity.Error); } finally { _busy = false; } }
+    private void Show(string value, Severity severity) { _message = value; _severity = severity; }
+}

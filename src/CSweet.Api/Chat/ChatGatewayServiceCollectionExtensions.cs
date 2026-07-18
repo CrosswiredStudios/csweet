@@ -1,5 +1,7 @@
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
+using CSweet.Api.Communications;
+using CSweet.Application.Communications;
 
 namespace CSweet.Api.Chat;
 
@@ -36,6 +38,8 @@ public static class ChatGatewayServiceCollectionExtensions
         services.AddSingleton<IAgentBrokerClient>(sp => sp.GetRequiredService<ApiGatewayBrokerConnection>());
         services.AddSingleton<IChatStreamRouter, ChatStreamRouter>();
         services.AddHostedService<ApiGatewayBrokerWorker>();
+        services.AddSingleton<ICommunicationEventPublisher, BrokerCommunicationEventPublisher>();
+        services.AddHostedService<CommunicationEventOutboxWorker>();
 
         return services;
     }

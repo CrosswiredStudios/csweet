@@ -2,16 +2,20 @@ using CSweet.Domain.Core;
 using CSweet.Domain.Communications;
 using CSweet.Domain.Planning;
 using CSweet.Domain.Setup;
+using CSweet.Contracts.Communications;
 using CSweet.Infrastructure.Auth;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace CSweet.Infrastructure.Persistence;
 
 public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>, IDataProtectionKeyContext
 {
+    private static readonly JsonSerializerOptions EventJsonOptions = new(JsonSerializerDefaults.Web);
+
     public CSweetDbContext(DbContextOptions<CSweetDbContext> options)
         : base(options)
     {
@@ -88,12 +92,129 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
     public DbSet<ExternalIdentity> ExternalIdentities => Set<ExternalIdentity>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
+    public DbSet<CommunicationEventOutboxItem> CommunicationEventOutbox => Set<CommunicationEventOutboxItem>();
     public DbSet<MemoryCaptureOutboxItem> MemoryCaptureOutbox => Set<MemoryCaptureOutboxItem>();
     public DbSet<AgentMemoryNamespaceRegistration> AgentMemoryNamespaces => Set<AgentMemoryNamespaceRegistration>();
     public DbSet<AgentMemoryRecallUse> AgentMemoryRecallUses => Set<AgentMemoryRecallUse>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<RootRecoveryCode> RootRecoveryCodes => Set<RootRecoveryCode>();
     public DbSet<EmailDeliveryConfiguration> EmailDeliveryConfigurations => Set<EmailDeliveryConfiguration>();
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        CaptureCommunicationEvents();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        CaptureCommunicationEvents();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void CaptureCommunicationEvents()
+    {
+        ChangeTracker.DetectChanges();
+        var conversations = ChangeTracker.Entries<Conversation>()
+            .Where(x => x.State is EntityState.Added or EntityState.Modified or EntityState.Deleted).ToList();
+        var participants = ChangeTracker.Entries<ConversationParticipant>()
+            .Where(x => x.State is EntityState.Added or EntityState.Modified or EntityState.Deleted).ToList();
+        var messages = ChangeTracker.Entries<ConversationMessage>()
+            .Where(x => x.State is EntityState.Added or EntityState.Modified or EntityState.Deleted).ToList();
+
+        foreach (var entry in conversations)
+        {
+            var chat = entry.Entity;
+            var eventType = entry.State switch
+            {
+                EntityState.Added => CommunicationEvents.ChatCreated,
+                EntityState.Deleted => CommunicationEvents.ChatDeleted,
+                EntityState.Modified when entry.Property(x => x.ArchivedAt).IsModified && chat.ArchivedAt.HasValue
+                    => CommunicationEvents.ChatArchived,
+                EntityState.Modified when HasConversationStateChange(entry) => CommunicationEvents.ChatUpdated,
+                _ => null
+            };
+            if (eventType is not null) QueueCommunicationEvent(chat.OrganizationId, chat.Id, eventType,
+                new CommunicationChatEvent(chat.Id, chat.OrganizationId, chat.Kind.ToString(),
+                    chat.InitiatedByOrganizationUserId, chat.AgentOrganizationUserId, chat.TeamId, chat.ProjectId,
+                    chat.Title, chat.Description, chat.IsPrivate, chat.CreatedAt, chat.UpdatedAt, chat.ArchivedAt));
+        }
+
+        foreach (var entry in participants)
+        {
+            var participant = entry.Entity;
+            var eventType = entry.State switch
+            {
+                EntityState.Added => CommunicationEvents.ParticipantAdded,
+                EntityState.Deleted => CommunicationEvents.ParticipantRemoved,
+                EntityState.Modified when entry.Property(x => x.LeftAt).IsModified && participant.LeftAt.HasValue
+                    => CommunicationEvents.ParticipantRemoved,
+                EntityState.Modified when entry.Property(x => x.LeftAt).IsModified && !participant.LeftAt.HasValue
+                    => CommunicationEvents.ParticipantAdded,
+                EntityState.Modified when entry.Property(x => x.Role).IsModified
+                    => CommunicationEvents.ParticipantUpdated,
+                _ => null
+            };
+            if (eventType is null) continue;
+            var organizationId = ResolveConversationOrganizationId(participant.ConversationId, participant.Conversation);
+            if (!organizationId.HasValue) continue;
+            QueueCommunicationEvent(organizationId.Value, participant.ConversationId, eventType,
+                new CommunicationParticipantEvent(participant.Id, participant.ConversationId,
+                    participant.OrganizationUserId, participant.Role.ToString(), participant.JoinedAt, participant.LeftAt));
+        }
+
+        foreach (var entry in messages)
+        {
+            var message = entry.Entity;
+            var eventType = entry.State switch
+            {
+                EntityState.Added => CommunicationEvents.MessageCreated,
+                EntityState.Deleted => CommunicationEvents.MessageDeleted,
+                EntityState.Modified when HasMessageStateChange(entry) => CommunicationEvents.MessageUpdated,
+                _ => null
+            };
+            if (eventType is null) continue;
+            var organizationId = ResolveConversationOrganizationId(message.ConversationId, message.Conversation);
+            if (!organizationId.HasValue) continue;
+            QueueCommunicationEvent(organizationId.Value, message.ConversationId, eventType,
+                new CommunicationMessageEvent(message.Id, message.ConversationId, message.SenderOrganizationUserId,
+                    message.ReplyToMessageId, message.Role.ToString(), message.Content, message.CorrelationId,
+                    message.CausationId, message.DeliveryIntent.ToString(), message.SourceProvider,
+                    message.SourceChannelExternalId, message.CreatedAt));
+        }
+    }
+
+    private static bool HasConversationStateChange(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<Conversation> entry) =>
+        entry.Property(x => x.Kind).IsModified || entry.Property(x => x.AgentOrganizationUserId).IsModified ||
+        entry.Property(x => x.TeamId).IsModified || entry.Property(x => x.ProjectId).IsModified ||
+        entry.Property(x => x.Title).IsModified || entry.Property(x => x.Description).IsModified ||
+        entry.Property(x => x.IsPrivate).IsModified || entry.Property(x => x.ArchivedAt).IsModified;
+
+    private static bool HasMessageStateChange(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<ConversationMessage> entry) =>
+        entry.Property(x => x.SenderOrganizationUserId).IsModified || entry.Property(x => x.ReplyToMessageId).IsModified ||
+        entry.Property(x => x.Role).IsModified || entry.Property(x => x.Content).IsModified ||
+        entry.Property(x => x.DeliveryIntent).IsModified || entry.Property(x => x.SourceProvider).IsModified ||
+        entry.Property(x => x.SourceChannelExternalId).IsModified;
+
+    private Guid? ResolveConversationOrganizationId(Guid chatId, Conversation? navigation)
+    {
+        if (navigation is not null) return navigation.OrganizationId;
+        var local = CoreConversations.Local.FirstOrDefault(x => x.Id == chatId);
+        if (local is not null) return local.OrganizationId;
+        return CoreConversations.AsNoTracking().Where(x => x.Id == chatId).Select(x => (Guid?)x.OrganizationId).SingleOrDefault();
+    }
+
+    private void QueueCommunicationEvent<T>(Guid organizationId, Guid chatId, string eventType, T data)
+    {
+        var now = DateTimeOffset.UtcNow;
+        CommunicationEventOutbox.Add(new CommunicationEventOutboxItem
+        {
+            Id = Guid.NewGuid(), OrganizationId = organizationId, ChatId = chatId,
+            EventType = eventType, Subject = CommunicationEvents.Subject(organizationId, chatId),
+            DataJson = JsonSerializer.Serialize(data, EventJsonOptions), Status = CommunicationEventOutboxStatus.Pending,
+            NextAttemptAt = now, OccurredAt = now
+        });
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

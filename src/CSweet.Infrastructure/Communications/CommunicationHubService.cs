@@ -1,0 +1,320 @@
+using CSweet.Application.Communications;
+using CSweet.Application.Setup;
+using CSweet.Contracts.Communications;
+using CSweet.Domain.Core;
+using CSweet.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+
+namespace CSweet.Infrastructure.Communications;
+
+public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWriter audit) : ICommunicationHubService
+{
+    public async Task<Guid?> ResolveOrganizationUserIdAsync(
+        Guid organizationId,
+        Guid applicationUserId,
+        CancellationToken cancellationToken = default) =>
+        await db.CoreOrganizationUsers
+            .Where(x => x.OrganizationId == organizationId && x.ApplicationUserId == applicationUserId && x.IsActive)
+            .Select(x => (Guid?)x.Id)
+            .SingleOrDefaultAsync(cancellationToken);
+
+    public async Task<CommunicationHubResponse?> GetAsync(
+        Guid organizationId,
+        Guid actorOrganizationUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var actor = await ActiveUserAsync(organizationId, actorOrganizationUserId, cancellationToken);
+        if (actor is null) return null;
+
+        var people = await db.CoreOrganizationUsers.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .Include(x => x.Role)
+            .OrderBy(x => x.DisplayName)
+            .ToListAsync(cancellationToken);
+
+        var chats = await db.CoreConversations.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.ArchivedAt == null &&
+                x.Participants.Any(p => p.OrganizationUserId == actorOrganizationUserId && p.LeftAt == null))
+            .Include(x => x.Participants).ThenInclude(x => x.OrganizationUser)
+            .Include(x => x.Messages)
+            .OrderByDescending(x => x.UpdatedAt)
+            .ToListAsync(cancellationToken);
+
+        var roles = await db.CoreRoles.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId)
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+        var workstreams = await db.Workstreams.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.Status != WorkstreamStatus.Cancelled)
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+        var responsibilities = await db.Responsibilities.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.WorkstreamId != null && x.Status == "Active")
+            .ToListAsync(cancellationToken);
+
+        var audiences = roles.Select(role => new CommunicationAudienceResponse(
+                "Role", role.Id, role.Name, people.Where(x => x.RoleId == role.Id).Select(x => x.Id).ToList()))
+            .Concat(workstreams.Select(workstream => new CommunicationAudienceResponse(
+                "Workstream", workstream.Id, workstream.Name,
+                responsibilities.Where(x => x.WorkstreamId == workstream.Id).Select(x => x.OrganizationUserId)
+                    .Append(workstream.AccountableManagerOrganizationUserId ?? Guid.Empty)
+                    .Where(x => x != Guid.Empty).Distinct().ToList())))
+            .ToList();
+
+        return new CommunicationHubResponse(
+            actor.Id,
+            actor.PermissionLevel >= OrganizationPermissionLevel.Manager,
+            chats.Select(x => MapChat(x, actor)).ToList(),
+            people.Select(x => new CommunicationPersonResponse(
+                x.Id, x.DisplayName, x.EmployeeType.ToString(), x.RoleId, x.Role?.Name)).ToList(),
+            audiences);
+    }
+
+    public async Task<IReadOnlyList<CommunicationHubMessageResponse>?> ListMessagesAsync(
+        Guid organizationId,
+        Guid chatId,
+        Guid actorOrganizationUserId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await IsActiveMemberAsync(organizationId, chatId, actorOrganizationUserId, cancellationToken)) return null;
+
+        var users = await db.CoreOrganizationUsers.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId)
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+        var messages = await db.CoreConversationMessages.AsNoTracking()
+            .Where(x => x.ConversationId == chatId)
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync(cancellationToken);
+        return messages.Select(x => MapMessage(x, users)).ToList();
+    }
+
+    public async Task<CommunicationHubActionResponse> CreateAsync(
+        Guid organizationId,
+        Guid actorOrganizationUserId,
+        CreateCommunicationChatRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var actor = await ActiveUserAsync(organizationId, actorOrganizationUserId, cancellationToken);
+        if (actor is null) return Failure("actor_not_found", "The chat creator is not an active member of this organization.");
+        if (!request.IsDirect && actor.PermissionLevel < OrganizationPermissionLevel.Manager && actor.EmployeeType != EmployeeType.Agent)
+            return Failure("not_authorized", "Only managers and granted agents can create group chats.");
+
+        var memberIds = await ExpandMembersAsync(organizationId, actor.Id, request.ParticipantOrganizationUserIds,
+            request.AudienceRoleIds, request.AudienceWorkstreamIds, cancellationToken);
+        var validation = await ValidateMembersAsync(organizationId, memberIds, request.IsDirect, cancellationToken);
+        if (validation is not null) return validation;
+
+        if (request.IsDirect)
+        {
+            var candidates = await db.CoreConversations
+                .Where(x => x.OrganizationId == organizationId && x.ArchivedAt == null &&
+                    x.Kind == ConversationKind.DirectHumanAgent && x.Participants.Count(p => p.LeftAt == null) == 2 &&
+                    x.Participants.Any(p => p.OrganizationUserId == actor.Id && p.LeftAt == null))
+                .Include(x => x.Participants).ThenInclude(x => x.OrganizationUser)
+                .Include(x => x.Messages)
+                .ToListAsync(cancellationToken);
+            var existing = candidates.FirstOrDefault(x => x.Participants.Where(p => p.LeftAt == null)
+                .Select(p => p.OrganizationUserId).ToHashSet().SetEquals(memberIds));
+            if (existing is not null) return Success("Direct chat already exists.", MapChat(existing, actor));
+        }
+
+        var members = await db.CoreOrganizationUsers.Where(x => memberIds.Contains(x.Id)).ToListAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var otherAgent = request.IsDirect ? members.SingleOrDefault(x => x.Id != actor.Id && x.EmployeeType == EmployeeType.Agent) : null;
+        var chat = new Conversation
+        {
+            Id = Guid.NewGuid(), OrganizationId = organizationId, InitiatedByOrganizationUserId = actor.Id,
+            AgentOrganizationUserId = otherAgent?.Id,
+            Kind = request.IsDirect ? ConversationKind.DirectHumanAgent : ConversationKind.Team,
+            Title = request.IsDirect ? null : request.Title?.Trim(),
+            Description = Clean(request.Description), IsPrivate = request.IsDirect || request.IsPrivate,
+            CreatedAt = now, UpdatedAt = now
+        };
+        if (!request.IsDirect && string.IsNullOrWhiteSpace(chat.Title))
+            return Failure("title_required", "Group chats require a title.");
+
+        foreach (var member in members)
+            chat.Participants.Add(new ConversationParticipant
+            {
+                Id = Guid.NewGuid(), OrganizationUserId = member.Id,
+                OrganizationUser = member,
+                Role = member.Id == actor.Id ? ConversationParticipantRole.Coordinator : ConversationParticipantRole.Member,
+                JoinedAt = now
+            });
+
+        db.CoreConversations.Add(chat);
+        await db.SaveChangesAsync(cancellationToken);
+        await audit.WriteAsync("communication.chat.created", "Conversation", chat.Id,
+            $"{actor.DisplayName} created {(request.IsDirect ? "a direct chat" : $"#{chat.Title}")}.", cancellationToken: cancellationToken);
+        return Success("Chat created.", MapChat(chat, actor));
+    }
+
+    public async Task<CommunicationHubActionResponse> UpdateAsync(
+        Guid organizationId,
+        Guid chatId,
+        Guid actorOrganizationUserId,
+        UpdateCommunicationChatRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var actor = await ActiveUserAsync(organizationId, actorOrganizationUserId, cancellationToken);
+        var chat = await db.CoreConversations
+            .Where(x => x.Id == chatId && x.OrganizationId == organizationId && x.ArchivedAt == null)
+            .Include(x => x.Participants).ThenInclude(x => x.OrganizationUser)
+            .Include(x => x.Messages)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (actor is null || chat is null) return Failure("chat_not_found", "The chat was not found.");
+        if (chat.Kind == ConversationKind.DirectHumanAgent) return Failure("direct_chat_immutable", "Direct-chat membership cannot be modified.");
+        if (!CanManage(chat, actor)) return Failure("not_authorized", "You do not have permission to modify this chat.");
+        if (string.IsNullOrWhiteSpace(request.Title)) return Failure("title_required", "A chat title is required.");
+
+        var memberIds = await ExpandMembersAsync(organizationId, actor.Id, request.ParticipantOrganizationUserIds,
+            request.AudienceRoleIds, request.AudienceWorkstreamIds, cancellationToken);
+        var validation = await ValidateMembersAsync(organizationId, memberIds, false, cancellationToken);
+        if (validation is not null) return validation;
+        var memberLookup = await db.CoreOrganizationUsers.Where(x => memberIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var participant in chat.Participants)
+        {
+            if (memberIds.Contains(participant.OrganizationUserId))
+            {
+                participant.LeftAt = null;
+                if (participant.OrganizationUserId == actor.Id) participant.Role = ConversationParticipantRole.Coordinator;
+            }
+            else participant.LeftAt ??= now;
+        }
+        foreach (var memberId in memberIds.Where(id => chat.Participants.All(x => x.OrganizationUserId != id)))
+            chat.Participants.Add(new ConversationParticipant
+            {
+                Id = Guid.NewGuid(), OrganizationUserId = memberId,
+                OrganizationUser = memberLookup[memberId],
+                Role = memberId == actor.Id ? ConversationParticipantRole.Coordinator : ConversationParticipantRole.Member,
+                JoinedAt = now
+            });
+
+        chat.Title = request.Title.Trim();
+        chat.Description = Clean(request.Description);
+        chat.IsPrivate = request.IsPrivate;
+        chat.UpdatedAt = now;
+        await db.SaveChangesAsync(cancellationToken);
+        await audit.WriteAsync("communication.chat.modified", "Conversation", chat.Id,
+            $"{actor.DisplayName} updated #{chat.Title}.", cancellationToken: cancellationToken);
+        return Success("Chat updated.", MapChat(chat, actor));
+    }
+
+    public async Task<CommunicationHubActionResponse> ArchiveAsync(
+        Guid organizationId,
+        Guid chatId,
+        Guid actorOrganizationUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var actor = await ActiveUserAsync(organizationId, actorOrganizationUserId, cancellationToken);
+        var chat = await db.CoreConversations.Include(x => x.Participants)
+            .SingleOrDefaultAsync(x => x.Id == chatId && x.OrganizationId == organizationId && x.ArchivedAt == null, cancellationToken);
+        if (actor is null || chat is null) return Failure("chat_not_found", "The chat was not found.");
+        if (chat.Kind == ConversationKind.DirectHumanAgent) return Failure("direct_chat_delete_denied", "Direct chats cannot be deleted.");
+        if (!CanManage(chat, actor)) return Failure("not_authorized", "You do not have permission to delete this chat.");
+
+        chat.ArchivedAt = DateTimeOffset.UtcNow;
+        chat.UpdatedAt = chat.ArchivedAt.Value;
+        await db.SaveChangesAsync(cancellationToken);
+        await audit.WriteAsync("communication.chat.archived", "Conversation", chat.Id,
+            $"{actor.DisplayName} archived #{chat.Title} without deleting its history.", cancellationToken: cancellationToken);
+        return Success("Chat archived. Its history was preserved.");
+    }
+
+    public async Task<CommunicationHubMessageResponse?> SendAsync(
+        Guid organizationId,
+        Guid chatId,
+        Guid actorOrganizationUserId,
+        SendCommunicationMessageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var actor = await ActiveUserAsync(organizationId, actorOrganizationUserId, cancellationToken);
+        var chat = await db.CoreConversations
+            .SingleOrDefaultAsync(x => x.Id == chatId && x.OrganizationId == organizationId && x.ArchivedAt == null &&
+                x.Participants.Any(p => p.OrganizationUserId == actorOrganizationUserId && p.LeftAt == null), cancellationToken);
+        if (actor is null || chat is null || string.IsNullOrWhiteSpace(request.Content)) return null;
+
+        var now = DateTimeOffset.UtcNow;
+        var message = new ConversationMessage
+        {
+            Id = Guid.NewGuid(), ConversationId = chat.Id, SenderOrganizationUserId = actor.Id,
+            Role = actor.EmployeeType == EmployeeType.Agent ? ConversationRole.Assistant : ConversationRole.User,
+            Content = request.Content.Trim(), CorrelationId = Guid.NewGuid(), DeliveryIntent = CommunicationDeliveryIntent.Inform,
+            SourceProvider = "InApp", CreatedAt = now
+        };
+        chat.UpdatedAt = now;
+        db.CoreConversationMessages.Add(message);
+        await db.SaveChangesAsync(cancellationToken);
+        return new CommunicationHubMessageResponse(message.Id, chat.Id, actor.Id, actor.DisplayName,
+            actor.EmployeeType.ToString(), message.Content, message.CreatedAt);
+    }
+
+    private Task<OrganizationUser?> ActiveUserAsync(Guid organizationId, Guid userId, CancellationToken token) =>
+        db.CoreOrganizationUsers.SingleOrDefaultAsync(x => x.Id == userId && x.OrganizationId == organizationId && x.IsActive, token);
+
+    private Task<bool> IsActiveMemberAsync(Guid organizationId, Guid chatId, Guid userId, CancellationToken token) =>
+        db.CoreConversations.AnyAsync(x => x.Id == chatId && x.OrganizationId == organizationId && x.ArchivedAt == null &&
+            x.Participants.Any(p => p.OrganizationUserId == userId && p.LeftAt == null), token);
+
+    private async Task<HashSet<Guid>> ExpandMembersAsync(Guid organizationId, Guid actorId, IReadOnlyList<Guid>? directIds,
+        IReadOnlyList<Guid>? roleIds, IReadOnlyList<Guid>? workstreamIds, CancellationToken token)
+    {
+        var ids = (directIds ?? []).Append(actorId).ToHashSet();
+        if (roleIds?.Count > 0)
+            ids.UnionWith(await db.CoreOrganizationUsers.Where(x => x.OrganizationId == organizationId && x.IsActive &&
+                x.RoleId != null && roleIds.Contains(x.RoleId.Value)).Select(x => x.Id).ToListAsync(token));
+        if (workstreamIds?.Count > 0)
+        {
+            ids.UnionWith(await db.Responsibilities.Where(x => x.OrganizationId == organizationId && x.Status == "Active" &&
+                x.WorkstreamId != null && workstreamIds.Contains(x.WorkstreamId.Value)).Select(x => x.OrganizationUserId).ToListAsync(token));
+            ids.UnionWith(await db.Workstreams.Where(x => x.OrganizationId == organizationId && workstreamIds.Contains(x.Id) &&
+                x.AccountableManagerOrganizationUserId != null).Select(x => x.AccountableManagerOrganizationUserId!.Value).ToListAsync(token));
+        }
+        return ids;
+    }
+
+    private async Task<CommunicationHubActionResponse?> ValidateMembersAsync(Guid organizationId, HashSet<Guid> ids, bool direct, CancellationToken token)
+    {
+        if (direct && ids.Count != 2) return Failure("direct_participant_count", "A direct chat must contain exactly two people.");
+        if (!direct && ids.Count < 2) return Failure("group_participant_count", "A group chat must contain at least two people.");
+        if (ids.Count > 250) return Failure("participant_limit", "A chat cannot contain more than 250 people.");
+        var validCount = await db.CoreOrganizationUsers.CountAsync(x => x.OrganizationId == organizationId && x.IsActive && ids.Contains(x.Id), token);
+        return validCount == ids.Count ? null : Failure("invalid_participant", "Every participant must be an active member of this organization.");
+    }
+
+    private static bool CanManage(Conversation chat, OrganizationUser actor) =>
+        actor.PermissionLevel >= OrganizationPermissionLevel.Manager ||
+        chat.Participants.Any(x => x.OrganizationUserId == actor.Id && x.LeftAt == null && x.Role == ConversationParticipantRole.Coordinator);
+
+    private static CommunicationChatResponse MapChat(Conversation chat, OrganizationUser actor)
+    {
+        var active = chat.Participants.Where(x => x.LeftAt == null).ToList();
+        var direct = chat.Kind == ConversationKind.DirectHumanAgent;
+        var title = chat.Title;
+        if (direct)
+            title = active.FirstOrDefault(x => x.OrganizationUserId != actor.Id)?.OrganizationUser?.DisplayName
+                ?? active.FirstOrDefault()?.OrganizationUser?.DisplayName ?? "Direct message";
+        var last = chat.Messages.OrderByDescending(x => x.CreatedAt).FirstOrDefault();
+        return new CommunicationChatResponse(chat.Id, title ?? "Untitled chat", chat.Description, direct, chat.IsPrivate,
+            !direct && CanManage(chat, actor), chat.UpdatedAt,
+            active.Select(x => new CommunicationParticipantResponse(x.OrganizationUserId,
+                x.OrganizationUser?.DisplayName ?? "Unknown", x.OrganizationUser?.EmployeeType.ToString() ?? "Unknown", x.Role.ToString())).ToList(),
+            last?.Content, last?.CreatedAt);
+    }
+
+    private static CommunicationHubMessageResponse MapMessage(ConversationMessage message, IReadOnlyDictionary<Guid, OrganizationUser> users)
+    {
+        var sender = message.SenderOrganizationUserId.HasValue && users.TryGetValue(message.SenderOrganizationUserId.Value, out var user) ? user : null;
+        return new CommunicationHubMessageResponse(message.Id, message.ConversationId, message.SenderOrganizationUserId,
+            sender?.DisplayName ?? (message.Role == ConversationRole.Assistant ? "Assistant" : "Unknown"),
+            sender?.EmployeeType.ToString() ?? (message.Role == ConversationRole.Assistant ? "Agent" : "Human"),
+            message.Content, message.CreatedAt);
+    }
+
+    private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static CommunicationHubActionResponse Success(string message, CommunicationChatResponse? chat = null) => new(true, null, message, chat);
+    private static CommunicationHubActionResponse Failure(string code, string message) => new(false, code, message);
+}

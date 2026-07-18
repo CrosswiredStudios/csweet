@@ -89,7 +89,7 @@
     private string? _message;
     private Severity _severity = Severity.Info;
     private Guid? OrganizationId => BusinessContext.SelectedBusiness?.Id;
-    private string DiscordSetupHref => $"/organizations/{OrganizationId}/communications";
+    private string DiscordSetupHref => $"/organizations/{OrganizationId}/communications/providers/discord";
 
     protected override async Task OnInitializedAsync()
     {

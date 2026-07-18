@@ -10,6 +10,9 @@ public sealed class Conversation
     public Guid? TeamId { get; set; }
     public Guid? ProjectId { get; set; }
     public string? Title { get; set; }
+    public string? Description { get; set; }
+    public bool IsPrivate { get; set; }
+    public DateTimeOffset? ArchivedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 

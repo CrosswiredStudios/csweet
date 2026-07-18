@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
+using CSweet.Contracts.Communications;
 using Microsoft.Extensions.Options;
 
 namespace CSweet.Api.Chat;
@@ -88,6 +89,7 @@ public sealed class ApiGatewayBrokerWorker : BackgroundService
         };
 
         registration.RequestedPublications.Add(AgentChatEvents.UserMessageReceivedEvent);
+        registration.RequestedPublications.AddRange(CommunicationEvents.All);
         registration.RequestedSubscriptions.Add(AgentChatEvents.AssistantResponseChunkEvent);
         registration.RequestedSubscriptions.Add(AgentChatEvents.AssistantResponseCreatedEvent);
         registration.RequestedPermissions.Add("installation.route");

@@ -37,6 +37,7 @@ builder.Services.AddScoped<IPlatformCapabilityHandler, MemoryPlatformCapabilityA
 builder.Services.AddScoped<IPlatformCapabilityHandler, WebPlatformCapabilityAdapter>();
 builder.Services.AddScoped<IPlatformCapabilityHandler, WebSocketPlatformCapabilityAdapter>();
 builder.Services.AddScoped<IPlatformCapabilityHandler, WorkforcePlatformCapabilityHandler>();
+builder.Services.AddScoped<IPlatformCapabilityHandler, CommunicationHubCapabilityHandler>();
 builder.Services.AddScoped<IPlatformEventObserver, ManagementEventObserver>();
 builder.Services.AddScoped<IAgentMemoryIdentityResolver, AgentMemoryIdentityResolver>();
 

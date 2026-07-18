@@ -1,220 +1,354 @@
 @page "/organizations/{OrganizationId:guid}/communications"
 @using CSweet.Contracts.Communications
-@using CSweet.Contracts.Agents
+@implements IDisposable
 @inject HttpClient Http
 
 <PageTitle>Communications - C-Sweet</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Large" Class="py-8">
-    <MudText Typo="Typo.h4">Communications</MudText>
-    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mb-6">
-        Connect a Discord server as a managed extension of this company. Employees remain authoritative in C-Sweet.
-    </MudText>
-
-    @if (!string.IsNullOrWhiteSpace(_message))
+<div class="hub-page">
+    @if (_loading)
     {
-        <MudAlert Severity="@_messageSeverity" Variant="Variant.Outlined" Class="mb-4">@_message</MudAlert>
+        <div class="hub-centered"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /><span>Opening communications…</span></div>
     }
-
-    <MudGrid>
-        <MudItem xs="12" md="5">
-            <MudPaper Class="pa-5" Outlined="true">
-                <MudText Typo="Typo.h6" Class="mb-4">Discord workspace</MudText>
-                @if (_loading)
-                {
-                    <MudProgressLinear Indeterminate="true" />
-                }
-                else if (_connection is not null)
-                {
-                    <MudList T="string" Dense="true">
-                        <MudListItem>Server: @_connection.WorkspaceExternalId</MudListItem>
-                        <MudListItem>Mode: @_connection.WorkspaceMode</MudListItem>
-                        <MudListItem>Status: @_connection.Status</MudListItem>
-                    </MudList>
-                }
-
-                <MudTextField Label="Discord server (guild) ID" @bind-Value="_guildId" Variant="Variant.Outlined" Class="mt-3" />
-                <MudSelect T="string" Label="Workspace mode" @bind-Value="_mode" Variant="Variant.Outlined" Class="mt-3">
-                    <MudSelectItem Value="@("Dedicated")">Dedicated server</MudSelectItem>
-                    <MudSelectItem Value="@("Contained")">Existing server</MudSelectItem>
-                </MudSelect>
-                <MudSelect T="Guid?" Label="Communication plugin" @bind-Value="_pluginInstallationId" Variant="Variant.Outlined" Class="mt-3">
-                    @foreach (var plugin in _plugins)
+    else if (!string.IsNullOrWhiteSpace(_error) || _hub is null)
+    {
+        <div class="hub-centered">
+            <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Color="Color.Error" Size="Size.Large" />
+            <MudText Typo="Typo.h6">Communications could not be opened</MudText>
+            <MudText Color="Color.Secondary">@_error</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">Try again</MudButton>
+        </div>
+    }
+    else
+    {
+        <aside class="hub-sidebar">
+            <div class="hub-brand">
+                <div class="hub-logo"><MudIcon Icon="@Icons.Material.Filled.Forum" /></div>
+                <div><strong>Communications</strong><span>C-Sweet workspace</span></div>
+            </div>
+            <div class="hub-search">
+                <MudIcon Icon="@Icons.Material.Filled.Search" Size="Size.Small" />
+                <input aria-label="Search conversations" placeholder="Search" @bind="_search" @bind:event="oninput" />
+            </div>
+            <nav class="hub-nav" aria-label="Conversations">
+                <div class="hub-section-title">
+                    <span>Channels</span>
+                    @if (_hub.CanManageChats)
                     {
-                        <MudSelectItem T="Guid?" Value="@((Guid?)plugin.Id)">@plugin.AgentName (@plugin.AgentVersion)</MudSelectItem>
+                        <button title="Create channel" aria-label="Create channel" @onclick="OpenCreateGroup"><MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" /></button>
                     }
-                </MudSelect>
-                <MudTextField Label="Managed category ID (optional)" @bind-Value="_managedRootExternalId" Variant="Variant.Outlined" Class="mt-3"
-                              HelperText="Use a distinct category root when multiple businesses share one Discord server." />
-                <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@_busy" OnClick="ConnectAsync" Class="mt-4">
-                    Save connection
-                </MudButton>
-            </MudPaper>
-
-            @if (_connection is not null)
-            {
-                <MudPaper Class="pa-5 mt-4" Outlined="true">
-                    <MudText Typo="Typo.h6">Link your Discord identity</MudText>
-                    <MudText Typo="Typo.body2" Class="my-2">Generate a short-lived code, then send <code>/link CODE</code> to the C-Sweet bot.</MudText>
-                    <MudButton Variant="Variant.Outlined" Disabled="@_busy" OnClick="CreateLinkCodeAsync">Generate link code</MudButton>
-                    @if (_linkCode is not null)
-                    {
-                        <MudAlert Severity="Severity.Info" Class="mt-3">
-                            Code: <strong>@_linkCode.Code</strong> (expires @_linkCode.ExpiresAt.ToLocalTime().ToString("t"))
-                        </MudAlert>
-                    }
-                </MudPaper>
-            }
-        </MudItem>
-
-        <MudItem xs="12" md="7">
-            <MudPaper Class="pa-5" Outlined="true">
-                <div class="d-flex justify-space-between align-center mb-4">
-                    <div>
-                        <MudText Typo="Typo.h6">Provisioning preview</MudText>
-                        <MudText Typo="Typo.body2" Color="Color.Secondary">Review every managed change before queuing it.</MudText>
-                    </div>
-                    <MudButton Variant="Variant.Text" Disabled="@(_busy || _connection is null)" OnClick="LoadPreviewAsync">Refresh</MudButton>
                 </div>
+                @foreach (var chat in FilteredChats.Where(x => !x.IsDirect))
+                {
+                    <button class="hub-nav-item @(chat.Id == _selected?.Id ? "active" : null)" @onclick="@(() => SelectChatAsync(chat))">
+                        <MudIcon Icon="@(chat.IsPrivate ? Icons.Material.Filled.Lock : Icons.Material.Filled.Tag)" Size="Size.Small" />
+                        <span>@chat.Title</span>
+                    </button>
+                }
+                @if (!FilteredChats.Any(x => !x.IsDirect))
+                {
+                    <p class="hub-nav-empty">No channels yet</p>
+                }
 
-                @if (_preview?.Changes.Count > 0)
+                <div class="hub-section-title direct"><span>Direct messages</span></div>
+                @foreach (var chat in FilteredChats.Where(x => x.IsDirect))
                 {
-                    <MudTable Items="_preview.Changes" Dense="true" Hover="true">
-                        <HeaderContent>
-                            <MudTh>Change</MudTh><MudTh>Resource</MudTh><MudTh>Name</MudTh><MudTh>Purpose</MudTh>
-                        </HeaderContent>
-                        <RowTemplate>
-                            <MudTd DataLabel="Change">@context.Change</MudTd>
-                            <MudTd DataLabel="Resource">@context.Kind</MudTd>
-                            <MudTd DataLabel="Name">@context.DesiredName</MudTd>
-                            <MudTd DataLabel="Purpose">@context.Purpose</MudTd>
-                        </RowTemplate>
-                    </MudTable>
-                    <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@_busy" OnClick="ReconcileAsync" Class="mt-4">
-                        Queue approved changes
-                    </MudButton>
+                    var person = chat.Participants.FirstOrDefault(x => x.OrganizationUserId != _hub.CurrentOrganizationUserId);
+                    <button class="hub-nav-item @(chat.Id == _selected?.Id ? "active" : null)" @onclick="@(() => SelectChatAsync(chat))">
+                        <span class="presence-dot"></span><span>@chat.Title</span>
+                        @if (person?.EmployeeType == "Agent") { <span class="agent-mark">AI</span> }
+                    </button>
                 }
-                else
-                {
-                    <MudText Typo="Typo.body2">@(_connection is null ? "Connect a Discord workspace to generate a preview." : "No managed changes are currently required.")</MudText>
-                }
-            </MudPaper>
+            </nav>
+            <a class="hub-settings" href="/settings/communications"><MudIcon Icon="@Icons.Material.Outlined.Settings" Size="Size.Small" /> Connected apps</a>
+        </aside>
 
-            <MudPaper Class="pa-5 mt-4" Outlined="true">
-                <MudText Typo="Typo.h6">Notifications</MudText>
-                @if (_notifications.Count == 0)
-                {
-                    <MudText Typo="Typo.body2" Class="mt-2">No communication notifications.</MudText>
-                }
-                else
-                {
-                    <MudList T="NotificationResponse" Dense="true">
-                        @foreach (var notification in _notifications)
+        <main class="hub-main">
+            @if (_selected is null)
+            {
+                <div class="hub-empty">
+                    <div class="hub-empty-icon"><MudIcon Icon="@Icons.Material.Outlined.Forum" Size="Size.Large" /></div>
+                    <MudText Typo="Typo.h5">Your company conversations live here</MudText>
+                    <MudText Color="Color.Secondary">Choose a channel, or start a direct message with a teammate.</MudText>
+                </div>
+            }
+            else
+            {
+                <header class="hub-chat-header">
+                    <div>
+                        <div class="hub-title-line">
+                            <MudIcon Icon="@(_selected.IsDirect ? Icons.Material.Filled.AlternateEmail : _selected.IsPrivate ? Icons.Material.Filled.Lock : Icons.Material.Filled.Tag)" />
+                            <strong>@_selected.Title</strong>
+                        </div>
+                        <span>@(_selected.Description ?? ParticipantSummary(_selected))</span>
+                    </div>
+                    <div class="hub-header-actions">
+                        <button title="Members" @onclick="@(() => _showMembers = !_showMembers)"><MudIcon Icon="@Icons.Material.Outlined.Group" /><span>@_selected.Participants.Count</span></button>
+                        @if (_selected.CanManage)
                         {
-                            <MudListItem Value="notification">
-                                <MudText Typo="Typo.subtitle2">@notification.Title</MudText>
-                                <MudText Typo="Typo.body2">@notification.Body</MudText>
-                            </MudListItem>
+                            <button title="Manage channel" @onclick="OpenEdit"><MudIcon Icon="@Icons.Material.Outlined.Edit" /></button>
                         }
-                    </MudList>
+                    </div>
+                </header>
+
+                @if (!string.IsNullOrWhiteSpace(_notice))
+                {
+                    <div class="hub-notice">@_notice</div>
                 }
-            </MudPaper>
-        </MudItem>
-    </MudGrid>
-</MudContainer>
+
+                <section class="hub-message-list" role="log" aria-live="polite">
+                    @if (_messages.Count == 0)
+                    {
+                        <div class="hub-welcome">
+                            <div class="hub-welcome-icon">@(_selected.IsDirect ? "@" : "#")</div>
+                            <MudText Typo="Typo.h5">This is the start of @_selected.Title</MudText>
+                            <MudText Color="Color.Secondary">Keep decisions, context, and work moving in one place.</MudText>
+                        </div>
+                    }
+                    @foreach (var message in _messages)
+                    {
+                        <article class="hub-message @(message.SenderOrganizationUserId == _hub.CurrentOrganizationUserId ? "mine" : null)">
+                            <div class="hub-avatar @AvatarClass(message.SenderEmployeeType)">@Initials(message.SenderDisplayName)</div>
+                            <div>
+                                <div class="hub-message-meta"><strong>@message.SenderDisplayName</strong>@if (message.SenderEmployeeType == "Agent") { <span>AGENT</span> }<time>@message.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</time></div>
+                                <p>@message.Content</p>
+                            </div>
+                        </article>
+                    }
+                </section>
+
+                <footer class="hub-composer">
+                    <MudTextField @bind-Value="_draft" Placeholder="@ComposerPlaceholder"
+                                  Variant="Variant.Outlined" Lines="2" Immediate="true" OnKeyDown="OnComposerKeyDown" Disabled="_sending" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendAsync"
+                               Disabled="@(_sending || string.IsNullOrWhiteSpace(_draft))" EndIcon="@Icons.Material.Filled.Send">Send</MudButton>
+                </footer>
+            }
+        </main>
+
+        <aside class="hub-people @(_showMembers ? "open" : null)">
+            <div class="hub-people-header"><strong>@(_selected is null ? "People" : "Members")</strong><button @onclick="@(() => _showMembers = false)"><MudIcon Icon="@Icons.Material.Filled.Close" /></button></div>
+            @foreach (var person in VisiblePeople)
+            {
+                <button class="hub-person" @onclick="@(() => StartDirectAsync(person))" disabled="@(person.Id == _hub.CurrentOrganizationUserId)">
+                    <span class="hub-avatar @AvatarClass(person.EmployeeType)">@Initials(person.DisplayName)</span>
+                    <span><strong>@person.DisplayName</strong><small>@(person.EmployeeType == "Agent" ? "AI employee" : person.RoleName ?? "Team member")</small></span>
+                    <span class="presence-dot"></span>
+                </button>
+            }
+        </aside>
+
+        @if (_showEditor)
+        {
+            <div class="hub-dialog-backdrop" @onclick="CloseEditor">
+                <section class="hub-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-editor-title" @onclick:stopPropagation="true">
+                    <header><div><span>@(_editing is null ? "NEW CHANNEL" : "CHANNEL SETTINGS")</span><h2 id="chat-editor-title">@(_editing is null ? "Create a place to work" : $"Manage #{_editing.Title}")</h2></div><button @onclick="CloseEditor"><MudIcon Icon="@Icons.Material.Filled.Close" /></button></header>
+                    @if (!string.IsNullOrWhiteSpace(_editorError)) { <MudAlert Severity="Severity.Error" Dense="true">@_editorError</MudAlert> }
+                    <MudTextField Label="Channel name" @bind-Value="_editorTitle" Variant="Variant.Outlined" Immediate="true" />
+                    <MudTextField Label="Description" @bind-Value="_editorDescription" Variant="Variant.Outlined" Lines="2" />
+                    <MudCheckBox T="bool" @bind-Value="_editorPrivate" Label="Private channel" />
+                    @if (_hub.Audiences.Count > 0)
+                    {
+                        <div class="hub-editor-section"><strong>Add a whole group</strong><span>Role-based departments and active product workstreams stay easy to select.</span>
+                            <div class="hub-audience-list">
+                                @foreach (var audience in _hub.Audiences)
+                                {
+                                    <button class="@(_selectedAudiences.Contains(AudienceKey(audience)) ? "selected" : null)" @onclick="@(() => ToggleAudience(audience))">
+                                        <MudIcon Icon="@(audience.Kind == "Workstream" ? Icons.Material.Outlined.RocketLaunch : Icons.Material.Outlined.CorporateFare)" />
+                                        <span>@audience.Name<small>@audience.Kind · @audience.OrganizationUserIds.Count people</small></span>
+                                        <MudIcon Icon="@(_selectedAudiences.Contains(AudienceKey(audience)) ? Icons.Material.Filled.CheckCircle : Icons.Material.Outlined.AddCircleOutline)" />
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                    <div class="hub-editor-section"><strong>Members</strong><span>@_selectedMembers.Count selected</span>
+                        <div class="hub-member-grid">
+                            @foreach (var person in _hub.People)
+                            {
+                                <label><input type="checkbox" checked="@_selectedMembers.Contains(person.Id)" @onchange="@(() => ToggleMember(person.Id))" /><span class="hub-avatar @AvatarClass(person.EmployeeType)">@Initials(person.DisplayName)</span><span>@person.DisplayName<small>@(person.RoleName ?? person.EmployeeType)</small></span></label>
+                            }
+                        </div>
+                    </div>
+                    @if (_confirmArchive)
+                    {
+                        <MudAlert Severity="Severity.Warning">Archive this channel? Its history will be preserved and it will disappear from the workspace.</MudAlert>
+                    }
+                    <footer>
+                        @if (_editing is not null)
+                        {
+                            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="ArchiveAsync">@(_confirmArchive ? "Confirm archive" : "Archive channel")</MudButton>
+                        }
+                        <span></span><MudButton Variant="Variant.Text" OnClick="CloseEditor">Cancel</MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_editorBusy" OnClick="SaveEditorAsync">@(_editing is null ? "Create channel" : "Save changes")</MudButton>
+                    </footer>
+                </section>
+            </div>
+        }
+    }
+</div>
 
 @code {
     [Parameter] public Guid OrganizationId { get; set; }
-    private CommunicationConnectionResponse? _connection;
-    private ProvisioningPreviewResponse? _preview;
-    private LinkCodeResponse? _linkCode;
-    private List<NotificationResponse> _notifications = [];
-    private string _guildId = string.Empty;
-    private Guid? _pluginInstallationId;
-    private string _managedRootExternalId = string.Empty;
-    private List<AgentInstallationResponse> _plugins = [];
-    private string _mode = "Contained";
-    private bool _loading = true;
-    private bool _busy;
-    private string? _message;
-    private Severity _messageSeverity = Severity.Info;
-    private string BasePath => $"api/organizations/{OrganizationId}/communications";
+    private readonly CancellationTokenSource _disposeCts = new();
+    private CommunicationHubResponse? _hub;
+    private CommunicationChatResponse? _selected;
+    private CommunicationChatResponse? _editing;
+    private readonly List<CommunicationHubMessageResponse> _messages = [];
+    private readonly HashSet<Guid> _selectedMembers = [];
+    private readonly HashSet<string> _selectedAudiences = [];
+    private bool _loading = true, _sending, _showMembers, _showEditor, _editorBusy, _editorPrivate, _confirmArchive;
+    private string _search = string.Empty, _draft = string.Empty, _editorTitle = string.Empty, _editorDescription = string.Empty;
+    private string? _error, _notice, _editorError;
+    private string BasePath => $"api/organizations/{OrganizationId}/communications/hub";
+    private IEnumerable<CommunicationChatResponse> FilteredChats => (_hub?.Chats ?? []).Where(x => string.IsNullOrWhiteSpace(_search) || x.Title.Contains(_search, StringComparison.OrdinalIgnoreCase));
+    private IEnumerable<CommunicationPersonResponse> VisiblePeople => _selected is null || !_showMembers
+        ? (_hub?.People ?? [])
+        : _hub!.People.Where(x => _selected.Participants.Any(p => p.OrganizationUserId == x.Id));
+    private string ComposerPlaceholder => _selected is null ? "Message" :
+        $"Message {(_selected.IsDirect ? _selected.Title : $"#{_selected.Title}")}";
 
-    protected override async Task OnParametersSetAsync()
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
     {
-        _loading = true;
+        _loading = true; _error = null;
         try
         {
-            var connectionResponse = await Http.GetAsync($"{BasePath}/discord");
-            _plugins = (await Http.GetFromJsonAsync<List<AgentInstallationResponse>>("api/plugins/installations") ?? [])
-                .Where(x => x.PluginKind == "CommunicationProvider" && x.InstallationScope == "System" && x.IsEnabled).ToList();
-            if (connectionResponse.IsSuccessStatusCode)
-            {
-                _connection = await connectionResponse.Content.ReadFromJsonAsync<CommunicationConnectionResponse>();
-                _guildId = _connection?.WorkspaceExternalId ?? string.Empty;
-                _mode = _connection?.WorkspaceMode ?? "Contained";
-                _pluginInstallationId = _connection?.PluginInstallationId;
-                _managedRootExternalId = _connection?.ManagedRootExternalId ?? string.Empty;
-            }
-            _notifications = await Http.GetFromJsonAsync<List<NotificationResponse>>($"{BasePath}/notifications") ?? [];
-            if (_connection is not null) await LoadPreviewAsync();
+            _hub = await Http.GetFromJsonAsync<CommunicationHubResponse>(BasePath, _disposeCts.Token);
+            _selected = _hub?.Chats.FirstOrDefault(x => x.Id == _selected?.Id) ?? _hub?.Chats.FirstOrDefault();
+            if (_selected is not null) await LoadMessagesAsync();
+            _ = PollAsync();
         }
+        catch (Exception ex) when (ex is not OperationCanceledException) { _error = ex.Message; }
         finally { _loading = false; }
     }
 
-    private async Task ConnectAsync()
+    private async Task PollAsync()
     {
-        if (string.IsNullOrWhiteSpace(_guildId) || !_pluginInstallationId.HasValue)
+        try
         {
-            Show("A server ID and installed communication plugin are required.", Severity.Warning);
-            return;
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+            while (await timer.WaitForNextTickAsync(_disposeCts.Token))
+            {
+                if (_selected is not null && !_sending && !_showEditor)
+                {
+                    var latest = await Http.GetFromJsonAsync<List<CommunicationHubMessageResponse>>($"{BasePath}/chats/{_selected.Id}/messages", _disposeCts.Token) ?? [];
+                    if (latest.Count != _messages.Count || latest.LastOrDefault()?.Id != _messages.LastOrDefault()?.Id)
+                    {
+                        _messages.Clear(); _messages.AddRange(latest); await InvokeAsync(StateHasChanged);
+                    }
+                }
+            }
         }
-        await BusyAsync(async () =>
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task SelectChatAsync(CommunicationChatResponse chat) { _selected = chat; _showMembers = false; _notice = null; await LoadMessagesAsync(); }
+    private async Task LoadMessagesAsync()
+    {
+        if (_selected is null) return;
+        var items = await Http.GetFromJsonAsync<List<CommunicationHubMessageResponse>>($"{BasePath}/chats/{_selected.Id}/messages", _disposeCts.Token) ?? [];
+        _messages.Clear(); _messages.AddRange(items);
+    }
+
+    private async Task SendAsync()
+    {
+        if (_selected is null || string.IsNullOrWhiteSpace(_draft)) return;
+        _sending = true; _notice = null;
+        var content = _draft.Trim(); _draft = string.Empty;
+        try
         {
-            var grant = await Http.PostAsJsonAsync($"api/plugins/installations/{_pluginInstallationId.Value:D}/organizations",
-                new GrantPluginOrganizationRequest(OrganizationId));
-            if (!grant.IsSuccessStatusCode) throw new InvalidOperationException(await grant.Content.ReadAsStringAsync());
-            var response = await Http.PostAsJsonAsync($"{BasePath}/discord/connect", new ConnectDiscordWorkspaceRequest(
-                _guildId.Trim(), _mode, _pluginInstallationId.Value,
-                string.IsNullOrWhiteSpace(_managedRootExternalId) ? null : _managedRootExternalId.Trim()));
-            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
-            _connection = await response.Content.ReadFromJsonAsync<CommunicationConnectionResponse>();
-            await LoadPreviewAsync();
-            Show("Discord workspace connected. Review the provisioning preview before applying changes.", Severity.Success);
-        });
+            var response = await Http.PostAsJsonAsync($"{BasePath}/chats/{_selected.Id}/messages", new SendCommunicationMessageRequest(content), _disposeCts.Token);
+            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(await response.Content.ReadAsStringAsync(_disposeCts.Token));
+            var message = await response.Content.ReadFromJsonAsync<CommunicationHubMessageResponse>(_disposeCts.Token);
+            if (message is not null) _messages.Add(message);
+        }
+        catch (Exception ex) { _draft = content; _notice = ex.Message; }
+        finally { _sending = false; }
     }
 
-    private async Task LoadPreviewAsync()
+    private Task OnComposerKeyDown(KeyboardEventArgs args) => args.Key == "Enter" && !args.ShiftKey ? SendAsync() : Task.CompletedTask;
+
+    private async Task StartDirectAsync(CommunicationPersonResponse person)
     {
-        var response = await Http.GetAsync($"{BasePath}/discord/provisioning-preview");
-        _preview = response.IsSuccessStatusCode ? await response.Content.ReadFromJsonAsync<ProvisioningPreviewResponse>() : null;
+        if (_hub is null || person.Id == _hub.CurrentOrganizationUserId) return;
+        var existing = _hub.Chats.FirstOrDefault(x => x.IsDirect && x.Participants.Any(p => p.OrganizationUserId == person.Id));
+        if (existing is not null) { await SelectChatAsync(existing); return; }
+        var request = new CreateCommunicationChatRequest(null, null, true, true, [person.Id]);
+        var response = await Http.PostAsJsonAsync($"{BasePath}/chats", request, _disposeCts.Token);
+        if (!response.IsSuccessStatusCode) { _notice = await response.Content.ReadAsStringAsync(_disposeCts.Token); return; }
+        var chat = await response.Content.ReadFromJsonAsync<CommunicationChatResponse>(_disposeCts.Token);
+        if (chat is null) return;
+        await RefreshHubAsync(chat.Id);
     }
 
-    private Task ReconcileAsync() => BusyAsync(async () =>
+    private void OpenCreateGroup()
     {
-        var response = await Http.PostAsync($"{BasePath}/discord/reconcile", null);
-        response.EnsureSuccessStatusCode();
-        Show("Provisioning was queued. Discord resources will converge in the background.", Severity.Success);
-    });
-
-    private Task CreateLinkCodeAsync() => BusyAsync(async () =>
+        _editing = null; _editorTitle = string.Empty; _editorDescription = string.Empty; _editorPrivate = false;
+        _selectedMembers.Clear(); if (_hub is not null) _selectedMembers.Add(_hub.CurrentOrganizationUserId);
+        _selectedAudiences.Clear(); _editorError = null; _confirmArchive = false; _showEditor = true;
+    }
+    private void OpenEdit()
     {
-        var response = await Http.PostAsync($"{BasePath}/discord/link-code", null);
-        response.EnsureSuccessStatusCode();
-        _linkCode = await response.Content.ReadFromJsonAsync<LinkCodeResponse>();
-    });
-
-    private async Task BusyAsync(Func<Task> action)
+        if (_selected is null) return;
+        _editing = _selected; _editorTitle = _selected.Title; _editorDescription = _selected.Description ?? string.Empty; _editorPrivate = _selected.IsPrivate;
+        _selectedMembers.Clear(); foreach (var member in _selected.Participants) _selectedMembers.Add(member.OrganizationUserId);
+        _selectedAudiences.Clear(); _editorError = null; _confirmArchive = false; _showEditor = true;
+    }
+    private void CloseEditor() { if (_editorBusy) return; _showEditor = false; _confirmArchive = false; }
+    private void ToggleMember(Guid id) { if (!_selectedMembers.Add(id)) _selectedMembers.Remove(id); }
+    private static string AudienceKey(CommunicationAudienceResponse x) => $"{x.Kind}:{x.Id}";
+    private void ToggleAudience(CommunicationAudienceResponse audience)
     {
-        _busy = true;
-        try { await action(); }
-        catch (Exception exception) { Show(exception.Message, Severity.Error); }
-        finally { _busy = false; }
+        var key = AudienceKey(audience);
+        if (!_selectedAudiences.Add(key)) _selectedAudiences.Remove(key);
+        else foreach (var id in audience.OrganizationUserIds) _selectedMembers.Add(id);
     }
 
-    private void Show(string message, Severity severity)
+    private async Task SaveEditorAsync()
     {
-        _message = message;
-        _messageSeverity = severity;
+        if (string.IsNullOrWhiteSpace(_editorTitle)) { _editorError = "Give the channel a name."; return; }
+        _editorBusy = true; _editorError = null;
+        try
+        {
+            var roles = SelectedAudienceIds("Role"); var workstreams = SelectedAudienceIds("Workstream");
+            HttpResponseMessage response;
+            if (_editing is null)
+                response = await Http.PostAsJsonAsync($"{BasePath}/chats", new CreateCommunicationChatRequest(_editorTitle, _editorDescription, false, _editorPrivate, _selectedMembers.ToList(), roles, workstreams), _disposeCts.Token);
+            else
+                response = await Http.PutAsJsonAsync($"{BasePath}/chats/{_editing.Id}", new UpdateCommunicationChatRequest(_editorTitle, _editorDescription, _editorPrivate, _selectedMembers.ToList(), roles, workstreams), _disposeCts.Token);
+            if (!response.IsSuccessStatusCode) { _editorError = await response.Content.ReadAsStringAsync(_disposeCts.Token); return; }
+            var chat = await response.Content.ReadFromJsonAsync<CommunicationChatResponse>(_disposeCts.Token);
+            _showEditor = false; await RefreshHubAsync(chat?.Id ?? _editing?.Id);
+        }
+        finally { _editorBusy = false; }
     }
+
+    private async Task ArchiveAsync()
+    {
+        if (!_confirmArchive) { _confirmArchive = true; return; }
+        if (_editing is null) return;
+        _editorBusy = true;
+        try
+        {
+            var response = await Http.DeleteAsync($"{BasePath}/chats/{_editing.Id}", _disposeCts.Token);
+            if (!response.IsSuccessStatusCode) { _editorError = await response.Content.ReadAsStringAsync(_disposeCts.Token); return; }
+            _showEditor = false; _selected = null; await RefreshHubAsync();
+        }
+        finally { _editorBusy = false; }
+    }
+
+    private List<Guid> SelectedAudienceIds(string kind) => _hub?.Audiences.Where(x => x.Kind == kind && _selectedAudiences.Contains(AudienceKey(x))).Select(x => x.Id).ToList() ?? [];
+    private async Task RefreshHubAsync(Guid? selectId = null)
+    {
+        _hub = await Http.GetFromJsonAsync<CommunicationHubResponse>(BasePath, _disposeCts.Token);
+        _selected = _hub?.Chats.FirstOrDefault(x => x.Id == selectId) ?? _hub?.Chats.FirstOrDefault();
+        if (_selected is not null) await LoadMessagesAsync(); else _messages.Clear();
+    }
+
+    private static string ParticipantSummary(CommunicationChatResponse chat) => string.Join(", ", chat.Participants.Take(4).Select(x => x.DisplayName)) + (chat.Participants.Count > 4 ? $" +{chat.Participants.Count - 4}" : string.Empty);
+    private static string AvatarClass(string type) => type == "Agent" ? "agent" : "human";
+    private static string Initials(string name) => string.Join(string.Empty, name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(x => char.ToUpperInvariant(x[0])));
+    public void Dispose() { _disposeCts.Cancel(); _disposeCts.Dispose(); }
 }

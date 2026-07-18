@@ -37,6 +37,7 @@ internal static class CoreConfigurations
         modelBuilder.Entity<ExternalIdentity>(ConfigureExternalIdentity);
         modelBuilder.Entity<UserNotification>(ConfigureUserNotification);
         modelBuilder.Entity<NotificationPreference>(ConfigureNotificationPreference);
+        modelBuilder.Entity<CommunicationEventOutboxItem>(ConfigureCommunicationEventOutbox);
         ConfigureWorkforcePlatform(modelBuilder);
     }
 
@@ -378,6 +379,7 @@ internal static class CoreConfigurations
     {
         entity.HasKey(x => x.Id);
         entity.Property(x => x.Title).HasMaxLength(256);
+        entity.Property(x => x.Description).HasMaxLength(2048);
         entity.Property(x => x.Kind).HasConversion<string>().HasMaxLength(32).IsRequired();
 
         entity.HasOne(x => x.Organization)
@@ -391,6 +393,7 @@ internal static class CoreConfigurations
             .OnDelete(DeleteBehavior.Restrict);
 
         entity.HasIndex(x => new { x.OrganizationId, x.AgentOrganizationUserId });
+        entity.HasIndex(x => new { x.OrganizationId, x.ArchivedAt, x.UpdatedAt });
     }
 
     static void ConfigureConversationParticipant(EntityTypeBuilder<ConversationParticipant> entity)
@@ -588,5 +591,20 @@ internal static class CoreConfigurations
         entity.Property(x => x.QuietHoursEnd).HasMaxLength(5);
         entity.Property(x => x.TimeZoneId).HasMaxLength(128).IsRequired();
         entity.HasIndex(x => new { x.OrganizationUserId, x.ProviderKey }).IsUnique();
+    }
+
+    static void ConfigureCommunicationEventOutbox(EntityTypeBuilder<CommunicationEventOutboxItem> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Sequence).ValueGeneratedOnAdd();
+        entity.Property(x => x.EventType).HasMaxLength(160).IsRequired();
+        entity.Property(x => x.Subject).HasMaxLength(256).IsRequired();
+        entity.Property(x => x.DataJson).HasColumnType("jsonb").IsRequired();
+        entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
+        entity.Property(x => x.DeliveredInstallationIdsJson).HasColumnType("jsonb").IsRequired();
+        entity.Property(x => x.LastError).HasMaxLength(4096);
+        entity.HasIndex(x => x.Sequence).IsUnique();
+        entity.HasIndex(x => new { x.Status, x.NextAttemptAt, x.Sequence });
+        entity.HasIndex(x => new { x.OrganizationId, x.ChatId, x.Sequence });
     }
 }
