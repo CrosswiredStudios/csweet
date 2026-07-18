@@ -3,6 +3,8 @@ using CSweet.Domain.Communications;
 using CSweet.Domain.Planning;
 using CSweet.Domain.Setup;
 using CSweet.Contracts.Communications;
+using CSweet.Contracts.Realtime;
+using CSweet.Domain.Notifications;
 using CSweet.Infrastructure.Auth;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
@@ -93,6 +95,7 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
     public DbSet<CommunicationEventOutboxItem> CommunicationEventOutbox => Set<CommunicationEventOutboxItem>();
+    public DbSet<ApplicationRealtimeOutboxItem> ApplicationRealtimeOutbox => Set<ApplicationRealtimeOutboxItem>();
     public DbSet<MemoryCaptureOutboxItem> MemoryCaptureOutbox => Set<MemoryCaptureOutboxItem>();
     public DbSet<AgentMemoryNamespaceRegistration> AgentMemoryNamespaces => Set<AgentMemoryNamespaceRegistration>();
     public DbSet<AgentMemoryRecallUse> AgentMemoryRecallUses => Set<AgentMemoryRecallUse>();
@@ -102,13 +105,17 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        AssignInMemoryMessageSequences();
         CaptureCommunicationEvents();
+        CaptureApplicationNotificationEvents();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        AssignInMemoryMessageSequences();
         CaptureCommunicationEvents();
+        CaptureApplicationNotificationEvents();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -137,7 +144,8 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
             if (eventType is not null) QueueCommunicationEvent(chat.OrganizationId, chat.Id, eventType,
                 new CommunicationChatEvent(chat.Id, chat.OrganizationId, chat.Kind.ToString(),
                     chat.InitiatedByOrganizationUserId, chat.AgentOrganizationUserId, chat.TeamId, chat.ProjectId,
-                    chat.Title, chat.Description, chat.IsPrivate, chat.CreatedAt, chat.UpdatedAt, chat.ArchivedAt));
+                    chat.Title, chat.Description, chat.IsPrivate, chat.IsDeletionProtected,
+                    chat.CreatedAt, chat.UpdatedAt, chat.ArchivedAt));
         }
 
         foreach (var entry in participants)
@@ -153,14 +161,21 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
                     => CommunicationEvents.ParticipantAdded,
                 EntityState.Modified when entry.Property(x => x.Role).IsModified
                     => CommunicationEvents.ParticipantUpdated,
+                EntityState.Modified when entry.Property(x => x.LastReadMessageSequence).IsModified
+                    => CommunicationEvents.ReadUpdated,
                 _ => null
             };
             if (eventType is null) continue;
             var organizationId = ResolveConversationOrganizationId(participant.ConversationId, participant.Conversation);
             if (!organizationId.HasValue) continue;
-            QueueCommunicationEvent(organizationId.Value, participant.ConversationId, eventType,
-                new CommunicationParticipantEvent(participant.Id, participant.ConversationId,
-                    participant.OrganizationUserId, participant.Role.ToString(), participant.JoinedAt, participant.LeftAt));
+            if (eventType == CommunicationEvents.ReadUpdated)
+                QueueCommunicationEvent(organizationId.Value, participant.ConversationId, eventType,
+                    new CommunicationReadEvent(participant.ConversationId, participant.OrganizationUserId,
+                        participant.LastReadMessageSequence, DateTimeOffset.UtcNow));
+            else
+                QueueCommunicationEvent(organizationId.Value, participant.ConversationId, eventType,
+                    new CommunicationParticipantEvent(participant.Id, participant.ConversationId,
+                        participant.OrganizationUserId, participant.Role.ToString(), participant.JoinedAt, participant.LeftAt));
         }
 
         foreach (var entry in messages)
@@ -184,11 +199,23 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
         }
     }
 
+    private void AssignInMemoryMessageSequences()
+    {
+        if (Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory") return;
+        var added = ChangeTracker.Entries<ConversationMessage>()
+            .Where(x => x.State == EntityState.Added && x.Entity.Sequence == 0)
+            .Select(x => x.Entity).ToList();
+        if (added.Count == 0) return;
+        var next = CoreConversationMessages.AsNoTracking().Select(x => (long?)x.Sequence).Max() ?? 0;
+        foreach (var message in added) message.Sequence = ++next;
+    }
+
     private static bool HasConversationStateChange(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<Conversation> entry) =>
         entry.Property(x => x.Kind).IsModified || entry.Property(x => x.AgentOrganizationUserId).IsModified ||
         entry.Property(x => x.TeamId).IsModified || entry.Property(x => x.ProjectId).IsModified ||
         entry.Property(x => x.Title).IsModified || entry.Property(x => x.Description).IsModified ||
-        entry.Property(x => x.IsPrivate).IsModified || entry.Property(x => x.ArchivedAt).IsModified;
+        entry.Property(x => x.IsPrivate).IsModified || entry.Property(x => x.IsDeletionProtected).IsModified ||
+        entry.Property(x => x.ArchivedAt).IsModified;
 
     private static bool HasMessageStateChange(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<ConversationMessage> entry) =>
         entry.Property(x => x.SenderOrganizationUserId).IsModified || entry.Property(x => x.ReplyToMessageId).IsModified ||
@@ -207,13 +234,67 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
     private void QueueCommunicationEvent<T>(Guid organizationId, Guid chatId, string eventType, T data)
     {
         var now = DateTimeOffset.UtcNow;
+        var dataJson = JsonSerializer.Serialize(data, EventJsonOptions);
         CommunicationEventOutbox.Add(new CommunicationEventOutboxItem
         {
             Id = Guid.NewGuid(), OrganizationId = organizationId, ChatId = chatId,
             EventType = eventType, Subject = CommunicationEvents.Subject(organizationId, chatId),
-            DataJson = JsonSerializer.Serialize(data, EventJsonOptions), Status = CommunicationEventOutboxStatus.Pending,
+            DataJson = dataJson, Status = CommunicationEventOutboxStatus.Pending,
             NextAttemptAt = now, OccurredAt = now
         });
+        QueueApplicationRealtimeEvent(organizationId, null, chatId, eventType,
+            CommunicationEvents.Subject(organizationId, chatId), dataJson, now,
+            ResolveRealtimeRecipients(chatId));
+    }
+
+    private void CaptureApplicationNotificationEvents()
+    {
+        var notifications = ChangeTracker.Entries<UserNotification>()
+            .Where(x => x.State == EntityState.Added ||
+                (x.State == EntityState.Modified && (x.Property(y => y.ReadAt).IsModified || x.Property(y => y.DismissedAt).IsModified)))
+            .ToList();
+        foreach (var entry in notifications)
+        {
+            var item = entry.Entity;
+            var eventType = entry.State == EntityState.Added
+                ? AppRealtimeEvents.NotificationCreated : AppRealtimeEvents.NotificationUpdated;
+            var data = new AppNotificationEvent(item.Id, item.OrganizationId, item.RecipientOrganizationUserId,
+                item.OriginatingAgentOrganizationUserId, item.Severity.ToString(), item.Category, item.Title,
+                item.Body, item.ActionUri, item.CreatedAt, item.ReadAt, item.DismissedAt);
+            QueueApplicationRealtimeEvent(item.OrganizationId, item.RecipientOrganizationUserId, null, eventType,
+                $"organizations/{item.OrganizationId:D}/notifications/{item.Id:D}",
+                JsonSerializer.Serialize(data, EventJsonOptions), DateTimeOffset.UtcNow);
+        }
+    }
+
+    private void QueueApplicationRealtimeEvent(Guid? organizationId, Guid? recipientOrganizationUserId,
+        Guid? chatId, string eventType, string subject, string dataJson, DateTimeOffset occurredAt,
+        IReadOnlyCollection<Guid>? recipientOrganizationUserIds = null)
+    {
+        ApplicationRealtimeOutbox.Add(new ApplicationRealtimeOutboxItem
+        {
+            Id = Guid.NewGuid(), OrganizationId = organizationId,
+            RecipientOrganizationUserId = recipientOrganizationUserId,
+            RecipientOrganizationUserIdsJson = JsonSerializer.Serialize(recipientOrganizationUserIds ?? [], EventJsonOptions),
+            ChatId = chatId,
+            EventType = eventType, Subject = subject, DataJson = dataJson,
+            Status = ApplicationRealtimeOutboxStatus.Pending, NextAttemptAt = occurredAt, OccurredAt = occurredAt
+        });
+    }
+
+    private IReadOnlyCollection<Guid> ResolveRealtimeRecipients(Guid chatId)
+    {
+        var recipients = ConversationParticipants.AsNoTracking()
+            .Where(x => x.ConversationId == chatId && x.LeftAt == null)
+            .Select(x => x.OrganizationUserId).ToHashSet();
+        foreach (var entry in ChangeTracker.Entries<ConversationParticipant>().Where(x => x.Entity.ConversationId == chatId))
+        {
+            if (entry.State == EntityState.Added && entry.Entity.LeftAt == null)
+                recipients.Add(entry.Entity.OrganizationUserId);
+            else if (entry.State is EntityState.Modified or EntityState.Deleted)
+                recipients.Add(entry.Entity.OrganizationUserId);
+        }
+        return recipients;
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -370,7 +451,7 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
             entity.HasIndex(x => new { x.InstallationKey, x.RevisionNumber }).IsUnique();
             entity.Property(x => x.BusinessId).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Scope).HasConversion<string>().HasMaxLength(24).IsRequired();
-            entity.HasIndex(x => new { x.PackageVersionId, x.BusinessId }).IsUnique();
+            entity.HasIndex(x => new { x.PackageVersionId, x.BusinessId });
             entity.HasOne(x => x.PackageVersion)
                 .WithMany()
                 .HasForeignKey(x => x.PackageVersionId)

@@ -18,6 +18,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPluginApiClient, PluginApiClient>();
         services.AddScoped<AuthSessionStore>();
         services.AddScoped<IAuthenticationApiClient, AuthenticationApiClient>();
+        services.AddScoped<AppRealtimeState>();
+        services.AddScoped<CommunicationUnreadState>();
 
         return services;
     }

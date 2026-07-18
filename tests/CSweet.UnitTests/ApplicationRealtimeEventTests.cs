@@ -1,0 +1,99 @@
+using System.Text.Json;
+using CSweet.Application.Notifications;
+using CSweet.Contracts.Realtime;
+using CSweet.Contracts.Communications;
+using CSweet.Domain.Communications;
+using CSweet.Domain.Core;
+using CSweet.Domain.Notifications;
+using CSweet.Infrastructure.Notifications;
+using CSweet.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+
+namespace CSweet.UnitTests;
+
+public sealed class ApplicationRealtimeEventTests
+{
+    [Fact]
+    public async Task CommunicationAndNotificationChanges_AreCapturedAndTenantRouted()
+    {
+        await using var db = CreateDb();
+        var organizationId = Guid.NewGuid();
+        var user = new OrganizationUser
+        {
+            Id = Guid.NewGuid(), OrganizationId = organizationId, ApplicationUserId = Guid.NewGuid(),
+            DisplayName = "Owner", EmployeeType = EmployeeType.Human, IsActive = true, CreatedAt = DateTimeOffset.UtcNow
+        };
+        var chat = new Conversation
+        {
+            Id = Guid.NewGuid(), OrganizationId = organizationId, InitiatedByOrganizationUserId = user.Id,
+            Kind = ConversationKind.Team, Title = "Updates", CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        chat.Participants.Add(new ConversationParticipant
+        {
+            Id = Guid.NewGuid(), OrganizationUserId = user.Id, OrganizationUser = user,
+            JoinedAt = DateTimeOffset.UtcNow, Role = ConversationParticipantRole.Coordinator
+        });
+        var notification = new UserNotification
+        {
+            Id = Guid.NewGuid(), OrganizationId = organizationId, RecipientOrganizationUserId = user.Id,
+            Severity = NotificationSeverity.Important, Category = "work", Title = "Review needed",
+            Body = "A decision is waiting.", CreatedAt = DateTimeOffset.UtcNow
+        };
+        db.AddRange(user, chat, notification);
+        await db.SaveChangesAsync();
+        var publisher = new RecordingPublisher();
+
+        var count = await new ApplicationRealtimeOutboxDispatcher(db).DispatchBatchAsync(publisher);
+
+        Assert.True(count >= 2);
+        Assert.All(publisher.Publications, x => Assert.Contains(user.Id, x.RecipientOrganizationUserIds));
+        Assert.Contains(publisher.Publications, x => x.Envelope.EventType == AppRealtimeEvents.NotificationCreated);
+        Assert.Contains(publisher.Publications, x => x.Envelope.EventType == "com.csweet.communication.chat.created.v1");
+        Assert.All(await db.ApplicationRealtimeOutbox.ToListAsync(), x => Assert.Equal(ApplicationRealtimeOutboxStatus.Published, x.Status));
+    }
+
+    [Fact]
+    public async Task RecipientSnapshot_IncludesRemovalEventButExcludesFormerMemberFromFutureMessages()
+    {
+        await using var db = CreateDb();
+        var organizationId = Guid.NewGuid();
+        var user = new OrganizationUser { Id = Guid.NewGuid(), OrganizationId = organizationId,
+            ApplicationUserId = Guid.NewGuid(), DisplayName = "Member", EmployeeType = EmployeeType.Human,
+            IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
+        var chat = new Conversation { Id = Guid.NewGuid(), OrganizationId = organizationId,
+            InitiatedByOrganizationUserId = user.Id, Kind = ConversationKind.Team, Title = "Secure",
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow };
+        var participant = new ConversationParticipant { Id = Guid.NewGuid(), ConversationId = chat.Id,
+            OrganizationUserId = user.Id, OrganizationUser = user, Role = ConversationParticipantRole.Member,
+            JoinedAt = DateTimeOffset.UtcNow };
+        db.AddRange(user, chat, participant);
+        await db.SaveChangesAsync();
+
+        participant.LeftAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        var removal = await db.ApplicationRealtimeOutbox.OrderByDescending(x => x.Sequence)
+            .FirstAsync(x => x.EventType == CommunicationEvents.ParticipantRemoved);
+        Assert.Contains(user.Id, JsonSerializer.Deserialize<List<Guid>>(removal.RecipientOrganizationUserIdsJson)!);
+
+        db.CoreConversationMessages.Add(new ConversationMessage { Id = Guid.NewGuid(), ConversationId = chat.Id,
+            SenderOrganizationUserId = null, Role = ConversationRole.Assistant, Content = "Private update",
+            CorrelationId = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow });
+        await db.SaveChangesAsync();
+        var message = await db.ApplicationRealtimeOutbox.OrderByDescending(x => x.Sequence)
+            .FirstAsync(x => x.EventType == CommunicationEvents.MessageCreated);
+        Assert.DoesNotContain(user.Id, JsonSerializer.Deserialize<List<Guid>>(message.RecipientOrganizationUserIdsJson)!);
+    }
+
+    private static CSweetDbContext CreateDb() => new(new DbContextOptionsBuilder<CSweetDbContext>()
+        .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+    private sealed class RecordingPublisher : IApplicationRealtimePublisher
+    {
+        public List<ApplicationRealtimePublication> Publications { get; } = [];
+        public Task PublishAsync(ApplicationRealtimePublication publication, CancellationToken cancellationToken = default)
+        {
+            Publications.Add(publication);
+            return Task.CompletedTask;
+        }
+    }
+}

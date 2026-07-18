@@ -1,0 +1,75 @@
+@using System.Text.Json
+@using CSweet.Contracts.Realtime
+@implements IDisposable
+@inject AppRealtimeState Realtime
+@inject CommunicationUnreadState Unread
+@inject IBusinessContext Businesses
+@inject ISnackbar Snackbar
+
+@code {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly CancellationTokenSource _disposeCts = new();
+    private bool _started;
+
+    protected override void OnInitialized()
+    {
+        Realtime.EventReceived += OnEvent;
+        Realtime.Disconnected += OnDisconnected;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _started) return;
+        _started = true;
+        await Businesses.InitializeAsync();
+        await Unread.InitializeAsync();
+        _ = ConnectWithRetryAsync(_disposeCts.Token);
+    }
+
+    private void OnDisconnected() => _ = ConnectWithRetryAsync(_disposeCts.Token);
+
+    private async Task ConnectWithRetryAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Realtime.StartAsync(cancellationToken);
+                await Unread.ReloadAsync(cancellationToken);
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+            catch (Exception)
+            {
+                try { await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken); }
+                catch (OperationCanceledException) { return; }
+            }
+        }
+    }
+
+    private void OnEvent(AppRealtimeEventEnvelope envelope)
+    {
+        if (envelope.EventType != AppRealtimeEvents.NotificationCreated) return;
+        try
+        {
+            var notification = envelope.Data.Deserialize<AppNotificationEvent>(JsonOptions);
+            if (notification is null) return;
+            var severity = notification.Severity switch
+            {
+                "Urgent" => Severity.Error,
+                "Important" => Severity.Warning,
+                _ => Severity.Info
+            };
+            _ = InvokeAsync(() => Snackbar.Add($"{notification.Title}: {notification.Body}", severity));
+        }
+        catch (JsonException) { }
+    }
+
+    public void Dispose()
+    {
+        Realtime.EventReceived -= OnEvent;
+        Realtime.Disconnected -= OnDisconnected;
+        _disposeCts.Cancel();
+        _disposeCts.Dispose();
+    }
+}

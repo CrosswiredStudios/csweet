@@ -1,5 +1,6 @@
 using CSweet.Application.Core;
 using CSweet.Application.Communications;
+using CSweet.Application.Notifications;
 using CSweet.Application.Auth;
 using CSweet.Application.BusinessOnboarding;
 using CSweet.Application.Llm;
@@ -11,6 +12,7 @@ using CSweet.Infrastructure.BusinessOnboarding;
 using CSweet.Infrastructure.Auth;
 using CSweet.Infrastructure.Core;
 using CSweet.Infrastructure.Communications;
+using CSweet.Infrastructure.Notifications;
 using CSweet.Infrastructure.Llm;
 using CSweet.Infrastructure.Persistence;
 using CSweet.Infrastructure.Planning;
@@ -164,6 +166,8 @@ public static class DependencyInjection
         builder.Services.AddScoped<IChatTurnService, ChatTurnService>();
         builder.Services.AddScoped<ICommunicationWorkspaceService, CommunicationWorkspaceService>();
         builder.Services.AddScoped<ICommunicationHubService, CommunicationHubService>();
+        builder.Services.AddScoped<IAgentCommunicationOnboardingService, AgentCommunicationOnboardingService>();
+        builder.Services.AddScoped<IApplicationRealtimeOutboxDispatcher, ApplicationRealtimeOutboxDispatcher>();
         builder.Services.AddScoped<ICommunicationEventOutboxDispatcher, CommunicationEventOutboxDispatcher>();
         builder.Services.AddScoped<ICommunicationRouter, CommunicationRouter>();
         builder.Services.AddScoped<ICommunicationIngressHandler, CommunicationIngressHandler>();

@@ -88,6 +88,52 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
         return messages.Select(x => MapMessage(x, users)).ToList();
     }
 
+    public async Task<CommunicationUnreadSummaryResponse?> GetUnreadSummaryAsync(
+        Guid organizationId,
+        Guid actorOrganizationUserId,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ActiveUserAsync(organizationId, actorOrganizationUserId, cancellationToken) is null) return null;
+        var chats = await db.CoreConversations.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.ArchivedAt == null &&
+                x.Participants.Any(p => p.OrganizationUserId == actorOrganizationUserId && p.LeftAt == null))
+            .Select(x => new
+            {
+                x.Id,
+                LastRead = x.Participants.Where(p => p.OrganizationUserId == actorOrganizationUserId && p.LeftAt == null)
+                    .Select(p => p.LastReadMessageSequence).Single(),
+                Messages = x.Messages.Where(m => m.SenderOrganizationUserId != actorOrganizationUserId)
+                    .Select(m => m.Sequence)
+            })
+            .ToListAsync(cancellationToken);
+        var counts = chats.ToDictionary(x => x.Id, x => x.Messages.Count(sequence => sequence > x.LastRead));
+        return new CommunicationUnreadSummaryResponse(counts.Values.Sum(), counts);
+    }
+
+    public async Task<CommunicationUnreadSummaryResponse?> MarkReadAsync(
+        Guid organizationId,
+        Guid chatId,
+        Guid actorOrganizationUserId,
+        long throughMessageSequence,
+        CancellationToken cancellationToken = default)
+    {
+        var participant = await db.ConversationParticipants
+            .Include(x => x.Conversation)
+            .SingleOrDefaultAsync(x => x.ConversationId == chatId && x.OrganizationUserId == actorOrganizationUserId &&
+                x.LeftAt == null && x.Conversation!.OrganizationId == organizationId && x.Conversation.ArchivedAt == null,
+                cancellationToken);
+        if (participant is null) return null;
+        var maximum = await db.CoreConversationMessages.Where(x => x.ConversationId == chatId)
+            .Select(x => (long?)x.Sequence).MaxAsync(cancellationToken) ?? 0;
+        var target = Math.Clamp(throughMessageSequence, 0, maximum);
+        if (target > participant.LastReadMessageSequence)
+        {
+            participant.LastReadMessageSequence = target;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        return await GetUnreadSummaryAsync(organizationId, actorOrganizationUserId, cancellationToken);
+    }
+
     public async Task<CommunicationHubActionResponse> CreateAsync(
         Guid organizationId,
         Guid actorOrganizationUserId,
@@ -163,6 +209,7 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
             .Include(x => x.Messages)
             .SingleOrDefaultAsync(cancellationToken);
         if (actor is null || chat is null) return Failure("chat_not_found", "The chat was not found.");
+        if (chat.IsDeletionProtected) return Failure("protected_chat_immutable", "This agent-instance conversation cannot be modified.");
         if (chat.Kind == ConversationKind.DirectHumanAgent) return Failure("direct_chat_immutable", "Direct-chat membership cannot be modified.");
         if (!CanManage(chat, actor)) return Failure("not_authorized", "You do not have permission to modify this chat.");
         if (string.IsNullOrWhiteSpace(request.Title)) return Failure("title_required", "A chat title is required.");
@@ -213,6 +260,7 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
         var chat = await db.CoreConversations.Include(x => x.Participants)
             .SingleOrDefaultAsync(x => x.Id == chatId && x.OrganizationId == organizationId && x.ArchivedAt == null, cancellationToken);
         if (actor is null || chat is null) return Failure("chat_not_found", "The chat was not found.");
+        if (chat.IsDeletionProtected) return Failure("protected_chat_delete_denied", "This agent-instance conversation cannot be deleted.");
         if (chat.Kind == ConversationKind.DirectHumanAgent) return Failure("direct_chat_delete_denied", "Direct chats cannot be deleted.");
         if (!CanManage(chat, actor)) return Failure("not_authorized", "You do not have permission to delete this chat.");
 
@@ -248,7 +296,7 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
         chat.UpdatedAt = now;
         db.CoreConversationMessages.Add(message);
         await db.SaveChangesAsync(cancellationToken);
-        return new CommunicationHubMessageResponse(message.Id, chat.Id, actor.Id, actor.DisplayName,
+        return new CommunicationHubMessageResponse(message.Id, message.Sequence, chat.Id, actor.Id, actor.DisplayName,
             actor.EmployeeType.ToString(), message.Content, message.CreatedAt);
     }
 
@@ -298,17 +346,20 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
             title = active.FirstOrDefault(x => x.OrganizationUserId != actor.Id)?.OrganizationUser?.DisplayName
                 ?? active.FirstOrDefault()?.OrganizationUser?.DisplayName ?? "Direct message";
         var last = chat.Messages.OrderByDescending(x => x.CreatedAt).FirstOrDefault();
+        var membership = active.FirstOrDefault(x => x.OrganizationUserId == actor.Id);
+        var unreadCount = membership is null ? 0 : chat.Messages.Count(x =>
+            x.Sequence > membership.LastReadMessageSequence && x.SenderOrganizationUserId != actor.Id);
         return new CommunicationChatResponse(chat.Id, title ?? "Untitled chat", chat.Description, direct, chat.IsPrivate,
-            !direct && CanManage(chat, actor), chat.UpdatedAt,
+            chat.IsDeletionProtected, !direct && !chat.IsDeletionProtected && CanManage(chat, actor), chat.UpdatedAt,
             active.Select(x => new CommunicationParticipantResponse(x.OrganizationUserId,
                 x.OrganizationUser?.DisplayName ?? "Unknown", x.OrganizationUser?.EmployeeType.ToString() ?? "Unknown", x.Role.ToString())).ToList(),
-            last?.Content, last?.CreatedAt);
+            last?.Content, last?.CreatedAt, unreadCount);
     }
 
     private static CommunicationHubMessageResponse MapMessage(ConversationMessage message, IReadOnlyDictionary<Guid, OrganizationUser> users)
     {
         var sender = message.SenderOrganizationUserId.HasValue && users.TryGetValue(message.SenderOrganizationUserId.Value, out var user) ? user : null;
-        return new CommunicationHubMessageResponse(message.Id, message.ConversationId, message.SenderOrganizationUserId,
+        return new CommunicationHubMessageResponse(message.Id, message.Sequence, message.ConversationId, message.SenderOrganizationUserId,
             sender?.DisplayName ?? (message.Role == ConversationRole.Assistant ? "Assistant" : "Unknown"),
             sender?.EmployeeType.ToString() ?? (message.Role == ConversationRole.Assistant ? "Agent" : "Human"),
             message.Content, message.CreatedAt);

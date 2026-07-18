@@ -3,6 +3,7 @@
 @inject IAuthenticationApiClient AuthenticationApi
 @inject AuthSessionStore AuthSession
 @inject NavigationManager Navigation
+@inject CommunicationUnreadState CommunicationUnread
 
 <div class="nav-shell">
     <a class="nav-brand" href="/" aria-label="C-Sweet Enterprise home">
@@ -27,8 +28,17 @@
                     <MudNavLink Href="@EmployeesHref" Icon="@Icons.Material.Outlined.Groups" Class="@EmployeesClass">
                         Employees
                     </MudNavLink>
-                    <MudNavLink Href="@CommunicationsHref" Icon="@Icons.Material.Outlined.Forum" Class="business-nav-link">
-                        Communications
+                    <MudNavLink Href="@CommunicationsHref" Class="business-nav-link">
+                        <span class="communications-nav-content">
+                            <span class="communications-nav-icon">
+                                <MudIcon Icon="@Icons.Material.Outlined.Forum" />
+                                @if (CommunicationUnread.TotalUnreadCount > 0)
+                                {
+                                    <span class="communications-nav-badge">@UnreadLabel</span>
+                                }
+                            </span>
+                            <span>Communications</span>
+                        </span>
                     </MudNavLink>
                 }
                 else
@@ -76,6 +86,9 @@
         ? "business-nav-link active"
         : "business-nav-link";
 
+    private string UnreadLabel => CommunicationUnread.TotalUnreadCount > 99
+        ? "99+" : CommunicationUnread.TotalUnreadCount.ToString();
+
     private string UserLabel => string.IsNullOrWhiteSpace(AuthSession.Current?.Email)
         ? "User"
         : AuthSession.Current.Email;
@@ -84,11 +97,14 @@
     {
         BusinessContext.Changed += OnContextChanged;
         Navigation.LocationChanged += OnLocationChanged;
+        CommunicationUnread.Changed += OnUnreadChanged;
+        _ = CommunicationUnread.InitializeAsync();
     }
 
     private string CurrentPath() => Navigation.ToBaseRelativePath(Navigation.Uri);
     private void OnContextChanged() => _ = InvokeAsync(StateHasChanged);
     private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => _ = InvokeAsync(StateHasChanged);
+    private void OnUnreadChanged() => _ = InvokeAsync(StateHasChanged);
 
     private async Task LogoutAsync()
     {
@@ -100,5 +116,6 @@
     {
         BusinessContext.Changed -= OnContextChanged;
         Navigation.LocationChanged -= OnLocationChanged;
+        CommunicationUnread.Changed -= OnUnreadChanged;
     }
 }

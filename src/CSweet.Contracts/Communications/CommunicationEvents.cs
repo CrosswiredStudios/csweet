@@ -15,12 +15,13 @@ public static class CommunicationEvents
     public const string MessageCreated = "com.csweet.communication.message.created.v1";
     public const string MessageUpdated = "com.csweet.communication.message.updated.v1";
     public const string MessageDeleted = "com.csweet.communication.message.deleted.v1";
+    public const string ReadUpdated = "com.csweet.communication.read.updated.v1";
 
     public static readonly IReadOnlyList<string> All =
     [
         ChatCreated, ChatUpdated, ChatArchived, ChatDeleted,
         ParticipantAdded, ParticipantUpdated, ParticipantRemoved,
-        MessageCreated, MessageUpdated, MessageDeleted
+        MessageCreated, MessageUpdated, MessageDeleted, ReadUpdated
     ];
 
     public static string Subject(Guid organizationId, Guid chatId) =>
@@ -51,6 +52,7 @@ public sealed record CommunicationChatEvent(
     string? Title,
     string? Description,
     bool IsPrivate,
+    bool IsDeletionProtected,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     DateTimeOffset? ArchivedAt);
@@ -77,3 +79,8 @@ public sealed record CommunicationMessageEvent(
     string? SourceChannelExternalId,
     DateTimeOffset CreatedAt);
 
+public sealed record CommunicationReadEvent(
+    Guid ChatId,
+    Guid OrganizationUserId,
+    long LastReadMessageSequence,
+    DateTimeOffset UpdatedAt);

@@ -1,6 +1,7 @@
 using CSweet.Domain.Core;
 using CSweet.Domain.Communications;
 using CSweet.Infrastructure.Auth;
+using CSweet.Domain.Notifications;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -38,6 +39,7 @@ internal static class CoreConfigurations
         modelBuilder.Entity<UserNotification>(ConfigureUserNotification);
         modelBuilder.Entity<NotificationPreference>(ConfigureNotificationPreference);
         modelBuilder.Entity<CommunicationEventOutboxItem>(ConfigureCommunicationEventOutbox);
+        modelBuilder.Entity<ApplicationRealtimeOutboxItem>(ConfigureApplicationRealtimeOutbox);
         ConfigureWorkforcePlatform(modelBuilder);
     }
 
@@ -394,12 +396,16 @@ internal static class CoreConfigurations
 
         entity.HasIndex(x => new { x.OrganizationId, x.AgentOrganizationUserId });
         entity.HasIndex(x => new { x.OrganizationId, x.ArchivedAt, x.UpdatedAt });
+        entity.HasIndex(x => new { x.OrganizationId, x.InitiatedByOrganizationUserId, x.AgentOrganizationUserId })
+            .IsUnique()
+            .HasFilter("\"IsDeletionProtected\" = TRUE AND \"AgentOrganizationUserId\" IS NOT NULL");
     }
 
     static void ConfigureConversationParticipant(EntityTypeBuilder<ConversationParticipant> entity)
     {
         entity.HasKey(x => x.Id);
         entity.Property(x => x.Role).HasConversion<string>().HasMaxLength(24).IsRequired();
+        entity.Property(x => x.LastReadMessageSequence).HasDefaultValue(0L);
         entity.HasOne(x => x.Conversation).WithMany(x => x.Participants).HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
         entity.HasOne(x => x.OrganizationUser).WithMany().HasForeignKey(x => x.OrganizationUserId).OnDelete(DeleteBehavior.Restrict);
         entity.HasIndex(x => new { x.ConversationId, x.OrganizationUserId }).IsUnique();
@@ -408,6 +414,7 @@ internal static class CoreConfigurations
     static void ConfigureConversationMessage(EntityTypeBuilder<ConversationMessage> entity)
     {
         entity.HasKey(x => x.Id);
+        entity.Property(x => x.Sequence).ValueGeneratedOnAdd();
         entity.Property(x => x.Role).HasConversion<string>().HasMaxLength(16).IsRequired();
         entity.Property(x => x.Content).HasMaxLength(32768).IsRequired();
         entity.Property(x => x.DeliveryIntent).HasConversion<string>().HasMaxLength(24).IsRequired();
@@ -421,6 +428,7 @@ internal static class CoreConfigurations
             .OnDelete(DeleteBehavior.Cascade);
 
         entity.HasIndex(x => new { x.ConversationId, x.CreatedAt });
+        entity.HasIndex(x => x.Sequence).IsUnique();
         entity.HasIndex(x => x.ChatTurnId);
         entity.HasIndex(x => x.IdempotencyKey).IsUnique().HasFilter("\"IdempotencyKey\" IS NOT NULL");
     }
@@ -606,5 +614,21 @@ internal static class CoreConfigurations
         entity.HasIndex(x => x.Sequence).IsUnique();
         entity.HasIndex(x => new { x.Status, x.NextAttemptAt, x.Sequence });
         entity.HasIndex(x => new { x.OrganizationId, x.ChatId, x.Sequence });
+    }
+
+    static void ConfigureApplicationRealtimeOutbox(EntityTypeBuilder<ApplicationRealtimeOutboxItem> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Sequence).ValueGeneratedOnAdd();
+        entity.Property(x => x.EventType).HasMaxLength(160).IsRequired();
+        entity.Property(x => x.Subject).HasMaxLength(256).IsRequired();
+        entity.Property(x => x.DataJson).HasColumnType("jsonb").IsRequired();
+        entity.Property(x => x.RecipientOrganizationUserIdsJson).HasColumnType("jsonb").IsRequired();
+        entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
+        entity.Property(x => x.LastError).HasMaxLength(4096);
+        entity.HasIndex(x => x.Sequence).IsUnique();
+        entity.HasIndex(x => new { x.Status, x.NextAttemptAt, x.Sequence });
+        entity.HasIndex(x => new { x.OrganizationId, x.ChatId, x.Sequence });
+        entity.HasIndex(x => new { x.RecipientOrganizationUserId, x.Sequence });
     }
 }

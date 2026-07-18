@@ -60,6 +60,26 @@
 .business-nav-group ::deep .mud-input-adornment { color: #fff !important; }
 .business-nav-group ::deep .mud-input-outlined-border { border-color: rgba(255, 255, 255, .42) !important; }
 .business-nav-group ::deep .business-nav-link { padding-left: 1.35rem; }
+.communications-nav-content { display: flex; align-items: center; gap: .8rem; }
+.communications-nav-icon { position: relative; display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; }
+.communications-nav-icon ::deep .mud-icon-root { font-size: 1.35rem; }
+.communications-nav-badge {
+    position: absolute;
+    top: -.55rem;
+    right: -.85rem;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    padding: 0 .25rem;
+    display: grid;
+    place-items: center;
+    border: 2px solid #0b2e53;
+    border-radius: 999px;
+    background: #e85d75;
+    color: #fff;
+    font-size: .58rem;
+    font-weight: 850;
+    line-height: 1;
+}
 
 .business-nav-disabled {
     display: flex;

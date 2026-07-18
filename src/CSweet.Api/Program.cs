@@ -14,6 +14,8 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
 using CSweet.Infrastructure.Core;
 using CSweet.Infrastructure.Communications;
+using CSweet.Api.Notifications;
+using CSweet.Application.Notifications;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -94,6 +96,9 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<IApplicationRealtimePublisher, SignalRApplicationRealtimePublisher>();
+builder.Services.AddHostedService<ApplicationRealtimeOutboxWorker>();
 
 var app = builder.Build();
 
@@ -148,6 +153,7 @@ app.MapAgentManagementEndpoints();
 app.MapPluginManagementEndpoints();
 
 app.MapControllers();
+app.MapHub<AppEventsHub>("/hubs/app-events");
 
 app.Run();
 

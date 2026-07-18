@@ -118,6 +118,36 @@ public sealed class AgentInstallationServiceTests
     }
 
     [Fact]
+    public async Task InstallAsync_AllowsDistinctSameBusinessInstancesWhenManifestOptsIn()
+    {
+        await using var dbContext = CreateDbContext();
+        var package = await SeedAsync(dbContext, supportsMultipleInstallations: true);
+        var service = CreateService(dbContext);
+
+        var first = await service.InstallAsync(package.Id, ValidRequest());
+        var second = await service.InstallAsync(package.Id, ValidRequest());
+
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.NotEqual(first.InstallationKey, second.InstallationKey);
+        Assert.Equal(2, await dbContext.AgentInstallations.CountAsync());
+    }
+
+    [Fact]
+    public async Task InstallAsync_RejectsSecondSameBusinessInstanceWithoutManifestOptIn()
+    {
+        await using var dbContext = CreateDbContext();
+        var package = await SeedAsync(dbContext);
+        var service = CreateService(dbContext);
+        await service.InstallAsync(package.Id, ValidRequest());
+
+        var error = await Assert.ThrowsAsync<AgentInstallationException>(() =>
+            service.InstallAsync(package.Id, ValidRequest()));
+
+        Assert.Contains("does not support multiple installations", error.Message);
+        Assert.Single(await dbContext.AgentInstallations.ToListAsync());
+    }
+
+    [Fact]
     public async Task UpdateAsync_StagesZeroGrantRevisionAndKeepsActiveRevisionRunning()
     {
         await using var dbContext = CreateDbContext();
@@ -378,7 +408,7 @@ public sealed class AgentInstallationServiceTests
         512,
         50);
 
-    private static async Task<AgentPackageVersion> SeedAsync(CSweetDbContext dbContext)
+    private static async Task<AgentPackageVersion> SeedAsync(CSweetDbContext dbContext, bool supportsMultipleInstallations = false)
     {
         dbContext.AgentRuntimeGlobalSettings.Add(new AgentRuntimeGlobalSettings
         {
@@ -418,7 +448,7 @@ public sealed class AgentInstallationServiceTests
                 name = "Research Agent",
                 version = "1.2.3",
                 publisher = new { id = "com.example", name = "Example" },
-                runtime = new { type = "dotnet-project" },
+                runtime = new { type = "dotnet-project", supportsMultipleInstallations },
                 protocol = new { minimumVersion = "1.0", maximumVersion = "1.x" },
                 provides = new[] { new { name = "research.execute.v1" } },
                 requires = Array.Empty<object>(),

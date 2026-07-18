@@ -24,6 +24,14 @@ Modify, archive, and send payloads include `chatId`. Send also includes `content
 - Managers and owners can create and maintain group chats.
 - The creator is a coordinator and can maintain that group later.
 - Archive is used instead of hard deletion so communication history and auditability are retained.
+- Hiring an agent employee creates one private, deletion-protected direct conversation between that logical agent instance and the hiring human. Separate installations of the same agent therefore keep separate histories and memory contexts.
+- Agent manifests may provide `onboarding.introduction` and `onboarding.startingQuestion`. C-Sweet uses a role-aware fallback when either value is absent and persists the resulting introduction as an agent-authored message.
+
+## Unread state and live controls
+
+Messages have monotonic sequences and each participant stores the last sequence they read. Self-authored messages never contribute to unread totals. The hub exposes `GET /hub/unread-summary` and `POST /hub/chats/{chatId}/read`; the read request includes the last sequence actually displayed so a racing message remains unread.
+
+Authenticated browser sessions connect to `/hubs/app-events`. Communication changes and persisted `UserNotification` changes enter the transactional `ApplicationRealtimeOutbox`, then publish through a versioned `AppRealtimeEventEnvelope` only to server-resolved organization-user groups. The WebAssembly client deduplicates stable event IDs, reconnects automatically, and reconciles authoritative state through REST after reconnecting. This event store drives the navigation badge, conversation indicators, message refresh, and global notification toasts.
 
 ## Conversation events
 
@@ -41,5 +49,6 @@ Plugins can declare and receive these subscriptions:
 - `com.csweet.communication.message.created.v1`
 - `com.csweet.communication.message.updated.v1`
 - `com.csweet.communication.message.deleted.v1`
+- `com.csweet.communication.read.updated.v1`
 
 Dispatch is installation-targeted rather than broadcast. An organization-scoped plugin must belong to the event's organization. A system plugin must have a server-owned `PluginOrganizationGrant` for that organization. In both cases, its active installation grant must contain the exact subscription. This prevents one Discord installation from observing another organization's conversation data.

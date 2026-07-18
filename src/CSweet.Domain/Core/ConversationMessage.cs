@@ -3,6 +3,7 @@ namespace CSweet.Domain.Core;
 public sealed class ConversationMessage
 {
     public Guid Id { get; set; }
+    public long Sequence { get; set; }
     public Guid ConversationId { get; set; }
     public ConversationRole Role { get; set; }
     public string Content { get; set; } = string.Empty;

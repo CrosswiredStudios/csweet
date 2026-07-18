@@ -12,6 +12,7 @@ public sealed class Conversation
     public string? Title { get; set; }
     public string? Description { get; set; }
     public bool IsPrivate { get; set; }
+    public bool IsDeletionProtected { get; set; }
     public DateTimeOffset? ArchivedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -44,6 +45,7 @@ public sealed class ConversationParticipant
     public Guid ConversationId { get; set; }
     public Guid OrganizationUserId { get; set; }
     public ConversationParticipantRole Role { get; set; }
+    public long LastReadMessageSequence { get; set; }
     public DateTimeOffset JoinedAt { get; set; }
     public DateTimeOffset? LeftAt { get; set; }
     public Conversation? Conversation { get; set; }

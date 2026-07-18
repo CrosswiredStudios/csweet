@@ -6,6 +6,8 @@ using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using CSweet.Domain.Communications;
+using CSweet.Application.Communications;
+using CSweet.Infrastructure.Communications;
 
 namespace CSweet.Infrastructure.Core;
 
@@ -13,11 +15,14 @@ public sealed class OrganizationUserService : IOrganizationUserService
 {
     private readonly CSweetDbContext _dbContext;
     private readonly IAuditEventWriter _auditEventWriter;
+    private readonly IAgentCommunicationOnboardingService _agentOnboarding;
 
-    public OrganizationUserService(CSweetDbContext dbContext, IAuditEventWriter auditEventWriter)
+    public OrganizationUserService(CSweetDbContext dbContext, IAuditEventWriter auditEventWriter,
+        IAgentCommunicationOnboardingService? agentOnboarding = null)
     {
         _dbContext = dbContext;
         _auditEventWriter = auditEventWriter;
+        _agentOnboarding = agentOnboarding ?? new AgentCommunicationOnboardingService(dbContext);
     }
 
     public async Task<IReadOnlyList<OrganizationUserResponse>> ListByOrganizationAsync(Guid organizationId, CancellationToken cancellationToken = default)
@@ -41,7 +46,8 @@ public sealed class OrganizationUserService : IOrganizationUserService
         return user?.ToResponse();
     }
 
-    public async Task<CoreActionResponse> CreateAsync(Guid organizationId, CreateOrganizationUserRequest request, CancellationToken cancellationToken = default)
+    public async Task<CoreActionResponse> CreateAsync(Guid organizationId, CreateOrganizationUserRequest request,
+        CancellationToken cancellationToken = default, Guid? hiringApplicationUserId = null)
     {
         if (!await _dbContext.CoreOrganizations.AnyAsync(x => x.Id == organizationId, cancellationToken))
         {
@@ -169,6 +175,11 @@ public sealed class OrganizationUserService : IOrganizationUserService
         {
             managedUser.ReportsToOrganizationUserId = user.Id;
         }
+        if (user.EmployeeType == EmployeeType.Agent)
+        {
+            var onboarding = await _agentOnboarding.EnsureAsync(organizationId, user, hiringApplicationUserId, cancellationToken);
+            if (!onboarding.Succeeded) return Failure(onboarding.ErrorCode!, onboarding.Message);
+        }
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         await _auditEventWriter.WriteAsync(
@@ -213,6 +224,14 @@ public sealed class OrganizationUserService : IOrganizationUserService
         user.AgentInstallationId = null;
         if (user.EmployeeType == EmployeeType.Agent)
         {
+            var protectedChats = await _dbContext.CoreConversations
+                .Where(x => x.AgentOrganizationUserId == user.Id && x.IsDeletionProtected && x.ArchivedAt == null)
+                .ToListAsync(cancellationToken);
+            foreach (var chat in protectedChats)
+            {
+                chat.ArchivedAt = now;
+                chat.UpdatedAt = now;
+            }
             var connectionIds = await ActiveCommunicationConnectionIdsAsync(user.OrganizationId, cancellationToken);
             _dbContext.CommunicationDeliveries.AddRange(connectionIds.Select(connectionId =>
                 CreateEmployeeDelivery(user, connectionId, CommunicationDeliveryKind.ArchiveEmployee, now)));

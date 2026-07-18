@@ -11,6 +11,7 @@ public sealed record PluginManifest
     public string Version { get; init; } = string.Empty;
     public PluginPublisher Publisher { get; init; } = new();
     public PluginRuntime Runtime { get; init; } = new();
+    public PluginOnboarding Onboarding { get; init; } = new();
     public PluginProtocol Protocol { get; init; } = new();
     public IReadOnlyList<PluginCapabilityDeclaration> Provides { get; init; } = [];
     public IReadOnlyList<PluginCapabilityRequirement> Requires { get; init; } = [];
@@ -19,6 +20,12 @@ public sealed record PluginManifest
     public IReadOnlyList<PluginCredentialBinding> Credentials { get; init; } = [];
     public PluginWebAccess WebAccess { get; init; } = new();
     public IReadOnlyList<PluginUiContribution> Ui { get; init; } = [];
+}
+
+public sealed record PluginOnboarding
+{
+    public string? Introduction { get; init; }
+    public string? StartingQuestion { get; init; }
 }
 
 public sealed record PluginPublisher

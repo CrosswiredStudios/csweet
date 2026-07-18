@@ -1,5 +1,6 @@
 using CSweet.Application.Core;
 using CSweet.Contracts.Core;
+using CSweet.Api.Auth;
 
 namespace CSweet.Api.Core;
 
@@ -18,9 +19,10 @@ public static class OrganizationUserEndpoints
             return user is null ? Results.NotFound() : Results.Ok(user);
         });
 
-        group.MapPost("", async (Guid organizationId, CreateOrganizationUserRequest request, IOrganizationUserService service, CancellationToken cancellationToken) =>
+        group.MapPost("", async (Guid organizationId, CreateOrganizationUserRequest request, HttpContext http,
+            IOrganizationUserService service, CancellationToken cancellationToken) =>
         {
-            var result = await service.CreateAsync(organizationId, request, cancellationToken);
+            var result = await service.CreateAsync(organizationId, request, cancellationToken, http.User.GetApplicationUserId());
             return result.Succeeded
                 ? Results.Created($"/api/core/organization-users/{result.OrganizationUser!.Id}", result.OrganizationUser)
                 : Results.BadRequest(result);

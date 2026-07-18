@@ -80,14 +80,15 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
                 throw new AgentInstallationException("The imported agent version is not available for installation.");
             }
 
-        if (await _dbContext.AgentInstallations.AnyAsync(
-                x => x.PackageVersionId == packageVersion.Id && x.BusinessId == businessId,
+        var manifest = DeserializeManifest(packageVersion.ManifestJson);
+        if (!manifest.Runtime.SupportsMultipleInstallations && await _dbContext.AgentInstallations.AnyAsync(
+                x => x.BusinessId == businessId && x.IsEnabled && x.RevisionStatus == PluginRevisionStatus.Active &&
+                    x.PackageVersion!.AgentId == packageVersion.AgentId,
                 cancellationToken))
         {
-            throw new AgentInstallationException("This agent version is already installed for the business.");
+            throw new AgentInstallationException("This agent does not support multiple installations for the business.");
         }
 
-        var manifest = DeserializeManifest(packageVersion.ManifestJson);
         var activationMode = ParseActivationMode(request.ActivationMode);
         var scope = ParsePluginScope(request.PluginScope);
         if (packageVersion.PluginKind == PluginKind.Service &&

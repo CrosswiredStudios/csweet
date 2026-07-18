@@ -40,6 +40,25 @@ public static class CommunicationEndpoints
             return messages is null ? Results.NotFound() : Results.Ok(messages);
         });
 
+        group.MapGet("/hub/unread-summary", async (Guid organizationId, HttpContext http,
+            ICommunicationHubService service, CancellationToken cancellationToken) =>
+        {
+            var actorId = await ResolveActorAsync(organizationId, http, service, cancellationToken);
+            if (actorId is null) return Results.Forbid();
+            return await service.GetUnreadSummaryAsync(organizationId, actorId.Value, cancellationToken) is { } summary
+                ? Results.Ok(summary) : Results.Forbid();
+        });
+
+        group.MapPost("/hub/chats/{chatId:guid}/read", async (Guid organizationId, Guid chatId,
+            MarkCommunicationChatReadRequest request, HttpContext http, ICommunicationHubService service,
+            CancellationToken cancellationToken) =>
+        {
+            var actorId = await ResolveActorAsync(organizationId, http, service, cancellationToken);
+            if (actorId is null) return Results.Forbid();
+            return await service.MarkReadAsync(organizationId, chatId, actorId.Value, request.ThroughMessageSequence, cancellationToken)
+                is { } summary ? Results.Ok(summary) : Results.NotFound();
+        });
+
         group.MapPost("/hub/chats", async (Guid organizationId, CreateCommunicationChatRequest request, HttpContext http,
             ICommunicationHubService service, CancellationToken cancellationToken) =>
         {

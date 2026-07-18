@@ -1,7 +1,10 @@
 @page "/organizations/{OrganizationId:guid}/communications"
 @using CSweet.Contracts.Communications
-@implements IDisposable
+@implements IAsyncDisposable
 @inject HttpClient Http
+@inject AppRealtimeState Realtime
+@inject CommunicationUnreadState Unread
+@inject IJSRuntime JS
 
 <PageTitle>Communications - C-Sweet</PageTitle>
 
@@ -40,9 +43,10 @@
                 </div>
                 @foreach (var chat in FilteredChats.Where(x => !x.IsDirect))
                 {
-                    <button class="hub-nav-item @(chat.Id == _selected?.Id ? "active" : null)" @onclick="@(() => SelectChatAsync(chat))">
+                    <button class="hub-nav-item @(chat.Id == _selected?.Id ? "active" : null) @(ChatUnread(chat) > 0 ? "unread" : null)" @onclick="@(() => SelectChatAsync(chat))">
                         <MudIcon Icon="@(chat.IsPrivate ? Icons.Material.Filled.Lock : Icons.Material.Filled.Tag)" Size="Size.Small" />
                         <span>@chat.Title</span>
+                        @if (ChatUnread(chat) > 0) { <span class="hub-unread-count">@UnreadLabel(chat)</span> }
                     </button>
                 }
                 @if (!FilteredChats.Any(x => !x.IsDirect))
@@ -54,8 +58,9 @@
                 @foreach (var chat in FilteredChats.Where(x => x.IsDirect))
                 {
                     var person = chat.Participants.FirstOrDefault(x => x.OrganizationUserId != _hub.CurrentOrganizationUserId);
-                    <button class="hub-nav-item @(chat.Id == _selected?.Id ? "active" : null)" @onclick="@(() => SelectChatAsync(chat))">
+                    <button class="hub-nav-item @(chat.Id == _selected?.Id ? "active" : null) @(ChatUnread(chat) > 0 ? "unread" : null)" @onclick="@(() => SelectChatAsync(chat))">
                         <span class="presence-dot"></span><span>@chat.Title</span>
+                        @if (ChatUnread(chat) > 0) { <span class="hub-unread-dot" aria-label="@($"{ChatUnread(chat)} unread messages")"></span> }
                         @if (person?.EmployeeType == "Agent") { <span class="agent-mark">AI</span> }
                     </button>
                 }
@@ -191,6 +196,7 @@
 @code {
     [Parameter] public Guid OrganizationId { get; set; }
     private readonly CancellationTokenSource _disposeCts = new();
+    private IJSObjectReference? _visibilityModule;
     private CommunicationHubResponse? _hub;
     private CommunicationChatResponse? _selected;
     private CommunicationChatResponse? _editing;
@@ -200,6 +206,7 @@
     private bool _loading = true, _sending, _showMembers, _showEditor, _editorBusy, _editorPrivate, _confirmArchive;
     private string _search = string.Empty, _draft = string.Empty, _editorTitle = string.Empty, _editorDescription = string.Empty;
     private string? _error, _notice, _editorError;
+    private bool _realtimeRefreshing;
     private string BasePath => $"api/organizations/{OrganizationId}/communications/hub";
     private IEnumerable<CommunicationChatResponse> FilteredChats => (_hub?.Chats ?? []).Where(x => string.IsNullOrWhiteSpace(_search) || x.Title.Contains(_search, StringComparison.OrdinalIgnoreCase));
     private IEnumerable<CommunicationPersonResponse> VisiblePeople => _selected is null || !_showMembers
@@ -207,6 +214,8 @@
         : _hub!.People.Where(x => _selected.Participants.Any(p => p.OrganizationUserId == x.Id));
     private string ComposerPlaceholder => _selected is null ? "Message" :
         $"Message {(_selected.IsDirect ? _selected.Title : $"#{_selected.Title}")}";
+
+    protected override void OnInitialized() => Realtime.EventReceived += OnRealtimeEvent;
 
     protected override Task OnParametersSetAsync() => LoadAsync();
 
@@ -218,38 +227,24 @@
             _hub = await Http.GetFromJsonAsync<CommunicationHubResponse>(BasePath, _disposeCts.Token);
             _selected = _hub?.Chats.FirstOrDefault(x => x.Id == _selected?.Id) ?? _hub?.Chats.FirstOrDefault();
             if (_selected is not null) await LoadMessagesAsync();
-            _ = PollAsync();
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { _error = ex.Message; }
         finally { _loading = false; }
     }
 
-    private async Task PollAsync()
-    {
-        try
-        {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-            while (await timer.WaitForNextTickAsync(_disposeCts.Token))
-            {
-                if (_selected is not null && !_sending && !_showEditor)
-                {
-                    var latest = await Http.GetFromJsonAsync<List<CommunicationHubMessageResponse>>($"{BasePath}/chats/{_selected.Id}/messages", _disposeCts.Token) ?? [];
-                    if (latest.Count != _messages.Count || latest.LastOrDefault()?.Id != _messages.LastOrDefault()?.Id)
-                    {
-                        _messages.Clear(); _messages.AddRange(latest); await InvokeAsync(StateHasChanged);
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException) { }
-    }
-
     private async Task SelectChatAsync(CommunicationChatResponse chat) { _selected = chat; _showMembers = false; _notice = null; await LoadMessagesAsync(); }
-    private async Task LoadMessagesAsync()
+    private async Task LoadMessagesAsync(bool markRead = true)
     {
         if (_selected is null) return;
         var items = await Http.GetFromJsonAsync<List<CommunicationHubMessageResponse>>($"{BasePath}/chats/{_selected.Id}/messages", _disposeCts.Token) ?? [];
         _messages.Clear(); _messages.AddRange(items);
+        if (markRead && items.LastOrDefault() is { } last)
+        {
+            var response = await Http.PostAsJsonAsync($"{BasePath}/chats/{_selected.Id}/read",
+                new MarkCommunicationChatReadRequest(last.Sequence), _disposeCts.Token);
+            if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<CommunicationUnreadSummaryResponse>(_disposeCts.Token) is { } summary)
+                Unread.Apply(summary);
+        }
     }
 
     private async Task SendAsync()
@@ -340,15 +335,52 @@
     }
 
     private List<Guid> SelectedAudienceIds(string kind) => _hub?.Audiences.Where(x => x.Kind == kind && _selectedAudiences.Contains(AudienceKey(x))).Select(x => x.Id).ToList() ?? [];
-    private async Task RefreshHubAsync(Guid? selectId = null)
+    private async Task RefreshHubAsync(Guid? selectId = null, bool markRead = true)
     {
         _hub = await Http.GetFromJsonAsync<CommunicationHubResponse>(BasePath, _disposeCts.Token);
         _selected = _hub?.Chats.FirstOrDefault(x => x.Id == selectId) ?? _hub?.Chats.FirstOrDefault();
-        if (_selected is not null) await LoadMessagesAsync(); else _messages.Clear();
+        if (_selected is not null) await LoadMessagesAsync(markRead); else _messages.Clear();
     }
+
+    private void OnRealtimeEvent(CSweet.Contracts.Realtime.AppRealtimeEventEnvelope envelope)
+    {
+        if (envelope.OrganizationId != OrganizationId ||
+            !envelope.EventType.StartsWith("com.csweet.communication.", StringComparison.Ordinal)) return;
+        _ = InvokeAsync(RefreshFromRealtimeAsync);
+    }
+
+    private async Task RefreshFromRealtimeAsync()
+    {
+        if (_realtimeRefreshing || _sending || _showEditor) return;
+        _realtimeRefreshing = true;
+        try
+        {
+            var visible = await IsDocumentVisibleAsync();
+            await RefreshHubAsync(_selected?.Id, visible);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { }
+        finally { _realtimeRefreshing = false; }
+    }
+
+    private async Task<bool> IsDocumentVisibleAsync()
+    {
+        _visibilityModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/CSweet.UI/js/communications.js");
+        return await _visibilityModule.InvokeAsync<bool>("isDocumentVisible");
+    }
+
+    private int ChatUnread(CommunicationChatResponse chat) =>
+        Unread.ChatUnreadCounts.TryGetValue(chat.Id, out var count) ? count : chat.UnreadCount;
+    private string UnreadLabel(CommunicationChatResponse chat) => ChatUnread(chat) > 99 ? "99+" : ChatUnread(chat).ToString();
 
     private static string ParticipantSummary(CommunicationChatResponse chat) => string.Join(", ", chat.Participants.Take(4).Select(x => x.DisplayName)) + (chat.Participants.Count > 4 ? $" +{chat.Participants.Count - 4}" : string.Empty);
     private static string AvatarClass(string type) => type == "Agent" ? "agent" : "human";
     private static string Initials(string name) => string.Join(string.Empty, name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(x => char.ToUpperInvariant(x[0])));
-    public void Dispose() { _disposeCts.Cancel(); _disposeCts.Dispose(); }
+    public async ValueTask DisposeAsync()
+    {
+        Realtime.EventReceived -= OnRealtimeEvent;
+        _disposeCts.Cancel();
+        _disposeCts.Dispose();
+        if (_visibilityModule is not null) await _visibilityModule.DisposeAsync();
+    }
 }

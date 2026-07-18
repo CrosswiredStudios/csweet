@@ -41,6 +41,10 @@ public sealed class CommunicationEventTests
         AssertEvents(db, CommunicationEvents.ChatCreated, CommunicationEvents.ParticipantAdded,
             CommunicationEvents.MessageCreated);
 
+        participant.LastReadMessageSequence = message.Sequence;
+        await db.SaveChangesAsync();
+        AssertEvents(db, CommunicationEvents.ReadUpdated);
+
         chat.Title = "launch-room";
         participant.Role = ConversationParticipantRole.Member;
         message.Content = "Ready to launch";

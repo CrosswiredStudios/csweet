@@ -6,6 +6,8 @@ using CSweet.Contracts.BusinessOnboarding;
 using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
 using CSweet.Domain.Setup;
+using CSweet.Application.Communications;
+using CSweet.Infrastructure.Communications;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,6 +25,7 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
     private readonly IAuditEventWriter _auditEventWriter;
     private readonly IExecutiveBriefingService _executiveBriefings;
     private readonly CSweetDbContext _dbContext;
+    private readonly IAgentCommunicationOnboardingService _agentOnboarding;
 
     public BusinessOnboardingService(
         ICoreOrganizationService organizationService,
@@ -32,7 +35,8 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         IWorkerService workerService,
         IAuditEventWriter auditEventWriter,
         IExecutiveBriefingService executiveBriefings,
-        CSweetDbContext dbContext)
+        CSweetDbContext dbContext,
+        IAgentCommunicationOnboardingService? agentOnboarding = null)
     {
         _organizationService = organizationService;
         _roleService = roleService;
@@ -42,6 +46,7 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         _auditEventWriter = auditEventWriter;
         _executiveBriefings = executiveBriefings;
         _dbContext = dbContext;
+        _agentOnboarding = agentOnboarding ?? new AgentCommunicationOnboardingService(dbContext);
     }
 
     public async Task<BusinessOnboardingActionResponse> CompleteAsync(
@@ -421,6 +426,9 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
             PositionKey = "chief-of-staff",
             StartsAt = now
         });
+        var onboarding = await _agentOnboarding.EnsureAsync(organizationId, chief, cancellationToken: cancellationToken);
+        if (!onboarding.Succeeded)
+            return ChiefAssignmentResult.Failure(onboarding.ErrorCode!, onboarding.Message);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         await _auditEventWriter.WriteAsync(

@@ -28,9 +28,14 @@
 .hub-nav-item { width: 100%; display: flex; align-items: center; gap: 9px; padding: 8px 9px; margin: 2px 0; border: 0; border-radius: 7px; background: transparent; color: #4c5665; font: inherit; font-size: .86rem; text-align: left; cursor: pointer; }
 .hub-nav-item:hover { background: #ebe9f4; }
 .hub-nav-item.active { color: #4f3cbd; background: #e5e0fa; font-weight: 700; }
+.hub-nav-item.unread { color: #303846; font-weight: 720; }
+.hub-nav-item.unread.active { color: #4f3cbd; }
 .hub-nav-item > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hub-nav-empty { margin: 7px 9px; color: #999eaa; font-size: .78rem; }
 .presence-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #38b47a; box-shadow: 0 0 0 2px #fff; }
+.hub-unread-dot { flex: 0 0 auto; width: 7px; height: 7px; margin-left: auto; border-radius: 50%; background: var(--hub-purple); }
+.hub-unread-count { min-width: 1.25rem; margin-left: auto; padding: 1px 5px; border-radius: 999px; background: #ded8f8; color: #5540bd; font-size: .61rem; font-weight: 800; text-align: center; }
+.hub-unread-dot + .agent-mark { margin-left: 0; }
 .agent-mark, .hub-message-meta span { margin-left: auto; padding: 2px 5px; border-radius: 4px; background: #e6e0fb; color: #5a43c7; font-size: .57rem; font-weight: 800; letter-spacing: .04em; }
 .hub-settings { margin-top: auto; padding: 14px 17px; border-top: 1px solid var(--hub-line); display: flex; align-items: center; gap: 9px; color: #6f7783; font-size: .78rem; text-decoration: none; }
 .hub-settings:hover { color: var(--hub-purple); }

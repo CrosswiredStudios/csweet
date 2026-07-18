@@ -15,11 +15,13 @@ public sealed record CommunicationChatResponse(
     string? Description,
     bool IsDirect,
     bool IsPrivate,
+    bool IsDeletionProtected,
     bool CanManage,
     DateTimeOffset UpdatedAt,
     IReadOnlyList<CommunicationParticipantResponse> Participants,
     string? LastMessage,
-    DateTimeOffset? LastMessageAt);
+    DateTimeOffset? LastMessageAt,
+    int UnreadCount);
 
 public sealed record CommunicationParticipantResponse(
     Guid OrganizationUserId,
@@ -42,12 +44,19 @@ public sealed record CommunicationAudienceResponse(
 
 public sealed record CommunicationHubMessageResponse(
     Guid Id,
+    long Sequence,
     Guid ChatId,
     Guid? SenderOrganizationUserId,
     string SenderDisplayName,
     string SenderEmployeeType,
     string Content,
     DateTimeOffset CreatedAt);
+
+public sealed record CommunicationUnreadSummaryResponse(
+    int TotalUnreadCount,
+    IReadOnlyDictionary<Guid, int> ChatUnreadCounts);
+
+public sealed record MarkCommunicationChatReadRequest(long ThroughMessageSequence);
 
 public sealed record CreateCommunicationChatRequest(
     [property: MaxLength(256)] string? Title,
