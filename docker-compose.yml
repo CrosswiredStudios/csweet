@@ -67,8 +67,10 @@ services:
       CSWEET_LLM__DEFAULT_API_KEY: ${CSWEET_LLM__DEFAULT_API_KEY:-lm-studio}
       CSWEET_AGENT_PACKAGE_CACHE: /var/lib/csweet/agents/packages
       CSweet__ApiGateway__BrokerEndpoint: http://csweet-agenthost:8080
+      CSweet__Secrets__FilePath: /state/provider-secrets.json
     volumes:
       - csweet-agent-packages:/var/lib/csweet/agents/packages:ro
+      - csweet-provider-secrets:/state
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/health || exit 1"]
       interval: 10s
@@ -109,9 +111,10 @@ services:
       - csweet-agent-packages:/var/lib/csweet/agents/packages
 
   csweet-agenthost:
+    container_name: agenthost
     build:
-      context: .
-      dockerfile: docker/agenthost.Dockerfile
+      context: ..
+      dockerfile: csweet/docker/agenthost.Dockerfile
     expose:
       - "8080"
     depends_on:
@@ -123,6 +126,9 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       DOTNET_ENVIRONMENT: ${DOTNET_ENVIRONMENT:-Production}
       ConnectionStrings__Postgres: ${CSWEET_CONNECTIONSTRINGS__POSTGRES:-Host=postgres;Port=5432;Database=csweet;Username=csweet;Password=change-me-in-production}
+      CSweet__Secrets__FilePath: /state/provider-secrets.json
+    volumes:
+      - csweet-provider-secrets:/state
 
   # ---------------------------------------------------------
   # Database (PostgreSQL)
@@ -151,6 +157,9 @@ volumes:
     driver: local
   csweet-agent-packages:
     name: csweet-agent-packages
+    driver: local
+  csweet-provider-secrets:
+    name: csweet-provider-secrets
     driver: local
 
 networks:

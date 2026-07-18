@@ -40,10 +40,10 @@ The canonical palette is:
 | `--cs-navy-deep` | `#0B2E53` | Navigation rails and large dark brand surfaces |
 | `--cs-ivory` | `#FFFCF7` | Application canvas and warm page background |
 | `--cs-surface` | `#FFFFFF` | Cards, forms, dialogs, and elevated panels |
-| `--cs-mint` | `#98E7C2` | Agent identity accents and soft positive emphasis |
+| `--cs-mint` | `#9BE7C2` | Secondary brand accents and soft positive emphasis |
 | `--cs-mint-strong` | `#23845C` | Success and online status text/borders |
 | `--cs-amber` | `#F2B84B` | Busy, waiting, and caution states |
-| `--cs-coral` | `#E85D75` | Brand emphasis, destructive/error states, focal actions |
+| `--cs-coral` | `#E85D75` | Destructive and error states only |
 | `--cs-border` | `#E2DDD5` | Default borders and separators |
 | `--cs-muted` | `#68738A` | Secondary text and metadata |
 
@@ -51,8 +51,8 @@ The canonical palette is:
 
 - Page backgrounds must use ivory; primary content surfaces must use white.
 - Default body and heading text must use navy. Secondary text must use muted navy-gray.
-- Coral must be used sparingly. It is appropriate for a singular focal action, brand overline, error, destructive action, or active-navigation marker.
-- Mint means positive, online, available, or agent-associated. Amber means busy, waiting, or caution. Gray means offline or inactive.
+- Mint is the secondary brand color and may indicate positive, online, available, or agent-associated states. Amber means busy, waiting, or caution. Gray means offline or inactive.
+- Coral is reserved for errors, failures, and destructive actions. It must not be used as a decorative brand accent, loading color, focus indicator, or navigation marker.
 - Do not use success, warning, or error colors as large decorative backgrounds.
 - Text and interactive controls must meet WCAG 2.2 AA contrast. If a soft color cannot support readable text, use it as a border or background with navy text.
 
@@ -64,7 +64,7 @@ The font stack is `Inter, "Avenir Next", Roboto, "Helvetica Neue", Arial, sans-s
 - Section titles use `Typo.h6`.
 - Card titles use `Typo.subtitle1`.
 - Supporting copy uses body text with `Color.Secondary`.
-- Eyebrows use `Typo.overline`; they are coral, uppercase, bold, and letter-spaced.
+- Eyebrows use `Typo.overline`; they are strong green, uppercase, bold, and letter-spaced.
 - Headings use navy, a strong weight, tight letter spacing, and short line lengths.
 - Labels must use sentence case. Avoid title case on every control.
 - Do not communicate hierarchy by size alone; use spacing, weight, and placement.
@@ -93,7 +93,7 @@ Use a 4-pixel base rhythm. Preferred increments are `0.25rem`, `0.5rem`, `0.75re
 
 - Desktop uses a persistent deep-navy left navigation drawer.
 - The brand appears at the top with the dark-surface logo, product name, and short product phrase.
-- Navigation uses icon plus label, with a darkened selected background and coral left marker.
+- Navigation uses icon plus label, with a darkened selected background and mint left marker.
 - The desktop top app bar is hidden; account and organization controls should live in an intentional header or sidebar region.
 - The first destination is Enterprise, which represents the complete portfolio of businesses.
 - A focused-business selector follows Enterprise. Business-scoped destinations, including Overview and Employees, are visually nested beneath it.

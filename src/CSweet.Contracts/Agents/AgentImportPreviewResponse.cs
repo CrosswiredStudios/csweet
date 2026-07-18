@@ -28,4 +28,6 @@ public sealed record AgentImportPreviewResponse(
     public string ManifestFileName { get; init; } = "csweet-plugin.json";
     public IReadOnlyList<string> RequestedCapabilities { get; init; } = [];
     public PluginWebAccess WebAccess { get; init; } = new();
+    public IReadOnlyList<PluginConfigurationField> ConfigurationFields { get; init; } = [];
+    public IReadOnlyList<PluginCredentialBinding> CredentialBindings { get; init; } = [];
 }

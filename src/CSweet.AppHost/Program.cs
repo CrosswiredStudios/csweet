@@ -17,6 +17,13 @@ var postgresServer = builder.AddPostgres("postgres", userName: postgresUserName,
 var postgres = postgresServer.AddDatabase("csweet", postgresDatabaseName);
 
 var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+var workspaceRoot = Directory.GetParent(repositoryRoot)?.FullName
+    ?? throw new InvalidOperationException("The C-Sweet repository must have a workspace parent directory.");
+var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+var localStateDirectory = string.IsNullOrWhiteSpace(localAppData)
+    ? Path.Combine(repositoryRoot, ".csweet")
+    : Path.Combine(localAppData, "CSweet");
+Directory.CreateDirectory(localStateDirectory);
 
 var migrator = builder.AddExecutable(
         "migrator",
@@ -28,14 +35,24 @@ var migrator = builder.AddExecutable(
     .WithReference(postgres)
     .WaitFor(postgres);
 
-var agentHost = builder.AddProject<Projects.CSweet_AgentHost>("agenthost")
+// Agent runtimes execute on private Docker networks. Keeping the broker in a
+// real container lets the runtime manager attach only this gateway to each
+// network instead of exposing the runtime to the host or Aspire network.
+var agentHost = builder.AddDockerfile(
+        "agenthost",
+        workspaceRoot,
+        Path.Combine("csweet", "docker", "agenthost.Dockerfile"))
+    .WithContainerName("agenthost")
+    .WithHttpEndpoint(targetPort: 8080, name: "http")
+    .WithBindMount(localStateDirectory, "/state")
+    .WithEnvironment("CSweet__Secrets__FilePath", "/state/provider-secrets.json")
     .WithReference(postgres)
     .WaitFor(postgres)
     .WaitForCompletion(migrator);
 
 var api = builder.AddProject<Projects.CSweet_Api>("api")
     .WithReference(postgres)
-    .WithReference(agentHost)
+    .WithReference(agentHost.GetEndpoint("http"))
     .WaitFor(postgres)
     .WaitFor(agentHost)
     .WaitForCompletion(migrator);
@@ -46,7 +63,7 @@ builder.AddProject<Projects.CSweet_App>("app", launchProfileName: "http")
 
 builder.AddProject<Projects.CSweet_WorkerHost>("workerhost")
     .WithReference(api)
-    .WithReference(agentHost)
+    .WithReference(agentHost.GetEndpoint("http"))
     .WithReference(postgres)
     .WaitFor(postgres)
     .WaitForCompletion(migrator)

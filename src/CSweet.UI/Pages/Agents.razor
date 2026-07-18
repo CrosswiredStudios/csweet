@@ -2,11 +2,14 @@
 @implements IDisposable
 @using System.Text.Json
 @using CSweet.Contracts.Agents
+@using CSweet.Contracts.BusinessOnboarding
 @using CSweet.Contracts.Llm
 @using CSweet.Contracts.Setup
 @inject IAgentApiClient AgentApi
 @inject ILlmProviderApiClient LlmProviderApi
 @inject IAgentRuntimeSettingsApiClient AgentRuntimeSettingsApi
+@inject IBusinessOnboardingApiClient BusinessOnboardingApi
+@inject NavigationManager Navigation
 
 <PageTitle>Agents - C-Sweet</PageTitle>
 
@@ -29,6 +32,13 @@
             </MudTooltip>
         </MudStack>
     </MudPaper>
+
+    @if (IsChiefSetup)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            Select any enabled installed agent below to assign it as Chief of Staff. Chief-oriented capabilities are advisory; readiness warnings will be shown after assignment.
+        </MudAlert>
+    }
 
     @if (_usageSummary is not null)
     {
@@ -168,6 +178,13 @@
                                 </MudAlert>
                             }
                             <MudStack Row="true" Class="setup-actions">
+                                @if (IsChiefSetup && CanAssignToChiefSetup(installation))
+                                {
+                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Badge"
+                                               Disabled="@(_isManagingInstallation || !installation.IsEnabled)" OnClick="@(() => AssignAsChiefAsync(installation))">
+                                        Assign as Chief of Staff
+                                    </MudButton>
+                                }
                                 @if (availableUpdate is not null)
                                 {
                                     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.SystemUpdateAlt" Disabled="@_isManagingInstallation" OnClick="@(() => OpenUpdateDialog(installation, availableUpdate))">
@@ -738,6 +755,25 @@
 @code {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
+    [Parameter, SupplyParameterFromQuery(Name = "businessId")]
+    public Guid? ChiefSetupBusinessId { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "setup")]
+    public string? SetupMode { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "repositoryUrl")]
+    public string? SuggestedRepositoryUrl { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    private bool IsChiefSetup => ChiefSetupBusinessId.HasValue && string.Equals(SetupMode, "chief-of-staff", StringComparison.OrdinalIgnoreCase);
+
+    private bool CanAssignToChiefSetup(AgentInstallationResponse installation) =>
+        ChiefSetupBusinessId.HasValue &&
+        (string.Equals(installation.BusinessId, "default", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(installation.BusinessId, ChiefSetupBusinessId.Value.ToString("D"), StringComparison.OrdinalIgnoreCase));
+
     private IReadOnlyList<AgentInstallationResponse> _installations = [];
     private IReadOnlyList<AgentUpdateAvailabilityResponse> _updates = [];
     private IReadOnlyList<LlmProviderProfileResponse> _providerProfiles = [];
@@ -840,6 +876,37 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
+        if (!string.IsNullOrWhiteSpace(SuggestedRepositoryUrl))
+        {
+            OpenImportDialog();
+            _importRepositoryUrl = SuggestedRepositoryUrl;
+        }
+    }
+
+    private async Task AssignAsChiefAsync(AgentInstallationResponse installation)
+    {
+        if (!ChiefSetupBusinessId.HasValue) return;
+        _isManagingInstallation = true;
+        _installationActionMessage = null;
+        try
+        {
+            var result = await BusinessOnboardingApi.AssignChiefAsync(
+                ChiefSetupBusinessId.Value, new CompleteChiefSetupRequest(installation.Id));
+            _installationActionSucceeded = true;
+            _installationActionMessage = result.ReadinessWarnings.Count == 0
+                ? "Chief of Staff assigned. Opening the command center..."
+                : $"Chief assigned with {result.ReadinessWarnings.Count} readiness warning(s). Opening the command center...";
+            Navigation.NavigateTo(result.NextRoute);
+        }
+        catch (Exception exception)
+        {
+            _installationActionSucceeded = false;
+            _installationActionMessage = exception.Message;
+        }
+        finally
+        {
+            _isManagingInstallation = false;
+        }
     }
 
     private async Task LoadAsync()
@@ -990,6 +1057,8 @@
             _isInstallingImport = false;
             await InvokeAsync(StateHasChanged);
             await TrackAgentBuildAsync(installation, isUpdate: false, cancellationToken: _disposeCts.Token);
+            if (!string.IsNullOrWhiteSpace(ReturnUrl) && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//", StringComparison.Ordinal))
+                Navigation.NavigateTo(ReturnUrl);
         }
         catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
         catch (Exception exception)

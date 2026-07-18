@@ -65,6 +65,25 @@ public static class PluginManagementEndpoints
             IPluginInstallationService installations, CancellationToken cancellationToken) =>
             Results.Ok(await installations.RemoveAsync(installationId, cancellationToken)));
 
+        group.MapPut("/installations/{installationId:guid}/configuration", async (Guid installationId,
+            UpdateAgentConfigurationRequest request, IAgentInstallationConfigurationService configurations,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await configurations.SaveAsync(
+                    installationId,
+                    request.SchemaVersion ?? "1",
+                    request.Settings,
+                    cancellationToken);
+                return Results.NoContent();
+            }
+            catch (AgentInstallationException exception)
+            {
+                return Results.BadRequest(new { error = exception.Message });
+            }
+        });
+
         group.MapPut("/installations/{installationId:guid}/secrets/{key}", async (Guid installationId, string key,
             SetPluginSecretRequest request, IPluginSecretStore secrets, CancellationToken cancellationToken) =>
         {

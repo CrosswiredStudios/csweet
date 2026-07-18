@@ -1,0 +1,15 @@
+*
+!csweet/
+!csweet/**
+!CSweetAgentSdk/
+!CSweetAgentSdk/**
+!CSweet.Memory/
+!CSweet.Memory/**
+
+**/.git
+**/.vs
+**/.idea
+**/bin
+**/obj
+**/TestResults
+**/node_modules

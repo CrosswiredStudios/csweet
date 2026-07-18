@@ -26,7 +26,7 @@ public sealed class LlmProviderProfileService : ILlmProviderProfileService
         CreateLlmProviderProfileRequest request,
         CancellationToken cancellationToken = default)
     {
-        var validationFailure = Validate(request.Name, request.BaseUrl, request.DefaultChatModel);
+        var validationFailure = Validate(request.Name, request.BaseUrl);
         if (validationFailure is not null)
         {
             return validationFailure;
@@ -85,7 +85,7 @@ public sealed class LlmProviderProfileService : ILlmProviderProfileService
         UpdateLlmProviderProfileRequest request,
         CancellationToken cancellationToken = default)
     {
-        var validationFailure = Validate(request.Name, request.BaseUrl, request.DefaultChatModel);
+        var validationFailure = Validate(request.Name, request.BaseUrl);
         if (validationFailure is not null)
         {
             return validationFailure;
@@ -173,6 +173,11 @@ public sealed class LlmProviderProfileService : ILlmProviderProfileService
 
         var now = DateTimeOffset.UtcNow;
         await ClearDefaultReferencesAsync(profile.Id, cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(profile.ApiKeySecretName))
+        {
+            await _secretStore.DeleteAsync(profile.ApiKeySecretName, cancellationToken);
+        }
 
         var tests = await _dbContext.ModelCapabilityTests
             .Where(x => x.ProviderProfileId == profile.Id)
@@ -314,8 +319,7 @@ public sealed class LlmProviderProfileService : ILlmProviderProfileService
 
     private static LlmProviderProfileActionResponse? Validate(
         string name,
-        string baseUrl,
-        string defaultChatModel)
+        string baseUrl)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -325,11 +329,6 @@ public sealed class LlmProviderProfileService : ILlmProviderProfileService
         if (!IsValidBaseUrl(baseUrl))
         {
             return Failure("invalid_base_url", "Provider base URL must be an absolute HTTP or HTTPS URL.");
-        }
-
-        if (string.IsNullOrWhiteSpace(defaultChatModel))
-        {
-            return Failure("validation_error", "Default chat model is required.");
         }
 
         return null;

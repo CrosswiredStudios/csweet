@@ -50,6 +50,12 @@ public class AgentImportPreviewServiceTests
         Assert.Equal(64, result.ManifestDigest.Length);
         Assert.Equal("dotnet-project", result.RuntimeType);
         Assert.Contains(result.Warnings, warning => warning.Code == "network_access_requested");
+        var configuration = Assert.Single(result.ConfigurationFields);
+        Assert.Equal("workspaceId", configuration.Key);
+        Assert.True(configuration.Required);
+        var credential = Assert.Single(result.CredentialBindings);
+        Assert.Equal("service-token", credential.Name);
+        Assert.Contains("https://api.example.com", credential.AllowedOrigins);
         Assert.Single(await dbContext.AgentPackageSources.ToListAsync());
         var version = Assert.Single(await dbContext.AgentPackageVersions.ToListAsync());
         Assert.Equal(result.ImportId, version.Id);
@@ -125,9 +131,15 @@ public class AgentImportPreviewServiceTests
             "subscribes": ["research.requested.v1"],
             "publishes": ["research.completed.v1"]
           },
+          "configuration": [
+            {"key":"workspaceId","type":"string","label":"Workspace ID","required":true,"secret":false}
+          ],
+          "credentials": [
+            {"name":"service-token","type":"authorization-header","allowedOrigins":["https://api.example.com"]}
+          ],
           "webAccess": {
             "mode": "Allowlist",
-            "rules": [{"scheme":"https","host":"api.example.com","pathPrefix":"/","methods":["GET"],"protocol":"http","purpose":"Research"}]
+            "rules": [{"scheme":"https","host":"api.example.com","pathPrefix":"/","methods":["GET"],"protocol":"http","purpose":"Research","credential":"service-token"}]
           }
         }
         """;

@@ -26,6 +26,30 @@ public class LlmProviderTests
         Assert.False(preset.SupportsVision);
     }
 
+    [Theory]
+    [InlineData(LlmProviderType.LmStudio)]
+    [InlineData(LlmProviderType.UnslothStudio)]
+    [InlineData(LlmProviderType.Ollama)]
+    [InlineData(LlmProviderType.Vllm)]
+    [InlineData(LlmProviderType.OpenAi)]
+    [InlineData(LlmProviderType.GoogleGemini)]
+    [InlineData(LlmProviderType.OpenRouter)]
+    [InlineData(LlmProviderType.Groq)]
+    [InlineData(LlmProviderType.TogetherAi)]
+    [InlineData(LlmProviderType.Custom)]
+    public void SupportedSetupProvider_UsesOpenAiCompatibleApi(LlmProviderType providerType)
+    {
+        Assert.True(providerType.UsesOpenAiCompatibleApi());
+    }
+
+    [Fact]
+    public void LocalProviderPresets_ReturnExpectedEndpoints()
+    {
+        Assert.Equal("http://localhost:8888/v1", LlmProviderPresets.UnslothStudioLocalhost().BaseUrl);
+        Assert.Equal("http://localhost:11434/v1", LlmProviderPresets.OllamaLocalhost().BaseUrl);
+        Assert.Equal("http://localhost:8000/v1", LlmProviderPresets.VllmLocalhost().BaseUrl);
+    }
+
     [Fact]
     public async Task CreateProviderProfile_InvalidBaseUrl_IsRejected()
     {
@@ -49,6 +73,31 @@ public class LlmProviderTests
 
         Assert.False(result.Succeeded);
         Assert.Equal("invalid_base_url", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task CreateProviderProfile_DoesNotRequireDefaultChatModel()
+    {
+        await using var dbContext = CreateDbContext();
+        var tester = CreateTester(dbContext, CreateReadyHandler());
+        var service = new LlmProviderProfileService(dbContext, new InMemoryLlmProviderSecretStore(), tester);
+
+        var result = await service.CreateAsync(new CreateLlmProviderProfileRequest(
+            "Local LM Studio",
+            LlmProviderType.LmStudio,
+            "http://localhost:1234/v1",
+            null,
+            string.Empty,
+            null,
+            null,
+            null,
+            SupportsStreaming: false,
+            SupportsToolCalling: false,
+            SupportsStructuredOutput: false,
+            SupportsVision: false));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(string.Empty, result.Profile?.DefaultChatModel);
     }
 
     [Fact]
@@ -114,8 +163,13 @@ public class LlmProviderTests
         });
         await dbContext.SaveChangesAsync();
 
+        var secretStore = new InMemoryLlmProviderSecretStore();
+        profile.ApiKeySecretName = $"llm-provider-profiles/{profile.Id}/api-key";
+        await secretStore.StoreAsync(profile.ApiKeySecretName, "delete-me");
+        await dbContext.SaveChangesAsync();
+
         var tester = CreateTester(dbContext, CreateReadyHandler());
-        var service = new LlmProviderProfileService(dbContext, new InMemoryLlmProviderSecretStore(), tester);
+        var service = new LlmProviderProfileService(dbContext, secretStore, tester);
 
         var result = await service.DeleteAsync(profile.Id);
         var configuration = await dbContext.SystemConfigurations.SingleAsync();
@@ -125,6 +179,7 @@ public class LlmProviderTests
         Assert.Empty(dbContext.ModelCapabilityTests);
         Assert.Null(configuration.DefaultChatProviderId);
         Assert.Null(configuration.DefaultEmbeddingProviderId);
+        Assert.Null(await secretStore.GetAsync(profile.ApiKeySecretName));
     }
 
     [Fact]

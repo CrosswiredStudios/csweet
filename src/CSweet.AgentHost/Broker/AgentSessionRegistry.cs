@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CSweet.Agent.Contracts.Grpc;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 
@@ -165,6 +166,40 @@ public sealed class AgentSessionRegistry
             deliveredCount,
             string.Join(", ", deliveredTargets),
             correlationId);
+    }
+
+    /// <summary>Publishes a trusted, durable application event without impersonating an agent.</summary>
+    public int PublishPlatformEvent(string businessId, string eventType, string subject, ByteString payload, string correlationId,
+        string? targetInstallationId = null)
+    {
+        var delivered = new DeliveredEvent
+        {
+            EventId = Guid.NewGuid().ToString("N"),
+            SourceAgentId = "platform.csweet",
+            EventType = eventType,
+            SchemaVersion = "1.0",
+            Subject = subject,
+            ContentType = "application/json",
+            Payload = payload,
+            OccurredAt = Timestamp.FromDateTime(DateTime.UtcNow)
+        };
+        var count = 0;
+        foreach (var target in _sessions.Values.Where(x =>
+                     string.Equals(x.BusinessId, businessId, StringComparison.Ordinal) &&
+                     (targetInstallationId is null || string.Equals(x.InstallationId, targetInstallationId, StringComparison.OrdinalIgnoreCase)) &&
+                     x.Grant.Subscriptions.Contains(eventType)))
+        {
+            if (target.TrySend(new BrokerToAgentMessage
+                {
+                    MessageId = Guid.NewGuid().ToString("N"),
+                    CorrelationId = correlationId,
+                    Event = delivered
+                }))
+            {
+                count++;
+            }
+        }
+        return count;
     }
 
     public void RequestCapability(

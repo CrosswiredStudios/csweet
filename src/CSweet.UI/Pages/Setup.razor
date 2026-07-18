@@ -15,51 +15,52 @@
 <PageTitle>C-Sweet Setup</PageTitle>
 
 <div class="setup-shell">
-    <MudPaper Elevation="0" Class="page-header">
-        <div>
-            <MudText Typo="Typo.overline" Color="Color.Primary">First-run configuration</MudText>
-            <MudText Typo="Typo.h3">C-Sweet Setup</MudText>
-            <MudText Color="Color.Secondary">Connect the services C-Sweet needs before business onboarding starts.</MudText>
-        </div>
-        <MudStack AlignItems="AlignItems.End" Spacing="0">
-            <MudText Typo="Typo.h4" Color="Color.Primary">@CompletedStepCount / @SetupSteps.Count</MudText>
-            <MudText Typo="Typo.caption" Color="Color.Secondary">steps complete</MudText>
-        </MudStack>
-    </MudPaper>
-
     @if (_isLoading)
     {
-        <MudPaper Elevation="1" Class="surface-panel">
+        <MudPaper Elevation="1" Class="setup-card setup-loading-card" aria-live="polite">
             <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
-            <MudText Color="Color.Secondary">Loading setup status...</MudText>
+            <MudText Color="Color.Secondary">Preparing your setup...</MudText>
         </MudPaper>
     }
     else if (!string.IsNullOrWhiteSpace(_pageError))
     {
-        <MudAlert Severity="Severity.Error" Variant="Variant.Filled">@_pageError</MudAlert>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync" Class="mt-4">Retry</MudButton>
+        <MudPaper Elevation="1" Class="setup-card setup-error-card">
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_pageError</MudAlert>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">Retry</MudButton>
+        </MudPaper>
     }
     else
     {
-        <div class="setup-grid">
-            <aside class="setup-steps" aria-label="Setup steps">
-                @foreach (var step in SetupSteps)
-                {
-                    var isActive = step.Key == _activeStepKey;
-                    var isComplete = IsStepComplete(step.Key);
-                    <MudButton Class="@($"setup-step {(isActive ? "active" : null)} {(isComplete ? "complete" : null)}")"
-                               Variant="Variant.Text"
-                               OnClick="@(() => SelectStep(step.Key))">
-                        <span class="setup-step-index">@step.Number</span>
-                        <span>
-                            <strong>@step.Title</strong>
-                            <small>@(isComplete ? "Complete" : step.Description)</small>
-                        </span>
-                    </MudButton>
-                }
-            </aside>
+        <MudPaper Elevation="1" Class="setup-card">
+            <nav class="setup-progress" aria-label="Setup progress">
+                <ol>
+                    @foreach (var step in SetupSteps)
+                    {
+                        var isActive = step.Key == _activeStepKey;
+                        var isComplete = IsStepComplete(step.Key);
+                        <li class="@($"{(isActive ? "active" : null)} {(isComplete ? "complete" : null)}")">
+                            <button type="button"
+                                    aria-current="@(isActive ? "step" : null)"
+                                    aria-label="@($"Step {step.Number}: {step.Title}{(isComplete ? ", complete" : string.Empty)}")"
+                                    @onclick="() => SelectStep(step.Key)">
+                                <span class="setup-progress-node">
+                                    @if (isComplete)
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.Check" />
+                                    }
+                                    else
+                                    {
+                                        @step.Number
+                                    }
+                                </span>
+                                <span class="setup-progress-label">@step.Title</span>
+                            </button>
+                        </li>
+                    }
+                </ol>
+            </nav>
 
-            <MudPaper Elevation="1" Class="surface-panel">
+            <div class="setup-stage" @key="_activeStepKey">
                 @if (_status?.IsFirstRunComplete == true)
                 {
                     <MudAlert Severity="Severity.Success" Variant="Variant.Filled">Setup is complete. Redirecting to business onboarding...</MudAlert>
@@ -68,8 +69,8 @@
                 {
                     @RenderActiveStep()
                 }
-            </MudPaper>
-        </div>
+            </div>
+        </MudPaper>
     }
 </div>
 
@@ -77,16 +78,14 @@
     private static readonly IReadOnlyList<WizardStep> SetupSteps =
     [
         new(1, "welcome", "Welcome", "Start here"),
-        new(2, "llm-provider", "LLM Provider", "Chat model"),
-        new(3, "model-capability-test", "Capability Test", "Provider checks"),
-        new(4, "email-delivery", "Email Delivery", "Optional"),
-        new(5, "communications", "Communications", "Optional"),
-        new(6, "finish", "Finish", "Unlock app")
+        new(2, "llm-provider", "LLM Providers", "Connect endpoints"),
+        new(3, "email-delivery", "Email Delivery", "Optional"),
+        new(4, "communications", "Communications", "Optional"),
+        new(5, "finish", "Finish", "Unlock app")
     ];
 
     private SetupStatusResponse? _status;
     private IReadOnlyList<LlmProviderProfileResponse> _profiles = [];
-    private ModelCapabilityTestResult? _capabilityResult;
     private string _activeStepKey = "welcome";
     private bool _isLoading = true;
     private bool _isBusy;
@@ -102,64 +101,14 @@
     private string _smtpFromName = "C-Sweet";
     private string _publicAppUrl = string.Empty;
     private CommunicationSetupOptionsResponse? _communicationOptions;
-    private string _selectedCommunicationAdapter = "builtin";
-    private bool _discordAuthorizationConfirmed;
 
     private Guid? _providerProfileId;
-    private LlmProviderType _providerType = LlmProviderType.LmStudio;
-    private string _providerName = "Local LM Studio";
-    private string _baseUrl = "http://localhost:1234/v1";
-    private string _apiKey = "lm-studio";
-    private string _defaultChatModel = string.Empty;
-    private string _defaultEmbeddingModel = string.Empty;
-    private IReadOnlyList<ModelDescriptor> _availableModels = [];
-    private bool _initialModelCatalogLoadRequested;
-    private bool _isCheckingModelCatalog;
-    private bool? _modelCatalogSucceeded;
-    private string? _modelCatalogMessage;
-    private int? _contextWindowTokens;
-    private int? _maxOutputTokens;
-    private bool _supportsStreaming = true;
-    private bool _supportsToolCalling;
-    private bool _supportsStructuredOutput;
-    private bool _supportsVision;
-
-    private int CompletedStepCount => SetupSteps.Count(step => IsStepComplete(step.Key));
-    private bool CanFinish => RequiredPriorStepsComplete && _status?.DefaultChatProviderId is not null;
+    private bool CanFinish => _status is not null && SetupWizardState.CanFinish(_status);
     private bool RequiredPriorStepsComplete => _status?.Steps.Where(x => x.IsRequired && x.Key != "finish").All(x => x.IsComplete) == true;
-    private bool IsModelSelectDisabled => _isCheckingModelCatalog || (_availableModels.Count == 0 && string.IsNullOrWhiteSpace(_defaultChatModel));
-    private bool SelectedChatModelMissingFromCatalog => !string.IsNullOrWhiteSpace(_defaultChatModel) &&
-        !_availableModels.Any(model => string.Equals(model.Id, _defaultChatModel, StringComparison.Ordinal));
-    private string ModelSelectPlaceholder => _isCheckingModelCatalog
-        ? "Checking models..."
-        : _availableModels.Count == 0
-            ? "Blur Base URL to load models"
-            : "Select a model";
-    private string ModelCatalogFeedbackClass => _modelCatalogSucceeded switch
-    {
-        true => "setup-field-feedback setup-field-feedback-success",
-        false => "setup-field-feedback setup-field-feedback-error",
-        _ => "setup-field-feedback"
-    };
 
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (_isLoading ||
-            _activeStepKey != "llm-provider" ||
-            _initialModelCatalogLoadRequested ||
-            _availableModels.Count > 0)
-        {
-            return;
-        }
-
-        _initialModelCatalogLoadRequested = true;
-        await PreviewModelCatalogAsync();
-        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadAsync()
@@ -174,7 +123,7 @@
             _emailSettings = await Http.GetFromJsonAsync<EmailDeliverySettingsResponse>("api/setup/email-delivery");
             _communicationOptions = await Http.GetFromJsonAsync<CommunicationSetupOptionsResponse>("api/setup/communications/options");
             ApplyEmailSettings();
-            _providerProfileId ??= _status.DefaultChatProviderId ?? _profiles.LastOrDefault()?.Id;
+            _providerProfileId ??= _profiles.LastOrDefault()?.Id;
 
             if (_status.IsFirstRunComplete)
             {
@@ -201,7 +150,6 @@
 
     private void BackToWelcome() => SelectStep("welcome");
     private void BackToProvider() => SelectStep("llm-provider");
-    private void BackToCapabilityTest() => SelectStep("model-capability-test");
     private void BackToEmailDelivery() => SelectStep("email-delivery");
     private void BackToCommunications() => SelectStep("communications");
 
@@ -209,136 +157,23 @@
     {
         "welcome" => WelcomeStep,
         "llm-provider" => LlmProviderStep,
-        "model-capability-test" => CapabilityTestStep,
         "email-delivery" => EmailDeliveryStep,
         "communications" => CommunicationsStep,
         "finish" => FinishStep,
         _ => WelcomeStep
     };
 
-    private RenderFragment WelcomeStep => @<div>
-        <div class="setup-step-heading">
-            <MudText Typo="Typo.overline" Color="Color.Primary">Step 1</MudText>
-            <MudText Typo="Typo.h5">Welcome to C-Sweet.</MudText>
-            <MudText Color="Color.Secondary">Before creating your first business, connect a model provider and choose your account preferences.</MudText>
-        </div>
-        <MudStack Row="true" Class="setup-actions">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="ContinueFromWelcomeAsync">Continue</MudButton>
-        </MudStack>
-    </div>;
+    private RenderFragment WelcomeStep => @<WelcomeSetupStep IsBusy="@_isBusy" OnContinue="@ContinueFromWelcomeAsync" />;
 
-    private RenderFragment LlmProviderStep => @<div>
-        <div class="setup-step-heading">
-            <MudText Typo="Typo.overline" Color="Color.Primary">Step 2</MudText>
-            <MudText Typo="Typo.h5">LLM Provider</MudText>
-            <MudText Color="Color.Secondary">Create the default chat provider profile. LM Studio is prefilled for local setup.</MudText>
-        </div>
+    private RenderFragment LlmProviderStep => @<LlmProviderSetupStep Profiles="@_profiles"
+                                                                         SelectedProviderId="@_providerProfileId"
+                                                                         ProfilesChanged="@HandleProfilesChangedAsync"
+                                                                         OnContinue="@ContinueFromProviderAsync"
+                                                                         OnBack="@BackToWelcome" />;
 
-        <div class="setup-form-grid">
-            <MudSelect T="LlmProviderType" Label="Provider Type" Value="_providerType" ValueChanged="OnProviderTypeChanged" Variant="Variant.Outlined">
-                @foreach (var providerType in Enum.GetValues<LlmProviderType>())
-                {
-                    <MudSelectItem T="LlmProviderType" Value="@providerType">@ProviderTypeLabel(providerType)</MudSelectItem>
-                }
-            </MudSelect>
-            <MudTextField Label="Provider Name" @bind-Value="_providerName" Variant="Variant.Outlined" />
-            <div class="setup-form-wide">
-                <MudTextField Label="Base URL" @bind-Value="_baseUrl" Immediate="true" OnBlur="@(_ => PreviewModelCatalogAsync())" Variant="Variant.Outlined" />
-                @if (!string.IsNullOrWhiteSpace(_modelCatalogMessage))
-                {
-                    <MudText Typo="Typo.caption" Class="@ModelCatalogFeedbackClass">@_modelCatalogMessage</MudText>
-                }
-            </div>
-            <MudTextField Class="setup-form-wide" Label="API Key / Token" @bind-Value="_apiKey" InputType="InputType.Password" autocomplete="off" Variant="Variant.Outlined" />
-            <MudSelect T="string" Label="Default Chat Model" @bind-Value="_defaultChatModel" Disabled="@IsModelSelectDisabled" Variant="Variant.Outlined">
-                <MudSelectItem T="string" Value="@string.Empty">@ModelSelectPlaceholder</MudSelectItem>
-                @if (SelectedChatModelMissingFromCatalog)
-                {
-                    <MudSelectItem T="string" Value="@_defaultChatModel">@_defaultChatModel</MudSelectItem>
-                }
-                @foreach (var model in _availableModels)
-                {
-                    <MudSelectItem T="string" Value="@model.Id">@model.Id</MudSelectItem>
-                }
-            </MudSelect>
-            <MudTextField Label="Default Embedding Model" @bind-Value="_defaultEmbeddingModel" Variant="Variant.Outlined" />
-            <MudNumericField T="int?" Label="Context Window Tokens" @bind-Value="_contextWindowTokens" Variant="Variant.Outlined" />
-            <MudNumericField T="int?" Label="Max Output Tokens" @bind-Value="_maxOutputTokens" Variant="Variant.Outlined" />
-        </div>
-
-        <MudStack Row="true" Class="setup-toggle-row">
-            <MudCheckBox T="bool" Label="Streaming" @bind-Value="_supportsStreaming" />
-            <MudCheckBox T="bool" Label="Structured output" @bind-Value="_supportsStructuredOutput" />
-            <MudCheckBox T="bool" Label="Tool calling" @bind-Value="_supportsToolCalling" />
-            <MudCheckBox T="bool" Label="Vision" @bind-Value="_supportsVision" />
-        </MudStack>
-
-        @if (_profiles.Count > 0)
-        {
-            <MudStack Row="true" Class="setup-inline-list">
-                <MudText Color="Color.Secondary">Existing profiles</MudText>
-                @foreach (var profile in _profiles)
-                {
-                    <MudButton Size="Size.Small"
-                               Variant="@(profile.Id == _providerProfileId ? Variant.Filled : Variant.Outlined)"
-                               Color="@(profile.Id == _providerProfileId ? Color.Primary : Color.Secondary)"
-                               OnClick="@(() => SelectProvider(profile))">
-                        @profile.Name
-                    </MudButton>
-                }
-            </MudStack>
-        }
-
-        @StepMessage()
-        <MudStack Row="true" Class="setup-actions">
-            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToWelcome">Back</MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_isBusy || _isCheckingModelCatalog || string.IsNullOrWhiteSpace(_defaultChatModel))" OnClick="CreateProviderAsync">
-                @(_isBusy ? "Saving..." : "Save Provider")
-            </MudButton>
-        </MudStack>
-    </div>;
-
-    private RenderFragment CapabilityTestStep => @<div>
+    private RenderFragment EmailDeliveryStep => @<div class="setup-legacy-step">
         <div class="setup-step-heading">
             <MudText Typo="Typo.overline" Color="Color.Primary">Step 3</MudText>
-            <MudText Typo="Typo.h5">Model Capability Test</MudText>
-            <MudText Color="Color.Secondary">Required checks must pass. Optional capabilities are recorded honestly if unsupported.</MudText>
-        </div>
-
-        @if (_providerProfileId is null)
-        {
-            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">Create or select a provider profile before running the capability test.</MudAlert>
-        }
-        else
-        {
-            <div class="setup-check-list">
-                @CapabilityRow("Connection", _capabilityResult?.ConnectionSucceeded, required: true)
-                @CapabilityRow("Model list", _capabilityResult?.ConnectionSucceeded, required: false)
-                @CapabilityRow("Chat completion", _capabilityResult?.ChatSucceeded, required: true)
-                @CapabilityRow("Streaming", _capabilityResult?.StreamingSucceeded, required: false)
-                @CapabilityRow("Structured JSON output", _capabilityResult?.StructuredOutputSucceeded, required: false)
-                @CapabilityRow("Tool calling", _capabilityResult?.ToolCallingSucceeded, required: false)
-                @CapabilityRow("Embeddings", null, required: false)
-            </div>
-        }
-
-        @if (!string.IsNullOrWhiteSpace(_capabilityResult?.FailureMessage))
-        {
-            <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="mt-4">@_capabilityResult.FailureMessage</MudAlert>
-        }
-
-        @StepMessage()
-        <MudStack Row="true" Class="setup-actions">
-            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToProvider">Back</MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_isBusy || _providerProfileId is null)" OnClick="RunCapabilityTestAsync">
-                @(_isBusy ? "Testing..." : "Run Test")
-            </MudButton>
-        </MudStack>
-    </div>;
-
-    private RenderFragment EmailDeliveryStep => @<div>
-        <div class="setup-step-heading">
-            <MudText Typo="Typo.overline" Color="Color.Primary">Step 4</MudText>
             <MudText Typo="Typo.h5">Email Delivery <MudChip T="string" Size="Size.Small">Optional</MudChip></MudText>
             <MudText Color="Color.Secondary">Configure SMTP for email verification, password recovery, and future invitations. You can safely skip this and return later.</MudText>
         </div>
@@ -358,99 +193,30 @@
         }
         @StepMessage()
         <MudStack Row="true" Class="setup-actions">
-            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToCapabilityTest">Back</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToProvider">Back</MudButton>
             <MudButton Variant="Variant.Text" Disabled="@_isBusy" OnClick="SkipEmailDeliveryAsync">Skip for now</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@_isBusy" OnClick="SaveEmailDeliveryAsync">Save</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="TestEmailDeliveryAsync">Save &amp; Test</MudButton>
         </MudStack>
     </div>;
 
-    private RenderFragment CommunicationsStep => @<div>
+    private RenderFragment CommunicationsStep => @<CommunicationsSetupStep Options="@_communicationOptions"
+                                                                              OnBack="@BackToEmailDelivery"
+                                                                              OnContinue="@CompleteCommunicationsAsync" />;
+
+    private RenderFragment FinishStep => @<div class="setup-legacy-step">
         <div class="setup-step-heading">
             <MudText Typo="Typo.overline" Color="Color.Primary">Step 5</MudText>
-            <MudText Typo="Typo.h5">How should C-Sweet reach you? <MudChip T="string" Size="Size.Small">Optional</MudChip></MudText>
-            <MudText Color="Color.Secondary">
-                C-Sweet includes its own secure inbox and chat in the web and companion apps. You can also connect another communication surface and let C-Sweet create and maintain the workspace for you.
-            </MudText>
-        </div>
-
-        <MudGrid Class="mb-5">
-            <MudItem xs="12" md="4">
-                <MudPaper Outlined="true" Class="pa-4 h-100">
-                    <MudIcon Icon="@Icons.Material.Outlined.Chat" Color="Color.Primary" Size="Size.Large" />
-                    <MudText Typo="Typo.h6" Class="mt-2">C-Sweet app</MudText>
-                    <MudText Typo="Typo.body2">Always available. Conversations, notifications, and approvals stay synchronized here.</MudText>
-                    <MudButton Variant="@(_selectedCommunicationAdapter == "builtin" ? Variant.Filled : Variant.Outlined)" Color="Color.Primary"
-                               OnClick="@(() => _selectedCommunicationAdapter = "builtin")" Class="mt-3">Use built-in messaging</MudButton>
-                </MudPaper>
-            </MudItem>
-            <MudItem xs="12" md="4">
-                <MudPaper Outlined="true" Class="pa-4 h-100">
-                    <MudIcon Icon="@Icons.Material.Outlined.Forum" Color="Color.Primary" Size="Size.Large" />
-                    <MudText Typo="Typo.h6" Class="mt-2">Discord</MudText>
-                    <MudText Typo="Typo.body2">C-Sweet can build employee, team, project, approval, and archive channels and keep them synchronized.</MudText>
-                    <MudButton Variant="@(_selectedCommunicationAdapter == "discord" ? Variant.Filled : Variant.Outlined)" Color="Color.Primary"
-                               OnClick="@(() => _selectedCommunicationAdapter = "discord")" Class="mt-3">Set up Discord</MudButton>
-                </MudPaper>
-            </MudItem>
-            <MudItem xs="12" md="4">
-                <MudPaper Outlined="true" Class="pa-4 h-100">
-                    <MudText Typo="Typo.h6">Slack &amp; WhatsApp</MudText>
-                    <MudText Typo="Typo.body2">These adapters are planned but are not available in this release.</MudText>
-                    <MudChip T="string" Size="Size.Small" Class="mt-3">Coming soon</MudChip>
-                </MudPaper>
-            </MudItem>
-        </MudGrid>
-
-        @if (_selectedCommunicationAdapter == "discord")
-        {
-            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
-                <strong>What happens:</strong> you sign in to Discord, choose a server where you can manage channels and roles, and approve only the permissions C-Sweet needs. C-Sweet never gives your instance the official bot token and never requests Administrator access.
-            </MudAlert>
-            <MudText Typo="Typo.h6">Connect Discord</MudText>
-            <ol>
-                <li>Use a Discord account that can manage the server you want to connect.</li>
-                <li>Click the authorization button and sign in to Discord in the new window.</li>
-                <li>Select the server, review the requested channel, role, webhook, message, and thread permissions, then authorize.</li>
-                <li>Return here after Discord confirms the connection.</li>
-            </ol>
-            @if (_communicationOptions?.DiscordIsConfigured == true)
-            {
-                <MudButton Href="@_communicationOptions.DiscordInstallUrl" Target="_blank" Variant="Variant.Filled" Color="Color.Primary"
-                           StartIcon="@Icons.Material.Outlined.OpenInNew">Sign in to Discord and authorize C-Sweet</MudButton>
-                <MudCheckBox T="bool" @bind-Value="_discordAuthorizationConfirmed" Class="mt-3"
-                             Label="Discord confirmed that C-Sweet was authorized" />
-            }
-            else
-            {
-                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
-                    The administrator must configure <code>Communications:Discord:InstallUrl</code> before Discord authorization is available. You may skip this step and connect it later under Communications.
-                </MudAlert>
-            }
-        }
-
-        @StepMessage()
-        <MudStack Row="true" Class="setup-actions">
-            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToEmailDelivery">Back</MudButton>
-            <MudButton Variant="Variant.Text" Disabled="@_isBusy" OnClick="SkipCommunicationsAsync">Skip for now</MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_isBusy || (_selectedCommunicationAdapter == "discord" && !_discordAuthorizationConfirmed))"
-                       OnClick="CompleteCommunicationsAsync">Continue</MudButton>
-        </MudStack>
-    </div>;
-
-    private RenderFragment FinishStep => @<div>
-        <div class="setup-step-heading">
-            <MudText Typo="Typo.overline" Color="Color.Primary">Step 6</MudText>
             <MudText Typo="Typo.h5">Finish Setup</MudText>
             <MudText Color="Color.Secondary">Complete first-run setup and unlock business onboarding.</MudText>
         </div>
 
         <div class="setup-check-list">
             @CapabilityRow("Required steps complete", RequiredPriorStepsComplete, required: true)
-            @CapabilityRow("Default chat provider selected", _status?.DefaultChatProviderId is not null, required: true)
-            @CapabilityRow("Last capability test had chat success", IsStepComplete("model-capability-test"), required: true)
+            @CapabilityRow("At least one provider connected", _profiles.Any(x => x.IsEnabled), required: true)
+            @CapabilityRow("Provider model catalog verified", IsStepComplete("llm-provider"), required: true)
             @CapabilityRow("Email delivery tested", _emailSettings?.IsReady, required: false)
-            @CapabilityRow("Communication surface selected", IsStepComplete("communications"), required: false)
+            @CapabilityRow("Communication setup reviewed", IsStepComplete("communications"), required: false)
         </div>
 
         @StepMessage()
@@ -475,140 +241,21 @@
         }
     </div>;
 
-    private async Task OnProviderTypeChanged(LlmProviderType providerType)
+    private Task HandleProfilesChangedAsync(IReadOnlyList<LlmProviderProfileResponse> profiles)
     {
-        _providerType = providerType;
-        ApplyProviderPreset();
-
-        if (_providerType == LlmProviderType.LmStudio)
-        {
-            _initialModelCatalogLoadRequested = true;
-            await PreviewModelCatalogAsync();
-        }
+        _profiles = profiles;
+        return Task.CompletedTask;
     }
 
-    private async Task CreateProviderAsync()
+    private async Task ContinueFromProviderAsync(Guid? providerProfileId)
     {
-        _isBusy = true;
-        _stepMessage = null;
-
-        try
-        {
-            var profile = await LlmProviderApi.CreateAsync(new CreateLlmProviderProfileRequest(
-                _providerName,
-                _providerType,
-                _baseUrl,
-                string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey,
-                _defaultChatModel,
-                string.IsNullOrWhiteSpace(_defaultEmbeddingModel) ? null : _defaultEmbeddingModel,
-                _contextWindowTokens,
-                _maxOutputTokens,
-                _supportsStreaming,
-                _supportsToolCalling,
-                _supportsStructuredOutput,
-                _supportsVision));
-
-            _providerProfileId = profile.Id;
-            await CompleteStepAsync("llm-provider", "model-capability-test");
-            _profiles = await LlmProviderApi.ListAsync();
-            _stepMessage = "Provider profile saved.";
-        }
-        catch (Exception ex)
-        {
-            _stepMessage = ex.Message;
-        }
-        finally
-        {
-            _isBusy = false;
-        }
-    }
-
-    private async Task PreviewModelCatalogAsync()
-    {
-        _modelCatalogMessage = null;
-        _modelCatalogSucceeded = null;
-
-        if (!Uri.TryCreate(_baseUrl.Trim(), UriKind.Absolute, out var baseUri) ||
-            (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps))
-        {
-            _availableModels = [];
-            _modelCatalogSucceeded = false;
-            _modelCatalogMessage = "Enter a valid HTTP or HTTPS base URL.";
-            return;
-        }
-
-        _isCheckingModelCatalog = true;
-
-        try
-        {
-            var result = await LlmProviderApi.PreviewModelCatalogAsync(new PreviewModelCatalogRequest(
-                _providerType,
-                _baseUrl.Trim(),
-                string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey));
-
-            _availableModels = result.Models;
-            _modelCatalogSucceeded = result.Succeeded;
-            _modelCatalogMessage = result.Message ?? (result.Succeeded
-                ? $"Found {result.Models.Count} model(s)."
-                : "Unable to load models from this provider.");
-
-            if (result.Models.Count > 0 && (string.IsNullOrWhiteSpace(_defaultChatModel) || SelectedChatModelMissingFromCatalog))
-            {
-                _defaultChatModel = result.Models[0].Id;
-            }
-        }
-        catch
-        {
-            _availableModels = [];
-            _modelCatalogSucceeded = false;
-            _modelCatalogMessage = "Unable to check this provider. Confirm the API is running and the base URL is reachable.";
-        }
-        finally
-        {
-            _isCheckingModelCatalog = false;
-        }
-    }
-
-    private async Task RunCapabilityTestAsync()
-    {
-        if (_providerProfileId is null)
+        if (_profiles.Count == 0)
         {
             return;
         }
 
-        _isBusy = true;
-        _stepMessage = null;
-        _capabilityResult = null;
-
-        try
-        {
-            _capabilityResult = await LlmProviderApi.TestAsync(_providerProfileId.Value);
-
-            if (_capabilityResult.ConnectionSucceeded && _capabilityResult.ChatSucceeded)
-            {
-                var defaultResult = await LlmProviderApi.SetDefaultChatProviderAsync(_providerProfileId.Value);
-                if (!defaultResult.Succeeded)
-                {
-                    _stepMessage = defaultResult.Message;
-                    return;
-                }
-
-                await CompleteStepAsync("model-capability-test", "email-delivery");
-                _stepMessage = SetupWizardState.ProviderTestMessage(_capabilityResult);
-            }
-            else
-            {
-                _stepMessage = SetupWizardState.ProviderTestMessage(_capabilityResult);
-            }
-        }
-        catch (Exception ex)
-        {
-            _stepMessage = ex.Message;
-        }
-        finally
-        {
-            _isBusy = false;
-        }
+        _providerProfileId = providerProfileId ?? _profiles.Last().Id;
+        await CompleteStepAsync("llm-provider", "email-delivery");
     }
 
     private void ApplyEmailSettings()
@@ -677,16 +324,7 @@
     private async Task CompleteCommunicationsAsync()
     {
         await CompleteStepAsync("communications", "finish");
-        _stepMessage = _selectedCommunicationAdapter == "discord"
-            ? "Discord authorization recorded. The connection will be available from the Communications workspace."
-            : "C-Sweet's built-in messaging will be used. You can add Discord later.";
-    }
-
-    private async Task SkipCommunicationsAsync()
-    {
-        _selectedCommunicationAdapter = "builtin";
-        await CompleteStepAsync("communications", "finish");
-        _stepMessage = "Using C-Sweet messaging for now. Additional surfaces can be connected later.";
+        _stepMessage = "C-Sweet chat remains enabled. Additional communication surfaces can be connected or updated later from Settings.";
     }
 
     private async Task FinishSetupAsync()
@@ -739,65 +377,9 @@
         _stepMessage = null;
     }
 
-    private void SelectProvider(LlmProviderProfileResponse profile)
-    {
-        _providerProfileId = profile.Id;
-        _providerType = profile.ProviderType;
-        _providerName = profile.Name;
-        _baseUrl = profile.BaseUrl;
-        _defaultChatModel = profile.DefaultChatModel;
-        _defaultEmbeddingModel = profile.DefaultEmbeddingModel ?? string.Empty;
-        _availableModels = string.IsNullOrWhiteSpace(profile.DefaultChatModel)
-            ? []
-            : [new ModelDescriptor(profile.DefaultChatModel, null)];
-        _modelCatalogMessage = null;
-        _modelCatalogSucceeded = null;
-        _contextWindowTokens = profile.ContextWindowTokens;
-        _maxOutputTokens = profile.MaxOutputTokens;
-        _supportsStreaming = profile.SupportsStreaming;
-        _supportsToolCalling = profile.SupportsToolCalling;
-        _supportsStructuredOutput = profile.SupportsStructuredOutput;
-        _supportsVision = profile.SupportsVision;
-    }
-
-    private void ApplyProviderPreset()
-    {
-        _defaultChatModel = string.Empty;
-        _availableModels = [];
-        _modelCatalogMessage = null;
-        _modelCatalogSucceeded = null;
-
-        if (_providerType != LlmProviderType.LmStudio)
-        {
-            return;
-        }
-
-        var defaults = SetupWizardState.LmStudioDefaults();
-        _providerName = defaults.ProviderName;
-        _baseUrl = defaults.BaseUrl;
-        _apiKey = defaults.ApiKey;
-        _supportsStreaming = defaults.SupportsStreaming;
-        _supportsToolCalling = defaults.SupportsToolCalling;
-        _supportsStructuredOutput = defaults.SupportsStructuredOutput;
-        _supportsVision = defaults.SupportsVision;
-    }
-
     private bool IsStepComplete(string key)
     {
         return _status?.Steps.Any(x => x.Key == key && x.IsComplete) == true;
-    }
-
-    private static string ProviderTypeLabel(LlmProviderType providerType)
-    {
-        return providerType switch
-        {
-            LlmProviderType.LmStudio => "LM Studio",
-            LlmProviderType.OpenAiCompatible => "OpenAI-compatible",
-            LlmProviderType.OpenAi => "OpenAI",
-            LlmProviderType.AzureOpenAi => "Azure OpenAI",
-            LlmProviderType.MicrosoftFoundry => "Microsoft Foundry",
-            _ => providerType.ToString()
-        };
     }
 
     private static string CheckGlyph(bool? value, bool required)

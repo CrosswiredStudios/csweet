@@ -12,7 +12,7 @@ public sealed class LlmConnectionTester : ILlmConnectionTester
 {
     private const string ReadyPrompt = "Return the word READY and nothing else.";
     private const string StructuredPrompt = "Return only a JSON object with this exact shape: {\"status\":\"ready\"}";
-    private const string LmStudioApiKeyPlaceholder = "lm-studio";
+    private const string LocalApiKeyPlaceholder = "local-provider";
     private static readonly TimeSpan OptionalCapabilityTimeout = TimeSpan.FromSeconds(8);
 
     private readonly CSweetDbContext _dbContext;
@@ -48,7 +48,7 @@ public sealed class LlmConnectionTester : ILlmConnectionTester
             return invalidResult;
         }
 
-        if (!IsOpenAiCompatible(profile.ProviderType))
+        if (!profile.ProviderType.UsesOpenAiCompatibleApi())
         {
             var unsupportedResult = new ModelCapabilityTestResult(profile.Id, false, false, false, false, false, "Unsupported provider type.");
             await PersistAsync(profile, unsupportedResult, rawResult: null, cancellationToken);
@@ -229,8 +229,8 @@ public sealed class LlmConnectionTester : ILlmConnectionTester
             }
         }
 
-        return profile.ProviderType == LlmProviderType.LmStudio
-            ? LmStudioApiKeyPlaceholder
+        return profile.ProviderType.IsLocalRuntime()
+            ? LocalApiKeyPlaceholder
             : string.Empty;
     }
 
@@ -268,11 +268,6 @@ public sealed class LlmConnectionTester : ILlmConnectionTester
         {
             return false;
         }
-    }
-
-    private static bool IsOpenAiCompatible(LlmProviderType providerType)
-    {
-        return providerType is LlmProviderType.LmStudio or LlmProviderType.OpenAiCompatible or LlmProviderType.OpenAi;
     }
 
     private static bool IsValidBaseUrl(string baseUrl)

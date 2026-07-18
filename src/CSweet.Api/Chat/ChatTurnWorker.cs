@@ -160,7 +160,7 @@ public sealed class ChatTurnWorker(
                 outputRouter.BindAlias(conversation.Id, turnId);
                 var reader = outputRouter.Subscribe(turnId);
                 var payload = new UserMessageReceived(
-                    providerId.Value, conversation.Id.ToString(), conversation.InitiatedByOrganizationUserId.ToString(), prompt, null, turnId, turn.Attempt);
+                    providerId.Value, conversation.Id.ToString(), conversation.InitiatedByOrganizationUserId.ToString(), prompt, null, turnId, turn.Attempt, turn.UserMessageId);
 
                 await PublishTraceAsync(turns, turnId, "model", "model.dispatched", "running", "Assistant dispatched",
                     "The request was submitted to the agent broker.", new

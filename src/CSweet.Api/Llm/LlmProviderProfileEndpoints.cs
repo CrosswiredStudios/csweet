@@ -164,7 +164,7 @@ public static class LlmProviderProfileEndpoints
             return false;
         }
 
-        if (!SupportsOpenAiCompatibleModelCatalog(request.ProviderType))
+        if (!request.ProviderType.UsesOpenAiCompatibleApi())
         {
             response = new PreviewModelCatalogResponse(
                 false,
@@ -190,11 +190,4 @@ public static class LlmProviderProfileEndpoints
         return true;
     }
 
-    private static bool SupportsOpenAiCompatibleModelCatalog(LlmProviderType providerType)
-    {
-        return providerType is LlmProviderType.LmStudio
-            or LlmProviderType.OpenAiCompatible
-            or LlmProviderType.OpenAi
-            or LlmProviderType.Custom;
-    }
 }

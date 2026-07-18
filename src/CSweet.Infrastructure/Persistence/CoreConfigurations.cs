@@ -37,6 +37,7 @@ internal static class CoreConfigurations
         modelBuilder.Entity<ExternalIdentity>(ConfigureExternalIdentity);
         modelBuilder.Entity<UserNotification>(ConfigureUserNotification);
         modelBuilder.Entity<NotificationPreference>(ConfigureNotificationPreference);
+        ConfigureWorkforcePlatform(modelBuilder);
     }
 
     static void ConfigureOrganizationUser(EntityTypeBuilder<OrganizationUser> entity)
@@ -95,6 +96,151 @@ internal static class CoreConfigurations
         entity.Property(x => x.Stage).HasMaxLength(80);
         entity.Property(x => x.PrimaryGoal).HasMaxLength(2048);
         entity.Property(x => x.ConstraintsJson).HasMaxLength(65536);
+        entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
+    }
+
+    static void ConfigureWorkforcePlatform(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<BusinessProfile>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => x.OrganizationId).IsUnique();
+            entity.Property(x => x.BusinessType).HasMaxLength(160); entity.Property(x => x.Description).HasMaxLength(8192);
+            entity.Property(x => x.TargetCustomersJson).HasColumnType("jsonb"); entity.Property(x => x.OfferingsJson).HasColumnType("jsonb");
+            entity.Property(x => x.JurisdictionsJson).HasColumnType("jsonb"); entity.Property(x => x.ToolsJson).HasColumnType("jsonb");
+            entity.Property(x => x.ProvenanceJson).HasColumnType("jsonb"); entity.Property(x => x.TimeZone).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.HasOne(x => x.Organization).WithOne().HasForeignKey<BusinessProfile>(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<FinancialOperatingProfile>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => x.OrganizationId).IsUnique(); entity.Property(x => x.BaseCurrency).HasMaxLength(8).IsRequired();
+            entity.Property(x => x.RoutingPreference).HasMaxLength(40).IsRequired(); entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.HasOne(x => x.Organization).WithOne().HasForeignKey<FinancialOperatingProfile>(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<BusinessDiscoveryAssessment>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => x.OrganizationId).IsUnique(); entity.Property(x => x.ConfirmedFactsJson).HasColumnType("jsonb");
+            entity.Property(x => x.AssumptionsJson).HasColumnType("jsonb"); entity.Property(x => x.MissingQuestionsJson).HasColumnType("jsonb");
+            entity.Property(x => x.SelectedPatternsJson).HasColumnType("jsonb"); entity.Property(x => x.NextQuestion).HasMaxLength(2048); entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<LeadershipAssignment>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.Property(x => x.PositionKey).HasMaxLength(80).IsRequired();
+            entity.HasIndex(x => new { x.OrganizationId, x.PositionKey }).IsUnique().HasFilter("\"EndsAt\" IS NULL");
+            entity.HasOne<OrganizationUser>().WithMany().HasForeignKey(x => x.OrganizationUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Workstream>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.Property(x => x.Name).HasMaxLength(512).IsRequired(); entity.Property(x => x.Outcome).HasMaxLength(8192).IsRequired();
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_Workstreams_ExecutionRequiresManager",
+                "\"Status\" NOT IN ('Approved', 'Active') OR \"AccountableManagerOrganizationUserId\" IS NOT NULL"));
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired(); entity.Property(x => x.LifecycleStage).HasMaxLength(80).IsRequired();
+            entity.Property(x => x.ManagerTitle).HasMaxLength(160).IsRequired(); entity.Property(x => x.SuccessCriteriaJson).HasColumnType("jsonb");
+            entity.Property(x => x.RequiredCapabilitiesJson).HasColumnType("jsonb"); entity.Property(x => x.RisksJson).HasColumnType("jsonb"); entity.Property(x => x.BudgetCurrency).HasMaxLength(8);
+            entity.HasIndex(x => new { x.OrganizationId, x.Status });
+        });
+        modelBuilder.Entity<ActionProposal>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.Property(x => x.ActionType).HasMaxLength(160).IsRequired(); entity.Property(x => x.Summary).HasMaxLength(2048).IsRequired();
+            entity.Property(x => x.PayloadJson).HasColumnType("jsonb"); entity.Property(x => x.RiskClass).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired(); entity.Property(x => x.IdempotencyKey).HasMaxLength(256).IsRequired();
+            entity.HasIndex(x => new { x.OrganizationId, x.IdempotencyKey }).IsUnique();
+        });
+        modelBuilder.Entity<Budget>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.Property(x => x.ScopeType).HasConversion<string>().HasMaxLength(24).IsRequired(); entity.Property(x => x.Currency).HasMaxLength(8).IsRequired();
+            entity.HasIndex(x => new { x.OrganizationId, x.ScopeType, x.ScopeId, x.PeriodStart, x.PeriodEnd });
+        });
+        modelBuilder.Entity<BudgetReservation>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.Property(x => x.Currency).HasMaxLength(8).IsRequired(); entity.Property(x => x.Purpose).HasMaxLength(1024).IsRequired();
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired(); entity.Property(x => x.IdempotencyKey).HasMaxLength(256).IsRequired();
+            entity.HasIndex(x => new { x.OrganizationId, x.IdempotencyKey }).IsUnique(); entity.HasOne<Budget>().WithMany().HasForeignKey(x => x.BudgetId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ManagementCycle>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => x.OrganizationId).IsUnique(); entity.Property(x => x.TimeZone).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.DailyCheckInLocalTime).HasMaxLength(5).IsRequired(); entity.Property(x => x.DailyDueLocalTime).HasMaxLength(5).IsRequired();
+            entity.Property(x => x.WeeklyReviewDay).HasMaxLength(16).IsRequired(); entity.Property(x => x.WeeklyReviewLocalTime).HasMaxLength(5).IsRequired();
+            entity.Property(x => x.QuietHoursStart).HasMaxLength(5).IsRequired(); entity.Property(x => x.QuietHoursEnd).HasMaxLength(5).IsRequired();
+            entity.Property(x => x.ExecutiveBriefingCadence).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.ExecutiveBriefingWeeklyDay).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.ExecutiveBriefingLocalTime).HasMaxLength(5).IsRequired();
+        });
+        modelBuilder.Entity<BusinessPattern>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.PatternKey, x.Version }).IsUnique();
+            entity.Property(x => x.PatternKey).HasMaxLength(160).IsRequired(); entity.Property(x => x.Name).HasMaxLength(256).IsRequired();
+            entity.Property(x => x.LifecycleStage).HasMaxLength(80).IsRequired(); entity.Property(x => x.Provenance).HasMaxLength(256).IsRequired();
+            entity.Property(x => x.ApplicableBusinessTypesJson).HasColumnType("jsonb"); entity.Property(x => x.JurisdictionsJson).HasColumnType("jsonb");
+            entity.Property(x => x.WorkstreamsJson).HasColumnType("jsonb"); entity.Property(x => x.TeamRecipeJson).HasColumnType("jsonb");
+            entity.Property(x => x.RisksJson).HasColumnType("jsonb"); entity.Property(x => x.FinancialConsiderationsJson).HasColumnType("jsonb");
+        });
+        modelBuilder.Entity<WorkforcePlan>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.OrganizationId, x.Status }); entity.Property(x => x.Objective).HasMaxLength(2048).IsRequired();
+            entity.Property(x => x.AssignmentsJson).HasColumnType("jsonb"); entity.Property(x => x.RejectedAlternativesJson).HasColumnType("jsonb");
+            entity.Property(x => x.Currency).HasMaxLength(8); entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
+        });
+        modelBuilder.Entity<WorkforceCandidate>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.OrganizationId, x.Source, x.ExternalCandidateId });
+            entity.Property(x => x.Source).HasMaxLength(80).IsRequired(); entity.Property(x => x.ExternalCandidateId).HasMaxLength(256).IsRequired();
+            entity.Property(x => x.DisplayName).HasMaxLength(256).IsRequired(); entity.Property(x => x.CapabilitiesJson).HasColumnType("jsonb");
+            entity.Property(x => x.ExplanationJson).HasColumnType("jsonb"); entity.Property(x => x.Currency).HasMaxLength(8);
+        });
+        modelBuilder.Entity<ResourceNeed>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.OrganizationId, x.Status }); entity.Property(x => x.RequiredCapabilitiesJson).HasColumnType("jsonb");
+            entity.Property(x => x.BusinessOutcome).HasMaxLength(2048).IsRequired(); entity.Property(x => x.Urgency).HasMaxLength(32).IsRequired(); entity.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        });
+        modelBuilder.Entity<StaffingActionProposal>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.OrganizationId, x.Status }); entity.Property(x => x.ActionType).HasMaxLength(80).IsRequired();
+            entity.Property(x => x.CandidateSource).HasMaxLength(80).IsRequired(); entity.Property(x => x.CandidateId).HasMaxLength(256).IsRequired();
+            entity.Property(x => x.PayloadJson).HasColumnType("jsonb"); entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
+        });
+        modelBuilder.Entity<Responsibility>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.OrganizationId, x.OrganizationUserId, x.Status });
+            entity.Property(x => x.Title).HasMaxLength(256).IsRequired(); entity.Property(x => x.Outcome).HasMaxLength(2048).IsRequired(); entity.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        });
+        modelBuilder.Entity<ManagementCheckInRequestRecord>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.OrganizationId, x.Status, x.DueAt });
+            entity.Property(x => x.CheckInType).HasMaxLength(64).IsRequired(); entity.Property(x => x.TopicsJson).HasColumnType("jsonb"); entity.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(256); entity.Property(x => x.TriggerType).HasMaxLength(32);
+            entity.Property(x => x.FailureCode).HasMaxLength(80); entity.Property(x => x.FailureMessage).HasMaxLength(2048);
+            entity.HasIndex(x => new { x.OrganizationId, x.IdempotencyKey }).IsUnique().HasFilter("\"IdempotencyKey\" IS NOT NULL");
+        });
+        modelBuilder.Entity<ManagementStatusReportRecord>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => x.ManagementCheckInRequestId).IsUnique(); entity.Property(x => x.Summary).HasMaxLength(4096).IsRequired();
+            entity.Property(x => x.OutcomesJson).HasColumnType("jsonb"); entity.Property(x => x.BlockersJson).HasColumnType("jsonb");
+            entity.Property(x => x.RisksJson).HasColumnType("jsonb"); entity.Property(x => x.DecisionsJson).HasColumnType("jsonb");
+            entity.Property(x => x.Markdown).HasMaxLength(8192); entity.Property(x => x.ImmediateActionsJson).HasColumnType("jsonb");
+            entity.Property(x => x.ConversationTopicsJson).HasColumnType("jsonb"); entity.Property(x => x.Severity).HasMaxLength(16).IsRequired();
+        });
+        modelBuilder.Entity<ExecutiveBriefingDeliveryRecord>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => x.ManagementCheckInRequestId).IsUnique();
+            entity.HasIndex(x => new { x.Status, x.LastAttemptAt }); entity.Property(x => x.Channel).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(32).IsRequired(); entity.Property(x => x.PayloadJson).HasColumnType("jsonb");
+            entity.Property(x => x.FailureCode).HasMaxLength(80); entity.Property(x => x.FailureMessage).HasMaxLength(2048);
+            entity.HasOne<ManagementCheckInRequestRecord>().WithOne().HasForeignKey<ExecutiveBriefingDeliveryRecord>(x => x.ManagementCheckInRequestId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ManagementStatusReportRecord>().WithOne().HasForeignKey<ExecutiveBriefingDeliveryRecord>(x => x.ManagementStatusReportId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<OrganizationUser>().WithMany().HasForeignKey(x => x.RecipientOrganizationUserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<ConversationMessage>().WithMany().HasForeignKey(x => x.ConversationMessageId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<UserNotification>().WithMany().HasForeignKey(x => x.NotificationId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<ResourceNeedReportRecord>(entity =>
+        {
+            entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.OrganizationId, x.Status, x.ReportedAt }); entity.Property(x => x.Capability).HasMaxLength(256).IsRequired();
+            entity.Property(x => x.BusinessOutcome).HasMaxLength(2048).IsRequired(); entity.Property(x => x.Urgency).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.Evidence).HasMaxLength(4096).IsRequired(); entity.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        });
     }
 
     static void ConfigureRole(EntityTypeBuilder<Role> entity)

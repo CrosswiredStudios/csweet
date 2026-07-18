@@ -1,0 +1,196 @@
+.setup-shell {
+    width: min(100%, 74rem);
+    max-width: none;
+    margin: 0 auto;
+}
+
+.setup-shell ::deep .setup-card {
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, .22);
+    border-radius: 20px;
+    background: #ffffff;
+    box-shadow: 0 28px 70px rgba(2, 20, 39, .32);
+}
+
+.setup-shell ::deep .setup-loading-card,
+.setup-shell ::deep .setup-error-card {
+    display: flex;
+    min-height: 18rem;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 2rem;
+}
+
+.setup-progress {
+    padding: 1.15rem clamp(1rem, 3vw, 2rem);
+    border-bottom: 1px solid var(--cs-border);
+    background: #fffefa;
+}
+
+.setup-progress ol {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+
+.setup-progress li {
+    position: relative;
+    min-width: 0;
+}
+
+.setup-progress li:not(:last-child)::after {
+    position: absolute;
+    z-index: 0;
+    top: .95rem;
+    left: calc(50% + 1.05rem);
+    width: calc(100% - 2.1rem);
+    height: 1px;
+    background: #d8dde2;
+    content: "";
+    transition: background .18s ease;
+}
+
+.setup-progress li.complete:not(:last-child)::after {
+    background: var(--cs-mint-strong);
+}
+
+.setup-progress button {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    width: 100%;
+    justify-items: center;
+    gap: .38rem;
+    padding: 0 .25rem;
+    border: 0;
+    background: transparent;
+    color: #89939f;
+    cursor: pointer;
+    font: inherit;
+}
+
+.setup-progress-node {
+    display: grid;
+    width: 1.9rem;
+    height: 1.9rem;
+    place-items: center;
+    border: 1px solid #cbd3da;
+    border-radius: 50%;
+    background: #fff;
+    color: #7b8794;
+    font-size: .7rem;
+    font-weight: 850;
+    transition: transform .18s ease, border-color .18s ease, background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+
+.setup-progress-node ::deep .mud-icon-root {
+    font-size: .95rem;
+}
+
+.setup-progress-label {
+    overflow: hidden;
+    color: inherit;
+    font-size: .67rem;
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.setup-progress button:hover .setup-progress-node {
+    transform: translateY(-1px);
+    border-color: var(--cs-navy);
+}
+
+.setup-progress button:focus-visible {
+    outline: 0;
+}
+
+.setup-progress button:focus-visible .setup-progress-node {
+    outline: 3px solid rgba(155, 231, 194, .72);
+    outline-offset: 2px;
+}
+
+.setup-progress li.active button {
+    color: var(--cs-navy);
+}
+
+.setup-progress li.active .setup-progress-node {
+    transform: scale(1.06);
+    border-color: var(--cs-navy);
+    background: var(--cs-navy);
+    color: #fff;
+    box-shadow: 0 5px 12px rgba(24, 35, 63, .18);
+}
+
+.setup-progress li.complete .setup-progress-node {
+    border-color: var(--cs-mint-strong);
+    background: #effaf5;
+    color: var(--cs-mint-strong);
+}
+
+.setup-stage {
+    min-height: 31rem;
+}
+
+.setup-stage ::deep .setup-legacy-step {
+    padding: clamp(1.5rem, 4vw, 3rem);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .setup-stage {
+        animation: setup-stage-in .28s cubic-bezier(.22, .75, .2, 1) both;
+    }
+}
+
+@keyframes setup-stage-in {
+    from { opacity: 0; transform: translateX(.65rem); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 640px) {
+    .setup-progress {
+        padding: 1rem .65rem .85rem;
+    }
+
+    .setup-progress-label {
+        display: none;
+    }
+
+    .setup-progress li.active .setup-progress-label {
+        display: block;
+        position: absolute;
+        top: 2.2rem;
+        width: 6rem;
+        text-align: center;
+    }
+
+    .setup-progress ol {
+        padding-bottom: 1.1rem;
+    }
+
+    .setup-progress-node {
+        width: 1.75rem;
+        height: 1.75rem;
+    }
+
+    .setup-progress li:not(:last-child)::after {
+        top: .875rem;
+        left: calc(50% + .95rem);
+        width: calc(100% - 1.9rem);
+    }
+
+    .setup-shell ::deep .setup-card {
+        border-radius: 16px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .setup-progress-node,
+    .setup-progress li::after {
+        transition: none;
+    }
+}

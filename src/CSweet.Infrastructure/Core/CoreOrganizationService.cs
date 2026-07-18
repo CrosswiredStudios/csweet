@@ -22,10 +22,15 @@ public sealed class CoreOrganizationService : ICoreOrganizationService
 
     public async Task<IReadOnlyList<OrganizationResponse>> ListAsync(CancellationToken cancellationToken = default)
     {
-        return await _dbContext.CoreOrganizations
+        var organizations = await _dbContext.CoreOrganizations
             .OrderBy(x => x.Name)
             .Select(x => x.ToResponse())
             .ToListAsync(cancellationToken);
+        var assigned = await _dbContext.LeadershipAssignments.AsNoTracking()
+            .Where(x => x.PositionKey == "chief-of-staff" && x.EndsAt == null)
+            .Select(x => x.OrganizationId)
+            .ToHashSetAsync(cancellationToken);
+        return organizations.Select(x => x with { NeedsChiefSetup = !assigned.Contains(x.Id) }).ToList();
     }
 
     public async Task<OrganizationResponse?> GetAsync(Guid id, CancellationToken cancellationToken = default)
@@ -33,7 +38,10 @@ public sealed class CoreOrganizationService : ICoreOrganizationService
         var org = await _dbContext.CoreOrganizations
             .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
 
-        return org?.ToResponse();
+        if (org is null) return null;
+        var hasChief = await _dbContext.LeadershipAssignments.AsNoTracking().AnyAsync(
+            x => x.OrganizationId == id && x.PositionKey == "chief-of-staff" && x.EndsAt == null, cancellationToken);
+        return org.ToResponse() with { NeedsChiefSetup = !hasChief };
     }
 
     public async Task<CoreActionResponse> CreateAsync(CreateOrganizationRequest request, CancellationToken cancellationToken = default, Guid? applicationUserId = null)
@@ -53,6 +61,7 @@ public sealed class CoreOrganizationService : ICoreOrganizationService
             Stage = TrimOrNull(request.Stage),
             PrimaryGoal = TrimOrNull(request.PrimaryGoal),
             ConstraintsJson = request.ConstraintsJson,
+            Status = OrganizationStatus.Draft,
             CreatedAt = now,
             UpdatedAt = now
         };

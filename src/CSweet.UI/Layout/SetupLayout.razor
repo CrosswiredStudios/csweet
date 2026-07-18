@@ -11,9 +11,9 @@
 <div class="setup-layout-shell">
     <header class="setup-layout-header">
         <div class="setup-layout-brand" aria-label="C-Sweet setup">
-            <img src="images/icon.svg" alt="" />
+            <img src="images/icon_dark.svg" alt="" />
             <span class="setup-layout-brand-name">C-Sweet</span>
-            <span class="setup-layout-brand-context">First-run setup</span>
+            <span class="setup-layout-brand-context">Quick setup</span>
         </div>
         <div class="setup-layout-account">
             @if (!string.IsNullOrWhiteSpace(AuthSession.Current?.Email))
@@ -21,7 +21,7 @@
                 <MudText Typo="Typo.caption">@AuthSession.Current.Email</MudText>
             }
             <MudButton Variant="Variant.Text"
-                       Color="Color.Primary"
+                       Class="setup-sign-out"
                        StartIcon="@Icons.Material.Filled.Logout"
                        OnClick="LogoutAsync">
                 Sign out
@@ -40,8 +40,9 @@
         PaletteLight = new PaletteLight
         {
             Primary = "#18233F",
-            Secondary = "#E85D75",
-            Tertiary = "#98E7C2",
+            Secondary = "#9BE7C2",
+            SecondaryContrastText = "#18233F",
+            Tertiary = "#9BE7C2",
             Background = "#FFFCF7",
             Surface = "#FFFFFF",
             TextPrimary = "#18233F",

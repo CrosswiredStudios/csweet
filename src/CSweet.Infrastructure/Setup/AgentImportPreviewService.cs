@@ -316,7 +316,9 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
             PluginKind = version.PluginKind.ToString(),
             ManifestFileName = version.ManifestFileName,
             RequestedCapabilities = manifest.Requires.Select(x => x.Name).ToArray(),
-            WebAccess = manifest.WebAccess
+            WebAccess = manifest.WebAccess,
+            ConfigurationFields = manifest.Configuration,
+            CredentialBindings = manifest.Credentials
         };
 
     public static IReadOnlyList<string> WebGrantTokens(PluginManifest manifest) => manifest.WebAccess.Mode switch

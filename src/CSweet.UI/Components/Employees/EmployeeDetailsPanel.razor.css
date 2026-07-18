@@ -9,6 +9,6 @@ dd { margin: 0; color: var(--cs-navy); font-weight: 650; }
 .employee-direct-reports { display: grid; gap: .3rem; }
 .employee-direct-reports button { display: flex; gap: .6rem; align-items: center; padding: .45rem; border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .employee-direct-reports button:hover { background: #f7f5f1; }
-.employee-direct-reports button:focus-visible { outline: 3px solid rgba(232,93,117,.35); }
+.employee-direct-reports button:focus-visible { outline: 3px solid rgba(35,132,92,.4); }
 .employee-direct-reports span { display: grid; }
 .employee-direct-reports small { color: var(--cs-muted); }

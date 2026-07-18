@@ -35,7 +35,33 @@ public class SetupEndpointTests
         Assert.NotNull(status);
         Assert.False(status.IsFirstRunComplete);
         Assert.Contains(status.Steps, x => x.Key == "email-delivery" && !x.IsRequired);
+        Assert.DoesNotContain(status.Steps, x => x.Key == "model-capability-test");
         Assert.DoesNotContain(status.Steps, x => x.Key == "admin-user");
+    }
+
+    [Fact]
+    public async Task CommunicationsOptions_ReturnsGuidedFirstPartyCatalog()
+    {
+        await using var factory = CreateFactory();
+        var client = factory.CreateClient();
+
+        var options = await client.GetFromJsonAsync<CommunicationSetupOptionsResponse>(
+            "/api/setup/communications/options");
+
+        Assert.NotNull(options);
+        Assert.Equal(4, options.FirstPartyPlugins.Count);
+        Assert.Collection(
+            options.FirstPartyPlugins,
+            plugin => Assert.Equal("discord", plugin.Key),
+            plugin => Assert.Equal("slack", plugin.Key),
+            plugin => Assert.Equal("teams", plugin.Key),
+            plugin => Assert.Equal("whatsapp", plugin.Key));
+        Assert.All(options.FirstPartyPlugins, plugin =>
+        {
+            Assert.StartsWith("com.csweet.communication.", plugin.PluginId, StringComparison.Ordinal);
+            Assert.StartsWith("https://", plugin.DocumentationUrl, StringComparison.Ordinal);
+            Assert.StartsWith("https://", plugin.ServicePortalUrl, StringComparison.Ordinal);
+        });
     }
 
     [Fact]

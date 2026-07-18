@@ -23,6 +23,16 @@ public static class BusinessOnboardingEndpoints
                 : Results.BadRequest(result);
         });
 
+        group.MapPost("/{organizationId:guid}/chief", async (
+            Guid organizationId,
+            CompleteChiefSetupRequest request,
+            IBusinessOnboardingService service,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await service.AssignChiefAsync(organizationId, request, cancellationToken);
+            return result.Succeeded ? Results.Ok(result.Setup) : Results.BadRequest(result);
+        });
+
         return endpoints;
     }
 }

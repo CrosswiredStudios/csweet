@@ -18,4 +18,10 @@ public sealed class InMemoryLlmProviderSecretStore : ILlmProviderSecretStore
         _secrets.TryGetValue(secretName, out var secretValue);
         return Task.FromResult(secretValue);
     }
+
+    public Task DeleteAsync(string secretName, CancellationToken cancellationToken = default)
+    {
+        _secrets.TryRemove(secretName, out _);
+        return Task.CompletedTask;
+    }
 }

@@ -15,7 +15,7 @@
 }
 
 .nav-brand:focus-visible {
-    outline: 3px solid rgba(152, 231, 194, .75);
+    outline: 3px solid rgba(155, 231, 194, .75);
     outline-offset: -3px;
 }
 
@@ -37,7 +37,7 @@
 
 .app-nav-shell ::deep .mud-navmenu.app-nav .mud-nav-link.active:not(.mud-nav-link-disabled),
 .nav-footer ::deep .mud-navmenu.app-nav .mud-nav-link.active:not(.mud-nav-link-disabled) {
-    border-left: 4px solid #e85d75;
+    border-left: 4px solid #9be7c2;
     background: rgba(0, 0, 0, 0.18);
     color: #f7fbff !important;
 }

@@ -56,25 +56,34 @@ public sealed class AgentContainerRunnerTests
     }
 
     [Fact]
-    public void RuntimeOptions_TranslateAspireLocalhostBrokerForDocker()
+    public void RuntimeOptions_DefaultToContainerizedBrokerGateway()
     {
-        var endpoint = AgentRuntimeManagerOptions.ResolveBrokerEndpoint(
-            AgentRuntimeManagerOptions.DefaultBrokerEndpoint,
-            "http://localhost:54821",
-            "https://localhost:7182");
+        var options = new AgentRuntimeManagerOptions();
 
-        Assert.Equal("http://host.docker.internal:54821", endpoint);
+        Assert.Equal("http://agenthost:8080", options.BrokerEndpoint);
+        Assert.Equal("agenthost", options.BrokerGatewayContainer);
     }
 
     [Fact]
-    public void RuntimeOptions_PreserveExplicitComposeBroker()
+    public async Task StartAsync_UsesEndpointHostAsAliasForConfiguredGatewayContainer()
     {
-        var endpoint = AgentRuntimeManagerOptions.ResolveBrokerEndpoint(
-            "http://csweet-agenthost:8080",
-            "http://localhost:54821",
-            null);
+        var docker = new FakeDockerCommandExecutor(
+            new DockerCommandResult(0, "[]", string.Empty),
+            new DockerCommandResult(0, string.Empty, string.Empty),
+            new DockerCommandResult(0, "container-id\n", string.Empty),
+            new DockerCommandResult(0, InspectJson, string.Empty));
+        var runner = new DockerAgentContainerRunner(docker, NullLogger<DockerAgentContainerRunner>.Instance);
+        var request = CreateRequest() with
+        {
+            BrokerEndpoint = "http://csweet-agenthost:8080",
+            BrokerGatewayContainer = "agenthost"
+        };
 
-        Assert.Equal("http://csweet-agenthost:8080", endpoint);
+        await runner.StartAsync(request);
+
+        Assert.Equal(
+            ["network", "connect", "--alias", "csweet-agenthost", "csweet-broker", "agenthost"],
+            docker.Commands[1]);
     }
 
     [Fact]

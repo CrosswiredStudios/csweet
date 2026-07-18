@@ -8,7 +8,7 @@ namespace CSweet.Infrastructure.Llm;
 
 public sealed class ModelCatalogClient : IModelCatalogClient
 {
-    private const string LmStudioApiKeyPlaceholder = "lm-studio";
+    private const string LocalApiKeyPlaceholder = "local-provider";
 
     private readonly CSweetDbContext _dbContext;
     private readonly ILlmProviderSecretStore _secretStore;
@@ -31,7 +31,7 @@ public sealed class ModelCatalogClient : IModelCatalogClient
         var profile = await _dbContext.LlmProviderProfiles
             .SingleOrDefaultAsync(x => x.Id == providerProfileId, cancellationToken);
 
-        if (profile is null || !IsOpenAiCompatible(profile.ProviderType) || !IsValidBaseUrl(profile.BaseUrl))
+        if (profile is null || !profile.ProviderType.UsesOpenAiCompatibleApi() || !IsValidBaseUrl(profile.BaseUrl))
         {
             return [];
         }
@@ -50,14 +50,9 @@ public sealed class ModelCatalogClient : IModelCatalogClient
             }
         }
 
-        return profile.ProviderType == LlmProviderType.LmStudio
-            ? LmStudioApiKeyPlaceholder
+        return profile.ProviderType.IsLocalRuntime()
+            ? LocalApiKeyPlaceholder
             : string.Empty;
-    }
-
-    private static bool IsOpenAiCompatible(LlmProviderType providerType)
-    {
-        return providerType is LlmProviderType.LmStudio or LlmProviderType.OpenAiCompatible or LlmProviderType.OpenAi;
     }
 
     private static bool IsValidBaseUrl(string baseUrl)

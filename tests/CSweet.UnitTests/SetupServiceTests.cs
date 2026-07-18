@@ -19,6 +19,7 @@ public class SetupServiceTests
         Assert.Null(status.DefaultChatProviderId);
         Assert.Contains(status.Steps, x => x.Key == "llm-provider" && !x.IsComplete);
         Assert.Contains(status.Steps, x => x.Key == "communications" && !x.IsRequired && !x.IsComplete);
+        Assert.DoesNotContain(status.Steps, x => x.Key == "model-capability-test");
         Assert.DoesNotContain(status.Steps, x => x.Key == "storage");
         Assert.DoesNotContain(status.Steps, x => x.Key == "worker-runtime");
     }
@@ -38,23 +39,7 @@ public class SetupServiceTests
     }
 
     [Fact]
-    public async Task FinishSetup_FailsWhenNoDefaultChatProviderExists()
-    {
-        await using var dbContext = CreateDbContext();
-        var service = new SetupService(dbContext);
-        await service.EnsureSeededAsync();
-
-        dbContext.LlmProviderProfiles.Add(CreateEnabledProvider());
-        await CompletePriorRequiredStepsAsync(dbContext);
-
-        var result = await service.CompleteFirstRunAsync();
-
-        Assert.False(result.Succeeded);
-        Assert.Equal("default_chat_provider_required", result.ErrorCode);
-    }
-
-    [Fact]
-    public async Task FinishSetup_FailsWhenNoSuccessfulChatTestExists()
+    public async Task FinishSetup_DoesNotRequireDefaultModelOrChatTest()
     {
         await using var dbContext = CreateDbContext();
         var service = new SetupService(dbContext);
@@ -62,14 +47,27 @@ public class SetupServiceTests
 
         var provider = CreateEnabledProvider();
         dbContext.LlmProviderProfiles.Add(provider);
-        var configuration = await dbContext.SystemConfigurations.SingleAsync();
-        configuration.DefaultChatProviderId = provider.Id;
+        await CompletePriorRequiredStepsAsync(dbContext);
+
+        var result = await service.CompleteFirstRunAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Null((await dbContext.SystemConfigurations.SingleAsync()).DefaultChatProviderId);
+    }
+
+    [Fact]
+    public async Task FinishSetup_FailsWhenNoEnabledProviderExists()
+    {
+        await using var dbContext = CreateDbContext();
+        var service = new SetupService(dbContext);
+        await service.EnsureSeededAsync();
+
         await CompletePriorRequiredStepsAsync(dbContext);
 
         var result = await service.CompleteFirstRunAsync();
 
         Assert.False(result.Succeeded);
-        Assert.Equal("successful_chat_test_required", result.ErrorCode);
+        Assert.Equal("provider_profile_required", result.ErrorCode);
     }
 
     [Fact]
@@ -81,17 +79,6 @@ public class SetupServiceTests
 
         var provider = CreateEnabledProvider();
         dbContext.LlmProviderProfiles.Add(provider);
-        dbContext.ModelCapabilityTests.Add(new ModelCapabilityTest
-        {
-            Id = Guid.NewGuid(),
-            ProviderProfileId = provider.Id,
-            ConnectionSucceeded = true,
-            ChatSucceeded = true,
-            TestedAt = DateTimeOffset.UtcNow
-        });
-
-        var configuration = await dbContext.SystemConfigurations.SingleAsync();
-        configuration.DefaultChatProviderId = provider.Id;
         await CompletePriorRequiredStepsAsync(dbContext);
 
         var result = await service.CompleteFirstRunAsync();
@@ -118,7 +105,7 @@ public class SetupServiceTests
             Name = "Local LM Studio",
             ProviderType = LlmProviderType.LmStudio,
             BaseUrl = "http://localhost:1234/v1",
-            DefaultChatModel = "local-model",
+            DefaultChatModel = string.Empty,
             IsEnabled = true,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow

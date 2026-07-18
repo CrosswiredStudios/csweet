@@ -9,4 +9,8 @@ public sealed record OrganizationResponse(
     string? PrimaryGoal,
     string? ConstraintsJson,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt)
+{
+    public string Status { get; init; } = "Active";
+    public bool NeedsChiefSetup { get; init; }
+}

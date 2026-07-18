@@ -12,7 +12,6 @@ public sealed class SetupService : ISetupService
     [
         ("welcome", "Welcome", true),
         ("llm-provider", "LLM Provider", true),
-        ("model-capability-test", "Model Capability Test", true),
         ("email-delivery", "Email Delivery", false),
         ("communications", "Communications", false),
         ("finish", "Finish", true)
@@ -197,24 +196,9 @@ public sealed class SetupService : ISetupService
     {
         await EnsureSeededAsync(cancellationToken);
 
-        var configuration = await GetConfigurationAsync(cancellationToken);
-
         if (!await _dbContext.LlmProviderProfiles.AnyAsync(x => x.IsEnabled, cancellationToken))
         {
             return await FailureAsync("provider_profile_required", "At least one enabled provider profile is required.", cancellationToken);
-        }
-
-        if (configuration.DefaultChatProviderId is null)
-        {
-            return await FailureAsync("default_chat_provider_required", "A default chat provider is required.", cancellationToken);
-        }
-
-        var hasSuccessfulChatTest = await _dbContext.ModelCapabilityTests
-            .AnyAsync(x => x.ProviderProfileId == configuration.DefaultChatProviderId && x.ChatSucceeded, cancellationToken);
-
-        if (!hasSuccessfulChatTest)
-        {
-            return await FailureAsync("successful_chat_test_required", "A successful chat capability test is required.", cancellationToken);
         }
 
         if (!await ArePriorRequiredStepsCompleteAsync(cancellationToken))
@@ -222,6 +206,7 @@ public sealed class SetupService : ISetupService
             return await FailureAsync("required_steps_incomplete", "Required setup steps must be complete before first-run setup can finish.", cancellationToken);
         }
 
+        var configuration = await GetConfigurationAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
         configuration.IsFirstRunComplete = true;
         configuration.UpdatedAt = now;

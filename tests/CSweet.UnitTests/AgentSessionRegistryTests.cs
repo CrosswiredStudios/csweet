@@ -274,6 +274,22 @@ public sealed class AgentSessionRegistryTests
         Assert.Equal("{\"value\":42}", response.CapabilityResult.Payload.ToStringUtf8());
     }
 
+    [Fact]
+    public async Task PublishPlatformEvent_TargetsOnlyConfiguredInstallation()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var target = Register(registry, "manager", "business-1", subscriptions: new[] { "status.v1" }, installationId: "target");
+        var sibling = Register(registry, "manager", "business-1", subscriptions: new[] { "status.v1" }, installationId: "sibling");
+
+        var count = registry.PublishPlatformEvent("business-1", "status.v1", "executive-briefing/1",
+            ByteString.CopyFromUtf8("{}"), "correlation", "target");
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        Assert.Equal(1, count);
+        Assert.Equal("platform.csweet", (await target.Outbound.ReadAsync(timeout.Token)).Event.SourceAgentId);
+        Assert.False(sibling.Outbound.TryRead(out _));
+    }
+
     private static AgentSession Register(
         AgentSessionRegistry registry,
         string agentId,

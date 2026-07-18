@@ -21,6 +21,8 @@ builder.Services
 builder.Services.AddSingleton<ConfiguredAgentAuthorizationPolicy>();
 builder.Services.AddScoped<IAgentAuthorizationPolicy, PersistedAgentAuthorizationPolicy>();
 builder.Services.AddSingleton<AgentSessionRegistry>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddHostedService<ManagementReviewScheduler>();
 builder.Services.AddScoped<IAgentRuntimeSignalService, AgentRuntimeSignalService>();
 builder.Services.AddScoped<PlatformLlmCapabilityHandler>();
 builder.Services.AddSingleton<IMemoryStore>(_ => new PostgreSqlMemoryStore(
@@ -30,6 +32,12 @@ builder.Services.AddSingleton<IMemoryStore>(_ => new PostgreSqlMemoryStore(
 builder.Services.AddScoped<PlatformMemoryCapabilityHandler>();
 builder.Services.AddScoped<PlatformWebProxyCapabilityHandler>();
 builder.Services.AddScoped<PlatformWebSocketCapabilityHandler>();
+builder.Services.AddScoped<IPlatformCapabilityHandler, LlmPlatformCapabilityAdapter>();
+builder.Services.AddScoped<IPlatformCapabilityHandler, MemoryPlatformCapabilityAdapter>();
+builder.Services.AddScoped<IPlatformCapabilityHandler, WebPlatformCapabilityAdapter>();
+builder.Services.AddScoped<IPlatformCapabilityHandler, WebSocketPlatformCapabilityAdapter>();
+builder.Services.AddScoped<IPlatformCapabilityHandler, WorkforcePlatformCapabilityHandler>();
+builder.Services.AddScoped<IPlatformEventObserver, ManagementEventObserver>();
 builder.Services.AddScoped<IAgentMemoryIdentityResolver, AgentMemoryIdentityResolver>();
 
 var app = builder.Build();

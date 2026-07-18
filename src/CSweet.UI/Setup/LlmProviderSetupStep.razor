@@ -1,0 +1,756 @@
+@using CSweet.Contracts.Llm
+@using CSweet.Domain.Setup
+@inject ILlmProviderApiClient LlmProviderApi
+
+<section class="provider-step" aria-labelledby="provider-step-title">
+    <header class="provider-step-header">
+        <div>
+            <MudText Typo="Typo.overline">Step 2 of 5</MudText>
+            <h1 id="provider-step-title">Connect your model providers.</h1>
+            <p>Connect local runtimes, hosted services, or both. One saved provider is all you need to continue.</p>
+        </div>
+        <div class="provider-count" aria-live="polite">
+            <strong>@_profiles.Count</strong>
+            <span>@(_profiles.Count == 1 ? "provider connected" : "providers connected")</span>
+        </div>
+    </header>
+
+    <div class="provider-workspace">
+        <section class="provider-roster" aria-labelledby="connected-providers-title">
+            <div class="provider-section-heading">
+                <div>
+                    <span class="provider-section-kicker">Your roster</span>
+                    <h2 id="connected-providers-title">Connected providers</h2>
+                </div>
+                @if (_profiles.Count > 0)
+                {
+                    <span class="provider-ready-badge">Ready to continue</span>
+                }
+            </div>
+
+            @if (_profiles.Count == 0)
+            {
+                <div class="provider-empty-state">
+                    <MudIcon Icon="@Icons.Material.Outlined.Hub" />
+                    <strong>Your provider roster is empty</strong>
+                    <span>Choose a runtime on the right to make your first connection.</span>
+                </div>
+            }
+            else
+            {
+                <div class="provider-list">
+                    @foreach (var profile in _profiles)
+                    {
+                        <article class="provider-list-item">
+                            <span class="provider-mark">@ProviderMark(profile.ProviderType)</span>
+                            <div class="provider-list-copy">
+                                <strong>@profile.Name</strong>
+                                <span>@ProviderTypeLabel(profile.ProviderType) · @ProviderConnectionLabel(profile)</span>
+                            </div>
+                            <div class="provider-list-state">
+                                <span class="provider-status verified">
+                                    Connected
+                                </span>
+                                <button type="button" class="provider-edit-button" aria-label="Edit @profile.Name" @onclick="() => EditProvider(profile)">
+                                    <MudIcon Icon="@Icons.Material.Outlined.Edit" />
+                                </button>
+                                <button type="button"
+                                        class="provider-delete-button"
+                                        aria-label="Delete @profile.Name"
+                                        disabled="@_isBusy"
+                                        @onclick="() => AskDeleteProvider(profile)">
+                                    <MudIcon Icon="@Icons.Material.Outlined.DeleteOutline" />
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="provider-picker" aria-labelledby="add-provider-title">
+            <div class="provider-section-heading">
+                <div>
+                    <span class="provider-section-kicker">Add another</span>
+                    <h2 id="add-provider-title">@(_showHosted ? "Choose a hosted provider" : "Choose a local runtime")</h2>
+                </div>
+            </div>
+
+            <div class="provider-mode-switch" role="group" aria-label="Provider location">
+                <button type="button"
+                        class="@(!_showHosted ? "selected" : null)"
+                        aria-pressed="@(!_showHosted)"
+                        disabled="@_isBusy"
+                        @onclick="() => SetProviderMode(false)">
+                    <MudIcon Icon="@Icons.Material.Outlined.Computer" />
+                    <span>
+                        <strong>Local</strong>
+                        <small>Runs on your hardware</small>
+                    </span>
+                </button>
+                <button type="button"
+                        class="@(_showHosted ? "selected" : null)"
+                        aria-pressed="@_showHosted"
+                        disabled="@_isBusy"
+                        @onclick="() => SetProviderMode(true)">
+                    <MudIcon Icon="@Icons.Material.Outlined.CloudQueue" />
+                    <span>
+                        <strong>Hosted</strong>
+                        <small>Connect with an API key</small>
+                    </span>
+                </button>
+            </div>
+
+            <div class="provider-choice-grid">
+                @foreach (var preset in ActivePresets)
+                {
+                    <button type="button"
+                            class="provider-choice @(IsActivePreset(preset) ? "selected" : null)"
+                            aria-pressed="@IsActivePreset(preset)"
+                            @onclick="() => SelectPresetAsync(preset)">
+                        <span class="provider-choice-mark">@preset.Mark</span>
+                        <span>
+                            <strong>@preset.DisplayName</strong>
+                            <small>@preset.Description</small>
+                        </span>
+                        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" />
+                    </button>
+                }
+            </div>
+
+            <button type="button"
+                    class="custom-provider-choice @(IsActivePreset(ActiveCustomPreset) ? "selected" : null)"
+                    aria-pressed="@IsActivePreset(ActiveCustomPreset)"
+                    @onclick="() => SelectPresetAsync(ActiveCustomPreset)">
+                <span class="provider-choice-mark">API</span>
+                <span>
+                    <strong>Custom OpenAI-compatible endpoint</strong>
+                    <small>@(_showHosted
+                        ? "Bring another hosted service and configure its connection yourself."
+                        : "Configure the URL, credentials, and compatibility settings yourself.")</small>
+                </span>
+                <MudIcon Icon="@Icons.Material.Filled.ArrowForward" />
+            </button>
+        </section>
+    </div>
+
+    <MudDialog Visible="_editorOpen" VisibleChanged="OnEditorVisibilityChanged" Options="_editorDialogOptions">
+        <DialogContent>
+        <section class="provider-editor" aria-labelledby="provider-editor-title">
+            <header class="provider-editor-header">
+                <div class="provider-editor-title">
+                    <span class="provider-choice-mark">@(_activePreset?.Mark ?? "API")</span>
+                    <div>
+                        <span class="provider-section-kicker">@(_editingProviderId is null ? "New connection" : "Edit connection")</span>
+                        <h2 id="provider-editor-title">@(_activePreset?.DisplayName ?? "Provider")</h2>
+                    </div>
+                </div>
+                <button type="button" class="provider-close-button" aria-label="Close provider form" @onclick="CloseEditor">
+                    <MudIcon Icon="@Icons.Material.Filled.Close" />
+                </button>
+            </header>
+
+            @if (_providerType == LlmProviderType.UnslothStudio)
+            {
+                <div class="provider-guidance">
+                    Open Unsloth Studio’s API Access screen, start a model, and confirm the endpoint and token shown there.
+                </div>
+            }
+
+            <div class="provider-form-grid">
+                <MudTextField Label="Provider name"
+                              @bind-Value="_providerName"
+                              Variant="Variant.Outlined"
+                              Disabled="@_isBusy" />
+                <MudTextField T="string"
+                              Label="Base URL"
+                              Value="_baseUrl"
+                              ValueChanged="OnBaseUrlChanged"
+                              Variant="Variant.Outlined"
+                              Immediate="true"
+                              OnBlur="@(_ => ValidateConnectionAsync())"
+                              Disabled="@_isBusy"
+                              Placeholder="http://localhost:8000/v1" />
+                <MudTextField T="string"
+                              Class="provider-form-wide"
+                              Label="@ApiKeyLabel"
+                              Value="_apiKey"
+                              ValueChanged="OnApiKeyChanged"
+                              Variant="Variant.Outlined"
+                              Immediate="true"
+                              OnBlur="@(_ => ValidateConnectionAsync())"
+                              InputType="InputType.Password"
+                              Disabled="@_isBusy"
+                              Placeholder="@ApiKeyPlaceholder"
+                              autocomplete="off" />
+            </div>
+
+            @if (_isDiscovering)
+            {
+                <div class="provider-feedback checking" role="status">
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" />
+                    <span>Checking the model endpoint with these connection details...</span>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_catalogMessage))
+            {
+                <div class="provider-feedback @(_catalogSucceeded == true ? "success" : "error")" role="status">
+                    <MudIcon Icon="@(_catalogSucceeded == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.ErrorOutline)" />
+                    <span>@_catalogMessage</span>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_formMessage))
+            {
+                <MudAlert Severity="@(_formSucceeded == true ? Severity.Success : Severity.Error)" Variant="Variant.Outlined" Class="mt-4">
+                    @_formMessage
+                </MudAlert>
+            }
+
+            <footer class="provider-editor-actions">
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@_isBusy" OnClick="CloseEditor">Cancel</MudButton>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           EndIcon="@Icons.Material.Filled.ArrowForward"
+                           Disabled="@(_isBusy || !CanSaveProvider)"
+                           OnClick="SaveProviderAsync">
+                    @(_isBusy ? "Saving..." : _editingProviderId is null ? "Connect provider" : "Save changes")
+                </MudButton>
+            </footer>
+        </section>
+        </DialogContent>
+    </MudDialog>
+
+    <MudDialog Visible="_deleteDialogOpen" VisibleChanged="OnDeleteDialogVisibilityChanged" Options="_deleteDialogOptions">
+        <DialogContent>
+            <section class="provider-delete-dialog" aria-labelledby="provider-delete-title">
+                <span class="provider-delete-icon" aria-hidden="true">
+                    <MudIcon Icon="@Icons.Material.Outlined.DeleteOutline" />
+                </span>
+                <div>
+                    <span class="provider-section-kicker">Remove connection</span>
+                    <h2 id="provider-delete-title">Delete @(_providerPendingDelete?.Name)?</h2>
+                    <p>This removes the saved endpoint and its stored credentials. You can reconnect it later.</p>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_deleteMessage))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_deleteMessage</MudAlert>
+                }
+
+                <footer class="provider-editor-actions">
+                    <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@_isBusy" OnClick="CloseDeleteDialog">Keep provider</MudButton>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Error"
+                               StartIcon="@Icons.Material.Outlined.DeleteOutline"
+                               Disabled="@(_isBusy || _providerPendingDelete is null)"
+                               OnClick="DeleteProviderAsync">
+                        @(_isBusy ? "Deleting..." : "Delete provider")
+                    </MudButton>
+                </footer>
+            </section>
+        </DialogContent>
+    </MudDialog>
+
+    @if (_formSucceeded == true && !string.IsNullOrWhiteSpace(_formMessage))
+    {
+        <div class="provider-feedback success provider-save-announcement" role="status">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" />
+            <span>@_formMessage Add another provider or continue when you’re ready.</span>
+        </div>
+    }
+
+    <footer class="provider-step-actions">
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="OnBack">
+            Back
+        </MudButton>
+        <div>
+            @if (_profiles.Count == 0)
+            {
+                <span>Add at least one provider to continue</span>
+            }
+            else
+            {
+                <span>@_profiles.Count @(_profiles.Count == 1 ? "provider" : "providers") connected</span>
+            }
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       EndIcon="@Icons.Material.Filled.ArrowForward"
+                       Disabled="@(_profiles.Count == 0 || _isBusy)"
+                       OnClick="ContinueAsync">
+                Continue
+            </MudButton>
+        </div>
+    </footer>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<LlmProviderSetupPreset> LocalPresets = SetupWizardState.LocalProviderPresets();
+    private static readonly IReadOnlyList<LlmProviderSetupPreset> HostedPresets = SetupWizardState.HostedProviderPresets();
+    private static readonly LlmProviderSetupPreset CustomPreset = SetupWizardState.CustomProviderPreset();
+    private readonly DialogOptions _editorDialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+    private readonly DialogOptions _deleteDialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    [Parameter]
+    public IReadOnlyList<LlmProviderProfileResponse> Profiles { get; set; } = [];
+
+    [Parameter]
+    public Guid? SelectedProviderId { get; set; }
+
+    [Parameter]
+    public EventCallback<IReadOnlyList<LlmProviderProfileResponse>> ProfilesChanged { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid?> OnContinue { get; set; }
+
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    private IReadOnlyList<LlmProviderProfileResponse> _profiles = [];
+    private LlmProviderSetupPreset? _activePreset;
+    private Guid? _editingProviderId;
+    private Guid? _selectedProviderId;
+    private bool _editorOpen;
+    private bool _deleteDialogOpen;
+    private LlmProviderProfileResponse? _providerPendingDelete;
+    private string? _deleteMessage;
+    private bool _showHosted;
+    private bool _isBusy;
+    private bool _isDiscovering;
+    private bool? _catalogSucceeded;
+    private string? _catalogMessage;
+    private bool? _formSucceeded;
+    private string? _formMessage;
+
+    private LlmProviderType _providerType = LlmProviderType.LmStudio;
+    private string _providerName = string.Empty;
+    private string _baseUrl = string.Empty;
+    private string _apiKey = string.Empty;
+    private string _defaultChatModel = string.Empty;
+    private string _defaultEmbeddingModel = string.Empty;
+    private int _discoveredModelCount;
+    private int _catalogValidationVersion;
+    private bool _connectionDetailsChanged;
+    private int? _contextWindowTokens;
+    private int? _maxOutputTokens;
+    private bool _supportsStreaming = true;
+    private bool _supportsToolCalling;
+    private bool _supportsStructuredOutput;
+    private bool _supportsVision;
+
+    private string ApiKeyPlaceholder => string.IsNullOrWhiteSpace(_activePreset?.ApiKeyPlaceholder)
+        ? "Leave blank if authentication is disabled"
+        : _activePreset.ApiKeyPlaceholder;
+
+    private string ApiKeyLabel => _activePreset?.RequiresApiKey == true
+        ? _editingProviderId is null ? "API key or token" : "New API key or token (leave blank to keep saved key)"
+        : "API key or token (optional)";
+
+    private bool RequiresApiKeyInput =>
+        _activePreset?.RequiresApiKey == true && string.IsNullOrWhiteSpace(_apiKey);
+
+    private IReadOnlyList<LlmProviderSetupPreset> ActivePresets => _showHosted ? HostedPresets : LocalPresets;
+
+    private LlmProviderSetupPreset ActiveCustomPreset => CustomPreset with
+    {
+        IsHosted = _showHosted
+    };
+
+    private bool CanSaveProvider =>
+        !_isDiscovering &&
+        !string.IsNullOrWhiteSpace(_providerName) &&
+        Uri.TryCreate(_baseUrl, UriKind.Absolute, out var uri) &&
+        uri.Scheme is "http" or "https" &&
+        (_editingProviderId is not null || !RequiresApiKeyInput) &&
+        _catalogSucceeded == true &&
+        _discoveredModelCount > 0;
+
+    protected override void OnParametersSet()
+    {
+        _profiles = Profiles;
+        _selectedProviderId ??= SelectedProviderId ?? _profiles.LastOrDefault()?.Id;
+    }
+
+    private bool IsActivePreset(LlmProviderSetupPreset preset) =>
+        _editorOpen && _activePreset?.ProviderType == preset.ProviderType;
+
+    private void SetProviderMode(bool showHosted)
+    {
+        if (_isBusy || _showHosted == showHosted)
+        {
+            return;
+        }
+
+        _showHosted = showHosted;
+        CloseEditor();
+    }
+
+    private async Task SelectPresetAsync(LlmProviderSetupPreset preset)
+    {
+        _activePreset = preset;
+        _editingProviderId = null;
+        _providerType = preset.ProviderType;
+        _providerName = preset.ProviderName;
+        _baseUrl = preset.BaseUrl;
+        _apiKey = preset.IsHosted ? string.Empty : preset.ApiKeyPlaceholder;
+        _defaultChatModel = string.Empty;
+        _defaultEmbeddingModel = string.Empty;
+        _discoveredModelCount = 0;
+        _contextWindowTokens = null;
+        _maxOutputTokens = null;
+        _supportsStreaming = true;
+        _supportsToolCalling = false;
+        _supportsStructuredOutput = false;
+        _supportsVision = false;
+        _connectionDetailsChanged = true;
+        ResetMessages();
+        _editorOpen = true;
+
+        if (!preset.IsHosted && !string.IsNullOrWhiteSpace(preset.BaseUrl))
+        {
+            await ValidateConnectionAsync();
+        }
+    }
+
+    private void EditProvider(LlmProviderProfileResponse profile)
+    {
+        _showHosted = profile.ProviderType.IsHostedProvider();
+        _activePreset = LocalPresets
+            .Concat(HostedPresets)
+            .FirstOrDefault(x => x.ProviderType == profile.ProviderType) ?? ActiveCustomPreset;
+        _editingProviderId = profile.Id;
+        _selectedProviderId = profile.Id;
+        _providerType = profile.ProviderType;
+        _providerName = profile.Name;
+        _baseUrl = profile.BaseUrl;
+        _apiKey = string.Empty;
+        _defaultChatModel = profile.DefaultChatModel;
+        _defaultEmbeddingModel = profile.DefaultEmbeddingModel ?? string.Empty;
+        _contextWindowTokens = profile.ContextWindowTokens;
+        _maxOutputTokens = profile.MaxOutputTokens;
+        _supportsStreaming = profile.SupportsStreaming;
+        _supportsToolCalling = profile.SupportsToolCalling;
+        _supportsStructuredOutput = profile.SupportsStructuredOutput;
+        _supportsVision = profile.SupportsVision;
+        _connectionDetailsChanged = false;
+        ResetMessages();
+        _catalogSucceeded = true;
+        _discoveredModelCount = 1;
+        _catalogMessage = "This saved connection was verified. Change the URL or credentials to check it again.";
+        _editorOpen = true;
+    }
+
+    private void CloseEditor()
+    {
+        if (_isBusy)
+        {
+            return;
+        }
+
+        _editorOpen = false;
+        _activePreset = null;
+        _editingProviderId = null;
+        ResetMessages();
+    }
+
+    private void OnEditorVisibilityChanged(bool isVisible)
+    {
+        if (isVisible)
+        {
+            _editorOpen = true;
+            return;
+        }
+
+        CloseEditor();
+    }
+
+    private void AskDeleteProvider(LlmProviderProfileResponse profile)
+    {
+        if (_isBusy)
+        {
+            return;
+        }
+
+        _providerPendingDelete = profile;
+        _deleteMessage = null;
+        _formMessage = null;
+        _formSucceeded = null;
+        _deleteDialogOpen = true;
+    }
+
+    private void CloseDeleteDialog()
+    {
+        if (_isBusy)
+        {
+            return;
+        }
+
+        _deleteDialogOpen = false;
+        _providerPendingDelete = null;
+        _deleteMessage = null;
+    }
+
+    private void OnDeleteDialogVisibilityChanged(bool isVisible)
+    {
+        if (isVisible)
+        {
+            _deleteDialogOpen = true;
+            return;
+        }
+
+        CloseDeleteDialog();
+    }
+
+    private async Task DeleteProviderAsync()
+    {
+        if (_providerPendingDelete is null || _isBusy)
+        {
+            return;
+        }
+
+        var providerId = _providerPendingDelete.Id;
+        _isBusy = true;
+        _deleteMessage = null;
+
+        try
+        {
+            await LlmProviderApi.DeleteAsync(providerId);
+            _profiles = await LlmProviderApi.ListAsync();
+            if (_selectedProviderId == providerId)
+            {
+                _selectedProviderId = _profiles.LastOrDefault()?.Id;
+            }
+
+            await ProfilesChanged.InvokeAsync(_profiles);
+            _deleteDialogOpen = false;
+            _providerPendingDelete = null;
+            _formSucceeded = true;
+            _formMessage = "Provider removed.";
+        }
+        catch
+        {
+            _deleteMessage = "C-Sweet could not remove this provider. Try again.";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private Task OnBaseUrlChanged(string value)
+    {
+        _baseUrl = value;
+        _connectionDetailsChanged = true;
+        InvalidateCatalogValidation();
+        return Task.CompletedTask;
+    }
+
+    private Task OnApiKeyChanged(string value)
+    {
+        _apiKey = value;
+        _connectionDetailsChanged = true;
+        InvalidateCatalogValidation();
+        return Task.CompletedTask;
+    }
+
+    private void InvalidateCatalogValidation()
+    {
+        _catalogValidationVersion++;
+        _catalogSucceeded = null;
+        _catalogMessage = null;
+        _discoveredModelCount = 0;
+    }
+
+    private async Task ValidateConnectionAsync()
+    {
+        if (_editingProviderId is not null && !_connectionDetailsChanged)
+        {
+            return;
+        }
+
+        var validationVersion = ++_catalogValidationVersion;
+        _catalogMessage = null;
+        _catalogSucceeded = null;
+        _discoveredModelCount = 0;
+
+        if (!Uri.TryCreate(_baseUrl.Trim(), UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+        {
+            _catalogSucceeded = false;
+            _catalogMessage = "Enter a valid HTTP or HTTPS base URL first.";
+            return;
+        }
+
+        if (RequiresApiKeyInput)
+        {
+            _catalogMessage = "Enter an API key or token to verify this hosted connection.";
+            return;
+        }
+
+        _isDiscovering = true;
+        try
+        {
+            var result = await LlmProviderApi.PreviewModelCatalogAsync(new PreviewModelCatalogRequest(
+                _providerType,
+                _baseUrl.Trim(),
+                string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey));
+
+            if (validationVersion != _catalogValidationVersion)
+            {
+                return;
+            }
+
+            _discoveredModelCount = result.Models.Count;
+            _catalogSucceeded = result.Succeeded && result.Models.Count > 0;
+            _connectionDetailsChanged = _catalogSucceeded != true;
+            _catalogMessage = _catalogSucceeded == true
+                ? $"Connection verified. Found {result.Models.Count} model(s); you’ll choose models when importing agents."
+                : result.Message ?? "C-Sweet could not fetch models from this provider.";
+        }
+        catch
+        {
+            if (validationVersion != _catalogValidationVersion)
+            {
+                return;
+            }
+
+            _discoveredModelCount = 0;
+            _catalogSucceeded = false;
+            _catalogMessage = "C-Sweet could not reach this provider. Confirm that it is running and the URL is correct.";
+        }
+        finally
+        {
+            _isDiscovering = false;
+        }
+    }
+
+    private async Task SaveProviderAsync()
+    {
+        if (!CanSaveProvider)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _formMessage = null;
+        _formSucceeded = null;
+
+        try
+        {
+            Guid savedProviderId;
+            if (_editingProviderId is null)
+            {
+                var created = await LlmProviderApi.CreateAsync(new CreateLlmProviderProfileRequest(
+                    _providerName,
+                    _providerType,
+                    _baseUrl,
+                    string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey,
+                    _defaultChatModel,
+                    string.IsNullOrWhiteSpace(_defaultEmbeddingModel) ? null : _defaultEmbeddingModel,
+                    _contextWindowTokens,
+                    _maxOutputTokens,
+                    _supportsStreaming,
+                    _supportsToolCalling,
+                    _supportsStructuredOutput,
+                    _supportsVision));
+                savedProviderId = created.Id;
+            }
+            else
+            {
+                await LlmProviderApi.UpdateAsync(
+                    _editingProviderId.Value,
+                    new UpdateLlmProviderProfileRequest(
+                        _providerName,
+                        _providerType,
+                        _baseUrl,
+                        string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey,
+                        ReplaceApiKey: !string.IsNullOrWhiteSpace(_apiKey),
+                        _defaultChatModel,
+                        string.IsNullOrWhiteSpace(_defaultEmbeddingModel) ? null : _defaultEmbeddingModel,
+                        _contextWindowTokens,
+                        _maxOutputTokens,
+                        _supportsStreaming,
+                        _supportsToolCalling,
+                        _supportsStructuredOutput,
+                        _supportsVision,
+                        IsEnabled: true));
+                savedProviderId = _editingProviderId.Value;
+            }
+
+            _profiles = await LlmProviderApi.ListAsync();
+            _selectedProviderId = savedProviderId;
+            await ProfilesChanged.InvokeAsync(_profiles);
+            _formSucceeded = true;
+            _formMessage = _editingProviderId is null ? "Provider connected." : "Provider changes saved.";
+            _editorOpen = false;
+            _activePreset = null;
+            _editingProviderId = null;
+        }
+        catch
+        {
+            _formSucceeded = false;
+            _formMessage = "C-Sweet could not save this provider. Check the connection details and try again.";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private Task ContinueAsync()
+    {
+        return OnContinue.InvokeAsync(_selectedProviderId ?? _profiles.LastOrDefault()?.Id);
+    }
+
+    private void ResetMessages()
+    {
+        _catalogValidationVersion++;
+        _catalogSucceeded = null;
+        _catalogMessage = null;
+        _discoveredModelCount = 0;
+        _formSucceeded = null;
+        _formMessage = null;
+    }
+
+    private static string ProviderMark(LlmProviderType providerType)
+    {
+        return providerType switch
+        {
+            LlmProviderType.LmStudio => "LM",
+            LlmProviderType.UnslothStudio => "US",
+            LlmProviderType.Ollama => "OL",
+            LlmProviderType.Vllm => "vL",
+            LlmProviderType.OpenAi => "OA",
+            LlmProviderType.GoogleGemini => "G",
+            LlmProviderType.OpenRouter => "OR",
+            LlmProviderType.Groq => "GQ",
+            LlmProviderType.TogetherAi => "TA",
+            _ => "API"
+        };
+    }
+
+    private static string ProviderTypeLabel(LlmProviderType providerType)
+    {
+        return providerType switch
+        {
+            LlmProviderType.LmStudio => "LM Studio",
+            LlmProviderType.UnslothStudio => "Unsloth Studio",
+            LlmProviderType.Ollama => "Ollama",
+            LlmProviderType.Vllm => "vLLM",
+            LlmProviderType.OpenAi => "OpenAI",
+            LlmProviderType.GoogleGemini => "Google Gemini",
+            LlmProviderType.OpenRouter => "OpenRouter",
+            LlmProviderType.Groq => "Groq",
+            LlmProviderType.TogetherAi => "Together AI",
+            LlmProviderType.Custom => "Custom endpoint",
+            _ => providerType.ToString()
+        };
+    }
+
+    private static string ProviderConnectionLabel(LlmProviderProfileResponse profile)
+    {
+        return Uri.TryCreate(profile.BaseUrl, UriKind.Absolute, out var uri)
+            ? uri.Host
+            : profile.BaseUrl;
+    }
+}

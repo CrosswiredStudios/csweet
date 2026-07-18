@@ -5,6 +5,9 @@ using CSweet.Application.Setup;
 using CSweet.Contracts.BusinessOnboarding;
 using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
+using CSweet.Domain.Setup;
+using CSweet.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace CSweet.Infrastructure.BusinessOnboarding;
 
@@ -18,6 +21,8 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
     private readonly IWorkTaskService _taskService;
     private readonly IWorkerService _workerService;
     private readonly IAuditEventWriter _auditEventWriter;
+    private readonly IExecutiveBriefingService _executiveBriefings;
+    private readonly CSweetDbContext _dbContext;
 
     public BusinessOnboardingService(
         ICoreOrganizationService organizationService,
@@ -25,7 +30,9 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         IStrategicObjectiveService objectiveService,
         IWorkTaskService taskService,
         IWorkerService workerService,
-        IAuditEventWriter auditEventWriter)
+        IAuditEventWriter auditEventWriter,
+        IExecutiveBriefingService executiveBriefings,
+        CSweetDbContext dbContext)
     {
         _organizationService = organizationService;
         _roleService = roleService;
@@ -33,6 +40,8 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         _taskService = taskService;
         _workerService = workerService;
         _auditEventWriter = auditEventWriter;
+        _executiveBriefings = executiveBriefings;
+        _dbContext = dbContext;
     }
 
     public async Task<BusinessOnboardingActionResponse> CompleteAsync(
@@ -45,26 +54,30 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
             return Failure("validation_error", "Business name is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.PrimaryGoal))
+        if (request.ChiefAgentInstallationId == Guid.Empty)
         {
-            return Failure("validation_error", "Primary goal is required.");
+            return Failure("chief_agent_required", "Select and approve a Chief of Staff agent before creating the business.");
         }
 
-        var constraints = NormalizeConstraints(request.Constraints);
-        var contextJson = JsonSerializer.Serialize(new
-        {
-            constraints,
-            preferredOperatingStyle = TrimOrNull(request.PreferredOperatingStyle)
-        }, JsonOptions);
+        var chiefValidation = await ValidateChiefInstallationAsync(request.ChiefAgentInstallationId, cancellationToken);
+        if (!chiefValidation.Succeeded)
+            return Failure(chiefValidation.ErrorCode!, chiefValidation.Message!);
+
+        await using var transaction = _dbContext.Database.IsRelational()
+            ? await _dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        var mission = TrimOrNull(request.MissionStatement);
+        var initialObjectiveTitle = mission ?? "Establish the first operating plan";
 
         var organizationResult = await _organizationService.CreateAsync(
             new CreateOrganizationRequest(
                 request.BusinessName,
                 TrimOrNull(request.Industry),
-                BuildMission(request.PrimaryGoal, request.PreferredOperatingStyle),
-                TrimOrNull(request.Stage),
-                request.PrimaryGoal.Trim(),
-                contextJson),
+                mission,
+                null,
+                null,
+                null),
             cancellationToken,
             applicationUserId);
 
@@ -74,13 +87,47 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         }
 
         var organizationId = organizationResult.Organization.Id;
+        var organization = await _dbContext.CoreOrganizations.SingleAsync(x => x.Id == organizationId, cancellationToken);
+        organization.Status = OrganizationStatus.Draft;
+
+        _dbContext.BusinessProfiles.Add(new BusinessProfile
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            BusinessType = TrimOrNull(request.Industry),
+            Description = mission,
+            TimeZone = "UTC",
+            Completeness = CalculateBootstrapCompleteness(request),
+            ProvenanceJson = "{}",
+            Revision = 1,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        _dbContext.FinancialOperatingProfiles.Add(new FinancialOperatingProfile
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            BaseCurrency = "USD",
+            RoutingPreference = "Balanced",
+            Revision = 1,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        _dbContext.ManagementCycles.Add(new ManagementCycle
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            TimeZone = "UTC",
+            NextReviewAt = NextUtcWeekdayCheckIn(),
+            NextExecutiveBriefingAt = NextUtcWeekdayCheckIn()
+        });
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
         var roles = await _roleService.ListByOrganizationAsync(organizationId, cancellationToken);
 
         var objectiveResult = await _objectiveService.CreateAsync(
             organizationId,
             new CreateStrategicObjectiveRequest(
-                request.PrimaryGoal.Trim(),
-                "Create a practical operating plan that turns the business goal into immediate actions, risks, owners, and deliverables.",
+                initialObjectiveTitle,
+                "Create a practical operating plan that turns the business mission into immediate actions, risks, owners, and deliverables.",
                 (int)ObjectiveStatus.Active,
                 DateTimeOffset.UtcNow.AddDays(30)),
             cancellationToken);
@@ -130,6 +177,24 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
             taskCount++;
         }
 
+        var assignment = await CreateChiefAssignmentAsync(
+            organizationId,
+            request.ChiefAgentInstallationId,
+            cancellationToken);
+        if (!assignment.Succeeded)
+        {
+            return Failure(
+                assignment.ErrorCode ?? "chief_assignment_failed",
+                assignment.Message ?? "The selected Chief of Staff agent could not be assigned.");
+        }
+
+        var chiefOrganizationUserId = assignment.OrganizationUserId!.Value;
+        var chiefReadinessWarnings = assignment.Warnings;
+        organization.Status = OrganizationStatus.Active;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await _executiveBriefings.QueueActivationAsync(organizationId, chiefOrganizationUserId, cancellationToken);
+        roles = await _roleService.ListByOrganizationAsync(organizationId, cancellationToken);
+
         await _auditEventWriter.WriteAsync(
             "business_onboarding.completed",
             "Organization",
@@ -142,9 +207,46 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
             roles.Count,
             taskCount,
             workerResult.Worker.Id,
-            $"/organizations/{organizationId}/command-center");
+            $"/organizations/{organizationId}/command-center")
+        {
+            OrganizationActivated = true,
+            ChiefOrganizationUserId = chiefOrganizationUserId,
+            ChiefReadinessWarnings = chiefReadinessWarnings
+        };
+
+        if (transaction is not null)
+            await transaction.CommitAsync(cancellationToken);
 
         return new BusinessOnboardingActionResponse(true, null, "Business onboarding completed.", response);
+    }
+
+    public async Task<ChiefSetupActionResponse> AssignChiefAsync(
+        Guid organizationId,
+        CompleteChiefSetupRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var organization = await _dbContext.CoreOrganizations.SingleOrDefaultAsync(x => x.Id == organizationId, cancellationToken);
+        if (organization is null)
+            return new(false, "not_found", "The organization was not found.");
+        var current = await _dbContext.LeadershipAssignments.AnyAsync(
+            x => x.OrganizationId == organizationId && x.PositionKey == "chief-of-staff" && x.EndsAt == null, cancellationToken);
+        if (current)
+            return new(false, "chief_already_assigned", "The organization already has an active Chief of Staff assignment.");
+
+        var assignment = await CreateChiefAssignmentAsync(organizationId, request.AgentInstallationId, cancellationToken);
+        if (!assignment.Succeeded)
+            return new(false, assignment.ErrorCode, assignment.Message);
+
+        organization.Status = OrganizationStatus.Active;
+        organization.UpdatedAt = DateTimeOffset.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await _executiveBriefings.QueueActivationAsync(organizationId, assignment.OrganizationUserId!.Value, cancellationToken);
+        var response = new CompleteChiefSetupResponse(
+            organizationId,
+            assignment.OrganizationUserId!.Value,
+            assignment.Warnings,
+            $"/organizations/{organizationId}/command-center");
+        return new(true, null, "Chief of Staff setup completed.", response);
     }
 
     private static IReadOnlyList<CreateWorkTaskRequest> BuildInitialTasks(
@@ -217,24 +319,176 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         return roles.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
     }
 
-    private static string BuildMission(string primaryGoal, string? preferredOperatingStyle)
-    {
-        var mission = $"Primary goal: {primaryGoal.Trim()}";
-        var style = TrimOrNull(preferredOperatingStyle);
-        return style is null ? mission : $"{mission}\nPreferred operating style: {style}";
-    }
-
-    private static IReadOnlyList<string> NormalizeConstraints(IReadOnlyList<string>? constraints)
-    {
-        return constraints?
-            .Select(TrimOrNull)
-            .Where(x => x is not null)
-            .Cast<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList() ?? [];
-    }
-
     private static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<ChiefAssignmentResult> ValidateChiefInstallationAsync(
+        Guid installationId,
+        CancellationToken cancellationToken)
+    {
+        var installation = await _dbContext.AgentInstallations
+            .Include(x => x.PackageVersion)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == installationId, cancellationToken);
+        if (installation?.PackageVersion is null)
+            return ChiefAssignmentResult.Failure("chief_agent_not_found", "The selected Chief of Staff agent installation was not found.");
+        if (!installation.IsEnabled || installation.RevisionStatus != PluginRevisionStatus.Active ||
+            installation.PackageVersion.PluginKind != PluginKind.Agent)
+            return ChiefAssignmentResult.Failure("chief_agent_unavailable", "The selected installation is not an enabled active agent.");
+        if (!string.Equals(installation.BusinessId, "default", StringComparison.OrdinalIgnoreCase))
+            return ChiefAssignmentResult.Failure("chief_agent_wrong_organization", "The selected installation is already assigned to another business.");
+        return ChiefAssignmentResult.Success(Guid.Empty, []);
+    }
+
+    private async Task<ChiefAssignmentResult> CreateChiefAssignmentAsync(Guid organizationId, Guid installationId, CancellationToken cancellationToken)
+    {
+        var installation = await _dbContext.AgentInstallations
+            .Include(x => x.PackageVersion)
+            .SingleOrDefaultAsync(x => x.Id == installationId, cancellationToken);
+        if (installation is null || installation.PackageVersion is null)
+        {
+            return ChiefAssignmentResult.Failure("chief_agent_not_found", "The selected Chief agent installation was not found.");
+        }
+
+        if (!installation.IsEnabled || installation.RevisionStatus != PluginRevisionStatus.Active ||
+            installation.PackageVersion.PluginKind != PluginKind.Agent)
+        {
+            return ChiefAssignmentResult.Failure("chief_agent_unavailable", "The selected installation is not an enabled active agent.");
+        }
+
+        var organizationKey = organizationId.ToString("D");
+        if (!string.Equals(installation.BusinessId, "default", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(installation.BusinessId, organizationKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return ChiefAssignmentResult.Failure("chief_agent_wrong_organization", "The selected installation belongs to another organization.");
+        }
+
+        installation.BusinessId = organizationKey;
+        var now = DateTimeOffset.UtcNow;
+        var chiefRole = await _dbContext.CoreRoles.SingleOrDefaultAsync(
+            x => x.OrganizationId == organizationId && x.Name == "Chief of Staff", cancellationToken);
+        if (chiefRole is null)
+        {
+            chiefRole = new Role
+            {
+                Id = Guid.NewGuid(),
+                OrganizationId = organizationId,
+                Name = "Chief of Staff",
+                Description = "Coordinates leadership, workstreams, management cadence, and workforce planning on behalf of the CEO.",
+                ResponsibilitiesJson = JsonSerializer.Serialize(new[]
+                {
+                    "Maintain authoritative business understanding",
+                    "Coordinate accountable workstream managers",
+                    "Surface staffing, financial, capacity, and execution risks"
+                }, JsonOptions),
+                AuthorityLevel = AuthorityLevel.ExecutionWithApproval,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            _dbContext.CoreRoles.Add(chiefRole);
+        }
+
+        var leaders = await _dbContext.CoreOrganizationUsers
+            .Include(x => x.Role)
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .OrderByDescending(x => x.PermissionLevel)
+            .ToListAsync(cancellationToken);
+        var ceo = leaders.FirstOrDefault(x => x.Role?.Name == "CEO")
+            ?? leaders.FirstOrDefault(x => x.PermissionLevel == OrganizationPermissionLevel.Owner);
+        if (ceo is null)
+        {
+            return ChiefAssignmentResult.Failure("chief_ceo_missing", "A CEO organization user is required before assigning the Chief of Staff.");
+        }
+
+        var chief = new OrganizationUser
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            ReportsToOrganizationUserId = ceo.Id,
+            RoleId = chiefRole.Id,
+            AgentInstallationId = installation.Id,
+            DisplayName = installation.PackageVersion.AgentName,
+            EmployeeType = EmployeeType.Agent,
+            PermissionLevel = OrganizationPermissionLevel.Manager,
+            CreatedAt = now,
+            IsActive = true
+        };
+        _dbContext.CoreOrganizationUsers.Add(chief);
+        _dbContext.LeadershipAssignments.Add(new LeadershipAssignment
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            OrganizationUserId = chief.Id,
+            PositionKey = "chief-of-staff",
+            StartsAt = now
+        });
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditEventWriter.WriteAsync(
+            "leadership_assignment.created",
+            "LeadershipAssignment",
+            chief.Id,
+            $"Assigned '{installation.PackageVersion.AgentName}' as Chief of Staff.",
+            cancellationToken: cancellationToken);
+
+        return ChiefAssignmentResult.Success(chief.Id, GetReadinessWarnings(installation.PackageVersion.ManifestJson));
+    }
+
+    private static IReadOnlyList<string> GetReadinessWarnings(string manifestJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(manifestJson);
+            var provided = document.RootElement.TryGetProperty("provides", out var provides) && provides.ValueKind == JsonValueKind.Array
+                ? provides.EnumerateArray()
+                    .Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : x.TryGetProperty("name", out var name) ? name.GetString() : null)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x!)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : [];
+            var warnings = new List<string>();
+            AddReadinessWarning(provided, warnings, "assistant.converse.v1", "conversation");
+            AddReadinessWarning(provided, warnings, "plugin.configuration.describe.v1", "configuration");
+            AddReadinessWarning(provided, warnings, "management.check-in.v1", "management check-in");
+            AddReadinessWarning(provided, warnings, "assistant.plan-work.v1", "planning");
+            return warnings;
+        }
+        catch (JsonException)
+        {
+            return ["The agent manifest could not be inspected for Chief-of-Staff readiness."];
+        }
+    }
+
+    private static void AddReadinessWarning(IReadOnlySet<string> provided, ICollection<string> warnings, string capability, string label)
+    {
+        if (!provided.Contains(capability))
+        {
+            warnings.Add($"This agent does not advertise {label} capability '{capability}'. Assignment is allowed, but the role may be degraded.");
+        }
+    }
+
+    private static decimal CalculateBootstrapCompleteness(CompleteBusinessOnboardingRequest request)
+    {
+        var supplied = new[] { request.BusinessName, request.Industry, request.MissionStatement }
+            .Count(x => !string.IsNullOrWhiteSpace(x));
+        return decimal.Round(supplied / 3m, 2);
+    }
+
+    private static DateTimeOffset NextUtcWeekdayCheckIn()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var next = new DateTimeOffset(now.Year, now.Month, now.Day, 9, 0, 0, TimeSpan.Zero).AddDays(1);
+        while (next.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) next = next.AddDays(1);
+        return next;
+    }
+
+    private sealed record ChiefAssignmentResult(bool Succeeded, string? ErrorCode, string? Message, Guid? OrganizationUserId, IReadOnlyList<string> Warnings)
+    {
+        public static ChiefAssignmentResult Success(Guid organizationUserId, IReadOnlyList<string> warnings) =>
+            new(true, null, null, organizationUserId, warnings);
+
+        public static ChiefAssignmentResult Failure(string errorCode, string message) =>
+            new(false, errorCode, message, null, []);
+    }
 
     private static BusinessOnboardingActionResponse Failure(string errorCode, string message) =>
         new(false, errorCode, message);

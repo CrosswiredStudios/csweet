@@ -72,8 +72,18 @@ public class LlmProviderEndpointTests
         Assert.Equal(HttpStatusCode.NotFound, fetchedAfterDelete.StatusCode);
     }
 
-    [Fact]
-    public async Task PreviewModelCatalog_ReturnsAvailableModels()
+    [Theory]
+    [InlineData(LlmProviderType.LmStudio)]
+    [InlineData(LlmProviderType.UnslothStudio)]
+    [InlineData(LlmProviderType.Ollama)]
+    [InlineData(LlmProviderType.Vllm)]
+    [InlineData(LlmProviderType.OpenAi)]
+    [InlineData(LlmProviderType.GoogleGemini)]
+    [InlineData(LlmProviderType.OpenRouter)]
+    [InlineData(LlmProviderType.Groq)]
+    [InlineData(LlmProviderType.TogetherAi)]
+    [InlineData(LlmProviderType.Custom)]
+    public async Task PreviewModelCatalog_ReturnsAvailableModelsForSupportedSetupProviders(LlmProviderType providerType)
     {
         await using var factory = CreateFactory();
         var client = factory.CreateClient();
@@ -81,7 +91,7 @@ public class LlmProviderEndpointTests
         var response = await client.PostAsJsonAsync(
             "/api/llm-provider-profiles/model-catalog/preview",
             new PreviewModelCatalogRequest(
-                LlmProviderType.LmStudio,
+                providerType,
                 "http://fake-provider/v1",
                 "secret-test-key"));
         var result = await response.Content.ReadFromJsonAsync<PreviewModelCatalogResponse>();

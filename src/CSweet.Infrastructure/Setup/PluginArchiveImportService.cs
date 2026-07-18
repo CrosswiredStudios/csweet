@@ -136,7 +136,8 @@ public sealed class PluginArchiveImportService(
             [], AgentImportPreviewService.WebGrantTokens(manifest), [], version.Status.ToString())
         {
             PluginKind = version.PluginKind.ToString(), ManifestFileName = "csweet-plugin.json",
-            RequestedCapabilities = manifest.Requires.Select(x => x.Name).ToArray(), WebAccess = manifest.WebAccess
+            RequestedCapabilities = manifest.Requires.Select(x => x.Name).ToArray(), WebAccess = manifest.WebAccess,
+            ConfigurationFields = manifest.Configuration, CredentialBindings = manifest.Credentials
         };
     }
 }

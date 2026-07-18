@@ -9,6 +9,7 @@ public sealed class Organization
     public string? Stage { get; set; }
     public string? PrimaryGoal { get; set; }
     public string? ConstraintsJson { get; set; }
+    public OrganizationStatus Status { get; set; } = OrganizationStatus.Draft;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

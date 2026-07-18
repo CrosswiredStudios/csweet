@@ -1,0 +1,525 @@
+@using System.Text.RegularExpressions
+@using CSweet.Contracts.Agents
+@using CSweet.Contracts.Plugins
+@using CSweet.Contracts.Setup
+@inject IPluginApiClient PluginApi
+
+<section class="communications-step">
+    <header class="communications-header">
+        <div>
+            <span class="communications-kicker">Communication surfaces</span>
+            <h1>Meet your team where they already work.</h1>
+            <p>C-Sweet chat is your always-on home base. Add any number of extra services now, or return to this from Settings whenever you are ready.</p>
+        </div>
+        <div class="communications-count" aria-label="Additional services connected">
+            <strong>@ConnectedCount</strong>
+            <span>extra @(ConnectedCount == 1 ? "surface" : "surfaces")</span>
+        </div>
+    </header>
+
+    <article class="builtin-surface">
+        <span class="surface-mark builtin"><MudIcon Icon="@Icons.Material.Filled.Forum" /></span>
+        <div>
+            <div class="surface-title-line">
+                <h2>C-Sweet chat</h2>
+                <span class="always-on-badge"><MudIcon Icon="@Icons.Material.Filled.Lock" /> Always enabled</span>
+            </div>
+            <p>Integrated conversations, notifications, and approvals are available in every C-Sweet workspace. Connecting another service adds a surface—it never replaces this one.</p>
+        </div>
+        <span class="ready-state"><MudIcon Icon="@Icons.Material.Filled.CheckCircle" /> Ready</span>
+    </article>
+
+    <div class="communications-section-heading">
+        <div>
+            <span class="communications-kicker">First-party plugins</span>
+            <h2>Add the services your team uses</h2>
+        </div>
+        <span>Connect one, several, or none</span>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="communications-loading"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /> Loading available plugins…</div>
+    }
+    else
+    {
+        <div class="surface-grid">
+            @foreach (var plugin in FirstPartyPlugins)
+            {
+                var installation = FindInstallation(plugin.PluginId);
+                <article class="surface-card @(installation is not null ? "connected" : null)">
+                    <div class="surface-card-topline">
+                        <span class="surface-mark @plugin.Key">@ProviderMark(plugin.Key)</span>
+                        @if (installation is not null)
+                        {
+                            <span class="connected-badge"><MudIcon Icon="@Icons.Material.Filled.Check" /> Connected</span>
+                        }
+                        else if (!plugin.IsSourceConfigured)
+                        {
+                            <span class="source-badge">Source needed</span>
+                        }
+                    </div>
+                    <h3>@plugin.DisplayName</h3>
+                    <p>@plugin.Description</p>
+                    <button type="button" class="surface-action" @onclick="() => OpenGuide(plugin)">
+                        @(installation is null ? "Set up connection" : "Review or update")
+                        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" />
+                    </button>
+                </article>
+            }
+
+            <article class="surface-card custom-source">
+                <div class="surface-card-topline">
+                    <span class="surface-mark github">GH</span>
+                    <span class="source-badge">Advanced</span>
+                </div>
+                <h3>Install from GitHub</h3>
+                <p>Connect another C-Sweet service plugin from a public repository, pinned to an exact commit for a reproducible review.</p>
+                <button type="button" class="surface-action" @onclick="OpenCustomGuide">
+                    Add custom plugin <MudIcon Icon="@Icons.Material.Filled.ArrowForward" />
+                </button>
+            </article>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_pageMessage))
+    {
+        <MudAlert Severity="@(_pageError ? Severity.Error : Severity.Success)" Variant="Variant.Outlined" Class="mt-4">@_pageMessage</MudAlert>
+    }
+
+    <footer class="communications-actions">
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="OnBack">Back</MudButton>
+        <div>
+            <span>C-Sweet chat is ready, so this step is optional.</span>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" EndIcon="@Icons.Material.Filled.ArrowForward" Disabled="@_busy" OnClick="ContinueAsync">
+                Continue
+            </MudButton>
+        </div>
+    </footer>
+
+    <MudDialog Visible="_dialogOpen" VisibleChanged="OnDialogVisibilityChanged" Options="_dialogOptions">
+        <DialogContent>
+            <section class="communication-dialog" aria-labelledby="communication-dialog-title">
+                <header class="dialog-header">
+                    <div class="dialog-heading">
+                        <span class="surface-mark @(_activePlugin?.Key ?? "github")">@ProviderMark(_activePlugin?.Key)</span>
+                        <div>
+                            <span class="communications-kicker">Guided connection</span>
+                            <h2 id="communication-dialog-title">@(_activePlugin?.DisplayName ?? "GitHub communication plugin")</h2>
+                            <p>Work from top to bottom. Nothing runs until you review the plugin manifest and approve its access.</p>
+                        </div>
+                    </div>
+                    <button type="button" class="dialog-close" aria-label="Close setup guide" disabled="@_busy" @onclick="CloseDialog">
+                        <MudIcon Icon="@Icons.Material.Filled.Close" />
+                    </button>
+                </header>
+
+                @if (_activePlugin is not null)
+                {
+                    <section class="guide-section">
+                        <div class="section-number">1</div>
+                        <div class="guide-content">
+                            <h3>Prepare @(_activePlugin.DisplayName)</h3>
+                            <p>Keep this window open while you complete these steps in the service’s administration portal.</p>
+                            <ol class="guided-checklist">
+                                @foreach (var step in GuideFor(_activePlugin.Key))
+                                {
+                                    <li>@step</li>
+                                }
+                            </ol>
+                            <div class="guide-links">
+                                <MudButton Href="@_activePlugin.ServicePortalUrl" Target="_blank" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.OpenInNew">
+                                    Open @(_activePlugin.DisplayName) setup
+                                </MudButton>
+                                <MudButton Href="@_activePlugin.DocumentationUrl" Target="_blank" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.MenuBook">
+                                    Official instructions
+                                </MudButton>
+                                @if (_activePlugin.Key == "discord" && Options?.DiscordIsConfigured == true)
+                                {
+                                    <MudButton Href="@Options.DiscordInstallUrl" Target="_blank" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Security">
+                                        Authorize the managed C-Sweet app
+                                    </MudButton>
+                                }
+                            </div>
+                            <div class="beginner-note"><strong>Tip:</strong> Use a service account or app registration owned by your organization. Save generated secrets immediately—many services show them only once.</div>
+                        </div>
+                    </section>
+                }
+                else
+                {
+                    <section class="guide-section">
+                        <div class="section-number">1</div>
+                        <div class="guide-content">
+                            <h3>Check the plugin repository</h3>
+                            <ol class="guided-checklist">
+                                <li>Confirm the repository is public and contains <code>csweet-plugin.json</code> at its root.</li>
+                                <li>Review the publisher, source, release notes, and setup documentation.</li>
+                                <li>Copy the full 40-character commit SHA—not a branch name or shortened hash.</li>
+                                <li>Only continue with code and a publisher you trust.</li>
+                            </ol>
+                        </div>
+                    </section>
+                }
+
+                <section class="guide-section">
+                    <div class="section-number">@(_activePlugin is null ? "2" : "2")</div>
+                    <div class="guide-content">
+                        <h3>Verify the plugin source</h3>
+                        <p>First-party sources are normally supplied by your C-Sweet deployment. A deployment administrator can enter them here when they have not been configured yet.</p>
+                        <div class="source-form">
+                            <MudTextField T="string" Label="Public GitHub repository URL" Value="_repositoryUrl" ValueChanged="OnRepositoryChanged"
+                                          Variant="Variant.Outlined" Disabled="@(_busy || ActiveSourceIsLocked)" Placeholder="https://github.com/organization/repository" />
+                            <MudTextField T="string" Label="Exact 40-character commit SHA" Value="_commitSha" ValueChanged="OnCommitChanged"
+                                          Variant="Variant.Outlined" Disabled="@(_busy || ActiveSourceIsLocked)" Placeholder="0123456789abcdef0123456789abcdef01234567" />
+                        </div>
+                        @if (ActiveSourceIsLocked)
+                        {
+                            <div class="verified-source"><MudIcon Icon="@Icons.Material.Filled.Verified" /> Source pinned by this C-Sweet deployment</div>
+                        }
+                        else if (_activePlugin is not null)
+                        {
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">This deployment has not configured the first-party source yet. Ask your administrator for the official repository URL and exact commit SHA before continuing.</MudAlert>
+                        }
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Policy"
+                                   Disabled="@(_busy || !HasValidSource)" OnClick="PreviewAsync">
+                            @(_busy && _preview is null ? "Inspecting…" : "Inspect manifest")
+                        </MudButton>
+                    </div>
+                </section>
+
+                @if (_preview is not null)
+                {
+                    <section class="guide-section manifest-section">
+                        <div class="section-number">3</div>
+                        <div class="guide-content">
+                            <h3>Review what will be installed</h3>
+                            <div class="manifest-identity">
+                                <div><span>Plugin</span><strong>@_preview.AgentName</strong><small>@_preview.AgentId · @_preview.AgentVersion</small></div>
+                                <div><span>Publisher</span><strong>@_preview.PublisherName</strong><small>@_preview.PublisherId</small></div>
+                                <div><span>Manifest digest</span><strong>SHA-256</strong><small>@_preview.ManifestDigest</small></div>
+                            </div>
+                            <div class="permission-grid">
+                                @PermissionGroup("Provides", _preview.Capabilities)
+                                @PermissionGroup("Platform access", _preview.RequestedCapabilities)
+                                @PermissionGroup("Network grants", _preview.RequestedNetworkAccess)
+                                @PermissionGroup("Event subscriptions", _preview.RequestedSubscriptions)
+                            </div>
+                            @if (_preview.Warnings.Count > 0)
+                            {
+                                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                                    @foreach (var warning in _preview.Warnings) { <div>@warning.Message</div> }
+                                </MudAlert>
+                            }
+                            <MudCheckBox T="bool" @bind-Value="_approved" Color="Color.Primary"
+                                         Label="I reviewed the publisher, pinned commit, capabilities, events, permissions, and network access shown above." />
+                            @if (_preview.WebAccess.Mode == PluginWebAccessMode.AllPublic)
+                            {
+                                <MudCheckBox T="bool" @bind-Value="_allPublicAcknowledged" Color="Color.Warning"
+                                             Label="I understand that this plugin requests access to any public internet host." />
+                            }
+                        </div>
+                    </section>
+
+                    <section class="guide-section">
+                        <div class="section-number">4</div>
+                        <div class="guide-content">
+                            <h3>Enter the connection values</h3>
+                            <p>These fields come directly from the reviewed manifest. Secrets are encrypted by C-Sweet and are never shown again after saving.</p>
+                            @if (_preview.ConfigurationFields.Count == 0 && _preview.CredentialBindings.Count == 0)
+                            {
+                                <div class="beginner-note">This plugin does not request any setup values. You can proceed to installation after approving the manifest.</div>
+                            }
+                            else
+                            {
+                                <div class="connection-form">
+                                    @foreach (var field in _preview.ConfigurationFields.Where(x => !x.Secret))
+                                    {
+                                        <MudTextField T="string" Label="@FieldLabel(field.Label, field.Required)" Value="@ConfigurationValue(field.Key)"
+                                                      ValueChanged="@(value => SetConfigurationValue(field.Key, value))" Variant="Variant.Outlined"
+                                                      Disabled="@_busy" HelperText="@ConfigurationHelp(_activePlugin?.Key, field.Key)" />
+                                    }
+                                    @foreach (var field in _preview.ConfigurationFields.Where(x => x.Secret))
+                                    {
+                                        <MudTextField T="string" Label="@FieldLabel(field.Label, field.Required)" Value="@SecretValue(field.Key)"
+                                                      ValueChanged="@(value => SetSecretValue(field.Key, value))" Variant="Variant.Outlined"
+                                                      InputType="InputType.Password" Disabled="@_busy" autocomplete="new-password" />
+                                    }
+                                    @foreach (var credential in _preview.CredentialBindings)
+                                    {
+                                        <MudTextField T="string" Label="@CredentialLabel(_activePlugin?.Key, credential.Name)" Value="@SecretValue(credential.Name)"
+                                                      ValueChanged="@(value => SetSecretValue(credential.Name, value))" Variant="Variant.Outlined"
+                                                      InputType="InputType.Password" Disabled="@_busy" autocomplete="new-password"
+                                                      HelperText="@CredentialHelp(_activePlugin?.Key, credential.Name)" />
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </section>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_dialogMessage))
+                {
+                    <MudAlert Severity="@(_dialogError ? Severity.Error : Severity.Success)" Variant="Variant.Outlined">@_dialogMessage</MudAlert>
+                }
+
+                <footer class="dialog-actions">
+                    <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@_busy" OnClick="CloseDialog">Cancel</MudButton>
+                    @if (_preview is not null)
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Link"
+                                   Disabled="@(_busy || !CanSaveConnection)" OnClick="InstallOrUpdateAsync">
+                            @(_busy ? "Saving connection…" : ExistingInstallation is null ? "Install and connect" : "Save connection settings")
+                        </MudButton>
+                    }
+                </footer>
+            </section>
+        </DialogContent>
+    </MudDialog>
+</section>
+
+@code {
+    private static readonly Regex CommitShaPattern = new("^[0-9a-fA-F]{40}$", RegexOptions.Compiled);
+    private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true };
+    private readonly List<AgentInstallationResponse> _installations = [];
+    private readonly Dictionary<string, string> _configurationValues = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _secretValues = new(StringComparer.Ordinal);
+
+    [Parameter] public CommunicationSetupOptionsResponse? Options { get; set; }
+    [Parameter] public EventCallback OnBack { get; set; }
+    [Parameter] public EventCallback OnContinue { get; set; }
+
+    private FirstPartyCommunicationPluginResponse? _activePlugin;
+    private AgentImportPreviewResponse? _preview;
+    private string _repositoryUrl = string.Empty;
+    private string _commitSha = string.Empty;
+    private string? _pageMessage;
+    private string? _dialogMessage;
+    private bool _pageError;
+    private bool _dialogError;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _dialogOpen;
+    private bool _approved;
+    private bool _allPublicAcknowledged;
+
+    private IReadOnlyList<FirstPartyCommunicationPluginResponse> FirstPartyPlugins => Options?.FirstPartyPlugins ?? [];
+    private int ConnectedCount => FirstPartyPlugins.Count(x => FindInstallation(x.PluginId) is not null);
+    private AgentInstallationResponse? ExistingInstallation => _preview is null
+        ? null
+        : _installations.FirstOrDefault(x => string.Equals(x.AgentId, _preview.AgentId, StringComparison.OrdinalIgnoreCase));
+    private bool ActiveSourceIsLocked => _activePlugin?.IsSourceConfigured == true;
+    private bool HasValidSource => Uri.TryCreate(_repositoryUrl.Trim(), UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase)
+        && CommitShaPattern.IsMatch(_commitSha.Trim());
+    private bool CanSaveConnection => _preview is not null
+        && _approved
+        && (_preview.WebAccess.Mode != PluginWebAccessMode.AllPublic || _allPublicAcknowledged)
+        && _preview.ConfigurationFields.Where(x => x.Required && !x.Secret).All(x => HasValue(_configurationValues, x.Key))
+        && _preview.ConfigurationFields.Where(x => x.Required && x.Secret).All(x => HasValue(_secretValues, x.Key))
+        && _preview.CredentialBindings.All(x => HasValue(_secretValues, x.Name));
+
+    protected override async Task OnInitializedAsync() => await LoadInstallationsAsync();
+
+    private async Task LoadInstallationsAsync()
+    {
+        _loading = true;
+        try
+        {
+            _installations.Clear();
+            _installations.AddRange(await PluginApi.ListAsync());
+        }
+        catch (Exception exception)
+        {
+            _pageError = true;
+            _pageMessage = exception.Message;
+        }
+        finally { _loading = false; }
+    }
+
+    private AgentInstallationResponse? FindInstallation(string pluginId) =>
+        _installations.FirstOrDefault(x => string.Equals(x.AgentId, pluginId, StringComparison.OrdinalIgnoreCase));
+
+    private void OpenGuide(FirstPartyCommunicationPluginResponse plugin)
+    {
+        ResetDialog();
+        _activePlugin = plugin;
+        _repositoryUrl = plugin.RepositoryUrl ?? string.Empty;
+        _commitSha = plugin.CommitSha ?? string.Empty;
+        _dialogOpen = true;
+    }
+
+    private void OpenCustomGuide()
+    {
+        ResetDialog();
+        _activePlugin = null;
+        _dialogOpen = true;
+    }
+
+    private async Task PreviewAsync()
+    {
+        _busy = true;
+        _dialogMessage = null;
+        _dialogError = false;
+        _preview = null;
+        _approved = false;
+        _allPublicAcknowledged = false;
+        _configurationValues.Clear();
+        _secretValues.Clear();
+        try
+        {
+            var preview = await PluginApi.PreviewAsync(new(_repositoryUrl.Trim(), _commitSha.Trim()));
+            if (!string.Equals(preview.PluginKind, "Service", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("This setup flow accepts service plugins only. Agent plugins can be installed later from Settings.");
+            if (_activePlugin is not null && !string.Equals(preview.AgentId, _activePlugin.PluginId, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"The repository contains '{preview.AgentId}', but the {_activePlugin.DisplayName} plugin must identify itself as '{_activePlugin.PluginId}'.");
+            _preview = preview;
+            _dialogMessage = "Manifest verified. Review its requested access, then enter the values from the service portal.";
+        }
+        catch (Exception exception)
+        {
+            _dialogError = true;
+            _dialogMessage = exception.Message;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task InstallOrUpdateAsync()
+    {
+        if (_preview is null || !CanSaveConnection) return;
+        _busy = true;
+        _dialogMessage = null;
+        _dialogError = false;
+        AgentInstallationResponse? installation = ExistingInstallation;
+        try
+        {
+            if (installation is null)
+            {
+                var request = new InstallAgentRequest(
+                    "enterprise", "AlwaysOn", 30, "Skip",
+                    _preview.Capabilities,
+                    _preview.RequestedSubscriptions,
+                    _preview.RequestedPublications,
+                    _preview.RequestedPermissions,
+                    _preview.RequestedNetworkAccess,
+                    300, 512, 50)
+                {
+                    PluginScope = "System",
+                    GrantedRequestedCapabilities = _preview.RequestedCapabilities,
+                    AllPublicWebAccessAcknowledged = _allPublicAcknowledged
+                };
+                installation = await PluginApi.InstallAsync(_preview.ImportId, request);
+            }
+
+            var publicSettings = _configurationValues
+                .Where(x => !string.IsNullOrWhiteSpace(x.Value))
+                .ToDictionary(x => x.Key, x => x.Value.Trim(), StringComparer.Ordinal);
+            if (_preview.ConfigurationFields.Any(x => !x.Secret))
+                await PluginApi.SaveConfigurationAsync(installation.Id, publicSettings);
+            foreach (var secret in _secretValues.Where(x => !string.IsNullOrWhiteSpace(x.Value)))
+                await PluginApi.SetSecretAsync(installation.Id, secret.Key, secret.Value.Trim());
+
+            _pageError = false;
+            _pageMessage = $"{_preview.AgentName} was connected. Its isolated build may take a moment to become ready.";
+            await LoadInstallationsAsync();
+            _dialogOpen = false;
+        }
+        catch (Exception exception)
+        {
+            _dialogError = true;
+            _dialogMessage = installation is null
+                ? exception.Message
+                : $"The plugin is installed, but its connection values could not all be saved: {exception.Message}";
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ContinueAsync() => await OnContinue.InvokeAsync();
+    private Task OnDialogVisibilityChanged(bool visible) { if (!visible && !_busy) CloseDialog(); return Task.CompletedTask; }
+    private void CloseDialog() { if (!_busy) { _dialogOpen = false; ResetDialog(); } }
+    private void ResetDialog()
+    {
+        _preview = null; _repositoryUrl = string.Empty; _commitSha = string.Empty; _dialogMessage = null;
+        _dialogError = false; _approved = false; _allPublicAcknowledged = false;
+        _configurationValues.Clear(); _secretValues.Clear();
+    }
+
+    private void OnRepositoryChanged(string value) { _repositoryUrl = value; InvalidatePreview(); }
+    private void OnCommitChanged(string value) { _commitSha = value; InvalidatePreview(); }
+    private void InvalidatePreview() { _preview = null; _approved = false; _configurationValues.Clear(); _secretValues.Clear(); }
+    private string ConfigurationValue(string key) => _configurationValues.GetValueOrDefault(key, string.Empty);
+    private string SecretValue(string key) => _secretValues.GetValueOrDefault(key, string.Empty);
+    private void SetConfigurationValue(string key, string value) => _configurationValues[key] = value;
+    private void SetSecretValue(string key, string value) => _secretValues[key] = value;
+    private static bool HasValue(IReadOnlyDictionary<string, string> values, string key) => values.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value);
+
+    private static string ProviderMark(string? key) => key switch
+    {
+        "discord" => "DC", "slack" => "SL", "teams" => "TM", "whatsapp" => "WA", _ => "GH"
+    };
+
+    private static IReadOnlyList<string> GuideFor(string key) => key switch
+    {
+        "discord" => [
+            "Sign in to the Discord Developer Portal and create a New Application for C-Sweet.",
+            "Open Bot, add a bot if needed, and enable the Gateway Intents named by the plugin documentation. Message Content is commonly required for message processing.",
+            "Reset and copy the bot token. Treat it like a password; do not paste it into chat or commit it to source control.",
+            "Under OAuth2 > URL Generator, select bot, choose only the permissions documented by the plugin, open the generated URL, and add the bot to the intended server.",
+            "In Discord, enable Developer Mode, right-click the server, and copy its Server ID. You will enter that value below."
+        ],
+        "slack" => [
+            "Sign in to Slack’s app management portal and create an app, preferably from the manifest supplied by the plugin publisher.",
+            "Enable Socket Mode when the plugin uses a socket connection, then create an app-level token with connections:write. App tokens begin with xapp-.",
+            "Review the requested bot scopes and event subscriptions, then install the app to the correct workspace.",
+            "Copy the Bot User OAuth Token from OAuth & Permissions. Bot tokens begin with xoxb- and should be stored as a secret.",
+            "Invite the app to every channel where it should read or send messages, then copy any workspace or channel IDs requested below."
+        ],
+        "teams" => [
+            "Use an account that can create Microsoft Entra app registrations and Teams apps for your tenant.",
+            "Create a Microsoft Entra app registration, record its Application (client) ID and Tenant ID, then create a client secret and copy its value immediately.",
+            "Create or configure the bot resource, set its messaging endpoint to the HTTPS callback documented by the plugin, and enable the Microsoft Teams channel.",
+            "Create the Teams app package with the bot ID, required scopes, and permissions, then upload or publish it to your organization’s app catalog.",
+            "Install the app in a test chat or team first and complete any tenant administrator consent requested by the documented permissions."
+        ],
+        "whatsapp" => [
+            "Sign in to Meta for Developers with access to the organization’s Meta Business portfolio, create a Business app, and add the WhatsApp product.",
+            "Add or select the WhatsApp Business Account and phone number C-Sweet will use. Record the phone number ID and business account ID.",
+            "Create a system user and permanent access token with the WhatsApp permissions required by the plugin; use the temporary token only for an initial test.",
+            "Configure the HTTPS webhook callback documented by the plugin, create a private verification token, and subscribe to the messages webhook field.",
+            "Send a test message to the business number and confirm the webhook is verified before entering the IDs and permanent token below."
+        ],
+        _ => []
+    };
+
+    private static string ConfigurationHelp(string? provider, string key) => (provider, key.ToLowerInvariant()) switch
+    {
+        ("discord", "guildid") => "The Server ID copied from Discord with Developer Mode enabled.",
+        ("discord", "gatewayintents") => "The numeric intents bitmask documented by the plugin publisher.",
+        _ => "Copy this value from the service or plugin setup instructions."
+    };
+
+    private static string CredentialLabel(string? provider, string name) => provider switch
+    {
+        "discord" => "Discord bot token (required)",
+        "slack" when name.Contains("app", StringComparison.OrdinalIgnoreCase) => "Slack app-level token (required)",
+        "slack" => "Slack bot token (required)",
+        "teams" => "Microsoft app secret (required)",
+        "whatsapp" => "WhatsApp permanent access token (required)",
+        _ => $"{name} secret (required)"
+    };
+
+    private static string CredentialHelp(string? provider, string name) => provider switch
+    {
+        "discord" => "Paste the raw bot token. C-Sweet applies it only to the Discord origins approved in the manifest.",
+        "slack" when name.Contains("app", StringComparison.OrdinalIgnoreCase) => "Usually begins with xapp- and is used for Socket Mode.",
+        "slack" => "Usually begins with xoxb- and authorizes the bot in the workspace.",
+        "teams" => "Use the secret value, not the secret identifier.",
+        "whatsapp" => "Use a permanent system-user token for production, not the short-lived test token.",
+        _ => "This secret is restricted to the origins declared in the reviewed manifest."
+    };
+
+    private static string FieldLabel(string label, bool required) => required ? $"{label} (required)" : label;
+    private static RenderFragment PermissionGroup(string title, IReadOnlyList<string> values) => @<div class="permission-group">
+        <span>@title</span><p>@(values.Count == 0 ? "None" : string.Join(", ", values))</p>
+    </div>;
+}

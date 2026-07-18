@@ -23,7 +23,7 @@ public class BusinessOnboardingEndpointTests
 
         var response = await client.PostAsJsonAsync(
             "/api/business-onboarding/complete",
-            CreateRequest());
+            CreateRequest(Guid.NewGuid()));
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
@@ -34,19 +34,22 @@ public class BusinessOnboardingEndpointTests
         await using var factory = CreateFactory();
         await MarkSetupCompleteAsync(factory);
         var client = factory.CreateClient();
+        var installationId = await SeedChiefInstallationAsync(factory);
 
         var response = await client.PostAsJsonAsync(
             "/api/business-onboarding/complete",
-            CreateRequest());
+            CreateRequest(installationId));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<CompleteBusinessOnboardingResponse>();
 
         Assert.NotNull(result);
         Assert.NotEqual(Guid.Empty, result.OrganizationId);
-        Assert.Equal(5, result.CreatedRoleCount);
+        Assert.Equal(6, result.CreatedRoleCount);
         Assert.Equal(5, result.CreatedTaskCount);
-        Assert.Equal($"/organizations/{result.OrganizationId}/command-center", result.NextRoute);
+        Assert.True(result.OrganizationActivated);
+        Assert.Contains("command-center", result.NextRoute);
+        Assert.NotNull(result.ChiefOrganizationUserId);
 
         var organization = await client.GetFromJsonAsync<OrganizationResponse>($"/api/organizations/{result.OrganizationId}");
         var roles = await client.GetFromJsonAsync<IReadOnlyList<RoleResponse>>($"/api/organizations/{result.OrganizationId}/roles");
@@ -56,22 +59,55 @@ public class BusinessOnboardingEndpointTests
         Assert.NotNull(organization);
         Assert.Equal("Example Co", organization.Name);
         Assert.NotNull(roles);
-        Assert.Equal(5, roles.Count);
+        Assert.Equal(6, roles.Count);
         Assert.NotNull(tasks);
         Assert.Equal(5, tasks.Count);
         Assert.Contains(tasks, x => x.Title == "Create 30-day execution plan" && x.AssignedWorkerId == result.DefaultWorkerId);
         Assert.NotNull(workers);
         Assert.Contains(workers, x => x.Id == result.DefaultWorkerId && x.Name == "Local Strategy Agent");
+
+        var activated = await client.GetFromJsonAsync<OrganizationResponse>($"/api/organizations/{result.OrganizationId}");
+        Assert.Equal("Active", activated?.Status);
+        Assert.False(activated?.NeedsChiefSetup);
+
+        var settings = await client.GetFromJsonAsync<ExecutiveBriefingSettingsResponse>(
+            $"/api/core/organizations/{result.OrganizationId}/executive-briefings/settings");
+        Assert.NotNull(settings);
+        Assert.True(settings.StartupEnabled);
+        Assert.Equal("Weekdays", settings.Cadence);
+        var manualResponse = await client.PostAsync(
+            $"/api/core/organizations/{result.OrganizationId}/executive-briefings/run", null);
+        Assert.Equal(HttpStatusCode.Accepted, manualResponse.StatusCode);
+        var manual = await manualResponse.Content.ReadFromJsonAsync<ExecutiveBriefingActionResponse>();
+        Assert.NotNull(manual?.RequestId);
+        var history = await client.GetFromJsonAsync<IReadOnlyList<ExecutiveBriefingHistoryItem>>(
+            $"/api/core/organizations/{result.OrganizationId}/executive-briefings/history");
+        Assert.Contains(history!, x => x.RequestId == manual.RequestId && x.TriggerType == "Manual");
     }
 
-    private static CompleteBusinessOnboardingRequest CreateRequest() =>
+    [Fact]
+    public async Task CompleteOnboarding_RequiresChiefAgentInstallation()
+    {
+        await using var factory = CreateFactory();
+        await MarkSetupCompleteAsync(factory);
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/business-onboarding/complete",
+            CreateRequest(Guid.Empty));
+        var result = await response.Content.ReadFromJsonAsync<BusinessOnboardingActionResponse>();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.NotNull(result);
+        Assert.Equal("chief_agent_required", result.ErrorCode);
+    }
+
+    private static CompleteBusinessOnboardingRequest CreateRequest(Guid chiefInstallationId) =>
         new(
             "Example Co",
             "Software",
-            "Idea",
-            "Launch a paid MVP in 30 days",
-            ["solo founder", "limited budget"],
-            "Balanced and practical");
+            "Launch a paid MVP that helps small teams plan their work.",
+            chiefInstallationId);
 
     private static async Task MarkSetupCompleteAsync(WebApplicationFactory<Program> factory)
     {
@@ -86,6 +122,29 @@ public class BusinessOnboardingEndpointTests
         });
 
         await dbContext.SaveChangesAsync();
+    }
+
+    private static async Task<Guid> SeedChiefInstallationAsync(WebApplicationFactory<Program> factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
+        var package = new AgentPackageVersion
+        {
+            Id = Guid.NewGuid(), PackageSourceId = Guid.NewGuid(), AgentId = "example.chief", AgentName = "Example Chief",
+            Version = "1.0.0", PluginKind = PluginKind.Agent,
+            ManifestJson = """{"kind":"agent","provides":[{"name":"assistant.converse.v1"}]}""",
+            ImportedAt = DateTimeOffset.UtcNow
+        };
+        var installation = new AgentInstallation
+        {
+            Id = Guid.NewGuid(), InstallationKey = Guid.NewGuid(), PackageVersionId = package.Id, PackageVersion = package,
+            BusinessId = "default", IsEnabled = true, RevisionStatus = PluginRevisionStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AgentPackageVersions.Add(package);
+        dbContext.AgentInstallations.Add(installation);
+        await dbContext.SaveChangesAsync();
+        return installation.Id;
     }
 
     private static WebApplicationFactory<Program> CreateFactory()

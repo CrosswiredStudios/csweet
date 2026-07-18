@@ -16,7 +16,8 @@ internal sealed record UserMessageReceived(
     string Message,
     IReadOnlyDictionary<string, string>? Context,
     Guid TurnId = default,
-    int Attempt = 0);
+    int Attempt = 0,
+    Guid MessageId = default);
 
 internal sealed record AssistantResponseChunk(
     string ConversationId,

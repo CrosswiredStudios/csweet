@@ -19,9 +19,12 @@ This will:
 - Build and start `CSweet.Api` on a random port
 - Build and start `CSweet.App` (Blazor frontend) on a random port
 - Build and start `CSweet.WorkerHost` as a background service
+- Build and start `CSweet.AgentHost` as the Docker container `agenthost`, which is the only gateway attached to isolated agent runtime networks
 - Open the Aspire dashboard automatically (shows all services, health status, logs)
 
 The Aspire dashboard URL appears in the console output (typically `https://localhost:15887`).
+Docker Desktop must be running. The local AgentHost image is built from the sibling
+`CSweetAgentSdk` and `CSweet.Memory` repositories used by the normal project references.
 
 ### Option 2: Individual Projects
 

@@ -52,6 +52,25 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
     public DbSet<TaskRun> CoreTaskRuns => Set<TaskRun>();
     public DbSet<Artifact> CoreArtifacts => Set<Artifact>();
     public DbSet<Approval> CoreApprovals => Set<Approval>();
+    public DbSet<BusinessProfile> BusinessProfiles => Set<BusinessProfile>();
+    public DbSet<FinancialOperatingProfile> FinancialOperatingProfiles => Set<FinancialOperatingProfile>();
+    public DbSet<BusinessDiscoveryAssessment> BusinessDiscoveryAssessments => Set<BusinessDiscoveryAssessment>();
+    public DbSet<LeadershipAssignment> LeadershipAssignments => Set<LeadershipAssignment>();
+    public DbSet<Workstream> Workstreams => Set<Workstream>();
+    public DbSet<ActionProposal> ActionProposals => Set<ActionProposal>();
+    public DbSet<Budget> Budgets => Set<Budget>();
+    public DbSet<BudgetReservation> BudgetReservations => Set<BudgetReservation>();
+    public DbSet<ManagementCycle> ManagementCycles => Set<ManagementCycle>();
+    public DbSet<BusinessPattern> BusinessPatterns => Set<BusinessPattern>();
+    public DbSet<WorkforcePlan> WorkforcePlans => Set<WorkforcePlan>();
+    public DbSet<WorkforceCandidate> WorkforceCandidates => Set<WorkforceCandidate>();
+    public DbSet<ResourceNeed> ResourceNeeds => Set<ResourceNeed>();
+    public DbSet<StaffingActionProposal> StaffingActionProposals => Set<StaffingActionProposal>();
+    public DbSet<Responsibility> Responsibilities => Set<Responsibility>();
+    public DbSet<ManagementCheckInRequestRecord> ManagementCheckInRequests => Set<ManagementCheckInRequestRecord>();
+    public DbSet<ManagementStatusReportRecord> ManagementStatusReports => Set<ManagementStatusReportRecord>();
+    public DbSet<ResourceNeedReportRecord> ResourceNeedReports => Set<ResourceNeedReportRecord>();
+    public DbSet<ExecutiveBriefingDeliveryRecord> ExecutiveBriefingDeliveries => Set<ExecutiveBriefingDeliveryRecord>();
 
     // Conversation entities
     public DbSet<Conversation> CoreConversations => Set<Conversation>();

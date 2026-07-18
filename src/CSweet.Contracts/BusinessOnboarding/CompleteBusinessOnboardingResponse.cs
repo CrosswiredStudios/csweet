@@ -5,4 +5,9 @@ public sealed record CompleteBusinessOnboardingResponse(
     int CreatedRoleCount,
     int CreatedTaskCount,
     Guid DefaultWorkerId,
-    string NextRoute);
+    string NextRoute)
+{
+    public bool OrganizationActivated { get; init; }
+    public Guid? ChiefOrganizationUserId { get; init; }
+    public IReadOnlyList<string> ChiefReadinessWarnings { get; init; } = [];
+}

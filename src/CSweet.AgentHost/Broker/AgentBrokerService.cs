@@ -2,6 +2,7 @@ using CSweet.Agent.Contracts.Grpc;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using CSweet.Application.Setup;
+using CSweet.Application.Core;
 using CSweet.Agent.SDK;
 using System.Text.Json;
 
@@ -13,28 +14,25 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
     private readonly AgentSessionRegistry _sessions;
     private readonly ILogger<AgentBrokerService> _logger;
     private readonly IAgentRuntimeSignalService _runtimeSignals;
-    private readonly PlatformLlmCapabilityHandler _platformLlm;
-    private readonly PlatformMemoryCapabilityHandler _platformMemory;
-    private readonly PlatformWebProxyCapabilityHandler _platformWeb;
-    private readonly PlatformWebSocketCapabilityHandler _platformWebSocket;
+    private readonly IExecutiveBriefingService _executiveBriefings;
+    private readonly IReadOnlyList<IPlatformCapabilityHandler> _platformCapabilities;
+    private readonly IReadOnlyList<IPlatformEventObserver> _platformEventObservers;
 
     public AgentBrokerService(
         IAgentAuthorizationPolicy authorizationPolicy,
         AgentSessionRegistry sessions,
         IAgentRuntimeSignalService runtimeSignals,
-        PlatformLlmCapabilityHandler platformLlm,
-        PlatformMemoryCapabilityHandler platformMemory,
-        PlatformWebProxyCapabilityHandler platformWeb,
-        PlatformWebSocketCapabilityHandler platformWebSocket,
+        IExecutiveBriefingService executiveBriefings,
+        IEnumerable<IPlatformCapabilityHandler> platformCapabilities,
+        IEnumerable<IPlatformEventObserver> platformEventObservers,
         ILogger<AgentBrokerService> logger)
     {
         _authorizationPolicy = authorizationPolicy;
         _sessions = sessions;
         _runtimeSignals = runtimeSignals;
-        _platformLlm = platformLlm;
-        _platformMemory = platformMemory;
-        _platformWeb = platformWeb;
-        _platformWebSocket = platformWebSocket;
+        _executiveBriefings = executiveBriefings;
+        _platformCapabilities = platformCapabilities.ToList();
+        _platformEventObservers = platformEventObservers.ToList();
         _logger = logger;
     }
 
@@ -79,6 +77,18 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                     Guid.Parse(firstMessage.Register.InstallationId),
                     firstMessage.Register.WorkloadToken,
                     context.CancellationToken);
+                try
+                {
+                    await _executiveBriefings.QueueRuntimeStartupAsync(
+                        Guid.Parse(firstMessage.Register.InstallationId),
+                        Guid.Parse(firstMessage.Register.RuntimeInstanceId),
+                        context.CancellationToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    _logger.LogWarning(exception,
+                        "The runtime registered successfully, but its startup executive briefing could not be queued.");
+                }
             }
             catch (Exception exception) when (exception is FormatException or InvalidOperationException)
             {
@@ -149,6 +159,17 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
             switch (message.PayloadCase)
             {
                 case AgentToBrokerMessage.PayloadOneofCase.PublishEvent:
+                    if (session.Grant.Publications.Contains(message.PublishEvent.EventType))
+                    {
+                        foreach (var observer in _platformEventObservers.Where(x => x.CanObserve(message.PublishEvent.EventType)))
+                        {
+                            try { await observer.ObserveAsync(session, message.PublishEvent, cancellationToken); }
+                            catch (JsonException exception)
+                            {
+                                _logger.LogWarning(exception, "Ignored malformed platform event {EventType} from {AgentId}.", message.PublishEvent.EventType, session.AgentId);
+                            }
+                        }
+                    }
                     if (message.PublishEvent.EventType == "com.csweet.runtime.completed.v1" &&
                         session.Grant.Publications.Contains(message.PublishEvent.EventType))
                     {
@@ -161,9 +182,10 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                     break;
 
                 case AgentToBrokerMessage.PayloadOneofCase.CapabilityRequest:
-                    if (message.CapabilityRequest.Capability == BrokerLlmCapabilities.ChatStream)
+                    var platformHandler = _platformCapabilities.FirstOrDefault(x => x.CanHandle(message.CapabilityRequest.Capability));
+                    if (platformHandler is not null)
                     {
-                        await foreach (var result in _platformLlm.StreamAsync(
+                        await foreach (var result in platformHandler.HandleAsync(
                             session,
                             message.CapabilityRequest,
                             cancellationToken))
@@ -175,39 +197,6 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                                 CapabilityResult = result
                             });
                         }
-                        break;
-                    }
-                    if (PlatformMemoryCapabilityHandler.IsPlatformMemoryCapability(message.CapabilityRequest.Capability))
-                    {
-                        var result = await _platformMemory.HandleAsync(session, message.CapabilityRequest, cancellationToken);
-                        session.TrySend(new BrokerToAgentMessage
-                        {
-                            MessageId = Guid.NewGuid().ToString("N"),
-                            CorrelationId = message.CorrelationId,
-                            CapabilityResult = result
-                        });
-                        break;
-                    }
-                    if (message.CapabilityRequest.Capability is PluginPlatformCapabilities.WebFetch or PluginPlatformCapabilities.WebRequest)
-                    {
-                        var result = await _platformWeb.HandleAsync(session, message.CapabilityRequest, cancellationToken);
-                        session.TrySend(new BrokerToAgentMessage
-                        {
-                            MessageId = Guid.NewGuid().ToString("N"),
-                            CorrelationId = message.CorrelationId,
-                            CapabilityResult = result
-                        });
-                        break;
-                    }
-                    if (message.CapabilityRequest.Capability == PluginPlatformCapabilities.WebSocket)
-                    {
-                        var result = await _platformWebSocket.HandleAsync(session, message.CapabilityRequest, cancellationToken);
-                        session.TrySend(new BrokerToAgentMessage
-                        {
-                            MessageId = Guid.NewGuid().ToString("N"),
-                            CorrelationId = message.CorrelationId,
-                            CapabilityResult = result
-                        });
                         break;
                     }
                     _sessions.RequestCapability(

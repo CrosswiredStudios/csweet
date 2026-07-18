@@ -15,7 +15,7 @@
         <img class="enterprise-logo" src="images/icon.svg" alt="" />
     </header>
 
-    <Organizations />
+    <Organizations CreateRequested="@CreateRequested" />
 
     <MudPaper Elevation="1" Class="surface-panel enterprise-status">
         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="3">
@@ -35,6 +35,9 @@
 </MudContainer>
 
 @code {
+    [Parameter, SupplyParameterFromQuery(Name = "create")]
+    public bool CreateRequested { get; set; }
+
     private bool? _apiStatus;
     private string ApiStatusLabel => _apiStatus switch { true => "Connected", false => "Disconnected", _ => "Checking..." };
     private Color ApiStatusColor => _apiStatus switch { true => Color.Success, false => Color.Error, _ => Color.Default };

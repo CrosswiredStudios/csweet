@@ -8,5 +8,5 @@ tr:hover { background: #fbfaf7; }
 .employee-table-identity { display: flex; min-width: 11rem; align-items: center; gap: .7rem; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .employee-table-identity span { display: grid; }
 .employee-table-identity small { color: var(--cs-muted); }
-.employee-table-identity:focus-visible { outline: 3px solid rgba(232,93,117,.35); outline-offset: 3px; }
+.employee-table-identity:focus-visible { outline: 3px solid rgba(35,132,92,.4); outline-offset: 3px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }

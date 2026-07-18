@@ -34,7 +34,7 @@ public class SetupWizardStateTests
     }
 
     [Fact]
-    public void FinishIsDisabledUntilRequiredStepsAndDefaultProviderExist()
+    public void FinishDependsOnRequiredStepsRatherThanDefaultProvider()
     {
         var incomplete = Status(
             defaultChatProviderId: Guid.NewGuid(),
@@ -52,8 +52,42 @@ public class SetupWizardStateTests
             ("llm-provider", true));
 
         Assert.False(SetupWizardState.CanFinish(incomplete));
-        Assert.False(SetupWizardState.CanFinish(noProvider));
+        Assert.True(SetupWizardState.CanFinish(noProvider));
         Assert.True(SetupWizardState.CanFinish(complete));
+    }
+
+    [Fact]
+    public void LocalProviderPresetsIncludeSupportedRuntimes()
+    {
+        var presets = SetupWizardState.LocalProviderPresets();
+
+        Assert.Collection(
+            presets,
+            preset => Assert.Equal(LlmProviderType.LmStudio, preset.ProviderType),
+            preset => Assert.Equal(LlmProviderType.UnslothStudio, preset.ProviderType),
+            preset => Assert.Equal(LlmProviderType.Ollama, preset.ProviderType),
+            preset => Assert.Equal(LlmProviderType.Vllm, preset.ProviderType));
+        Assert.All(presets, preset => Assert.EndsWith("/v1", preset.BaseUrl));
+    }
+
+    [Fact]
+    public void HostedProviderPresetsIncludePopularCompatibleServices()
+    {
+        var presets = SetupWizardState.HostedProviderPresets();
+
+        Assert.Collection(
+            presets,
+            preset => Assert.Equal(LlmProviderType.OpenAi, preset.ProviderType),
+            preset => Assert.Equal(LlmProviderType.GoogleGemini, preset.ProviderType),
+            preset => Assert.Equal(LlmProviderType.OpenRouter, preset.ProviderType),
+            preset => Assert.Equal(LlmProviderType.Groq, preset.ProviderType),
+            preset => Assert.Equal(LlmProviderType.TogetherAi, preset.ProviderType));
+        Assert.All(presets, preset =>
+        {
+            Assert.True(preset.IsHosted);
+            Assert.True(preset.RequiresApiKey);
+            Assert.StartsWith("https://", preset.BaseUrl);
+        });
     }
 
     [Fact]

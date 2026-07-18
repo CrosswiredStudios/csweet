@@ -1,0 +1,53 @@
+<section class="setup-welcome" aria-labelledby="setup-welcome-title">
+    <div class="setup-welcome-copy">
+        <MudText Typo="Typo.overline">Welcome to C-Sweet</MudText>
+        <h1 id="setup-welcome-title">Your AI workforce starts here.</h1>
+        <p>
+            We’ll guide you through a quick setup so your agents have the tools they need from day one.
+            Everything can grow and change with your organization later.
+        </p>
+
+        <div class="setup-welcome-actions">
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       EndIcon="@Icons.Material.Filled.ArrowForward"
+                       Disabled="@IsBusy"
+                       OnClick="OnContinue">
+                @(IsBusy ? "Starting..." : "Start setup")
+            </MudButton>
+            <span>Takes about 3 minutes</span>
+        </div>
+    </div>
+
+    <ol class="setup-promise-list" aria-label="What setup includes">
+        <li>
+            <span class="setup-promise-number">1</span>
+            <div>
+                <strong>Connect model providers</strong>
+                <small>Add one local runtime or build a flexible roster.</small>
+            </div>
+        </li>
+        <li>
+            <span class="setup-promise-number">2</span>
+            <div>
+                <strong>Verify each connection</strong>
+                <small>Confirm that every provider can return its model catalog.</small>
+            </div>
+        </li>
+        <li>
+            <span class="setup-promise-number">3</span>
+            <div>
+                <strong>Finish your preferences</strong>
+                <small>Choose communication and account options when ready.</small>
+            </div>
+        </li>
+    </ol>
+</section>
+
+@code {
+    [Parameter]
+    public bool IsBusy { get; set; }
+
+    [Parameter]
+    public EventCallback OnContinue { get; set; }
+}

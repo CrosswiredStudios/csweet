@@ -106,14 +106,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentRuntimeSignalService, AgentRuntimeSignalService>();
         builder.Services.AddScoped<IAgentRuntimeCleanupService, AgentRuntimeCleanupService>();
         builder.Services.AddOptions<AgentRuntimeManagerOptions>()
-            .Bind(builder.Configuration.GetSection(AgentRuntimeManagerOptions.SectionName))
-            .PostConfigure(options =>
-            {
-                options.BrokerEndpoint = AgentRuntimeManagerOptions.ResolveBrokerEndpoint(
-                    options.BrokerEndpoint,
-                    builder.Configuration["services:agenthost:http:0"],
-                    builder.Configuration["services:agenthost:https:0"]);
-            });
+            .Bind(builder.Configuration.GetSection(AgentRuntimeManagerOptions.SectionName));
         builder.Services.AddHttpClient<GitHubAgentRepositoryClient>(client =>
         {
             client.BaseAddress = new Uri("https://api.github.com/");
@@ -166,6 +159,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IArtifactService, ArtifactService>();
         builder.Services.AddScoped<IArtifactApprovalService, ArtifactApprovalService>();
         builder.Services.AddScoped<IOrganizationUserService, OrganizationUserService>();
+        builder.Services.AddScoped<IExecutiveBriefingService, ExecutiveBriefingService>();
         builder.Services.AddScoped<IConversationService, ConversationService>();
         builder.Services.AddScoped<IChatTurnService, ChatTurnService>();
         builder.Services.AddScoped<ICommunicationWorkspaceService, CommunicationWorkspaceService>();
@@ -183,6 +177,7 @@ public static class DependencyInjection
                 connectionString ?? throw new InvalidOperationException("A PostgreSQL connection is required for memory.")));
         }
         builder.Services.AddScoped<IAgentMemoryService, AgentMemoryService>();
+        builder.Services.TryAddSingleton(TimeProvider.System);
 
         return builder;
     }
@@ -196,13 +191,6 @@ public static class DependencyInjection
         var path = string.IsNullOrWhiteSpace(configuredPath)
             ? Path.Combine(GetLocalStateDirectory(), fileName)
             : configuredPath;
-
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
         return path;
     }
 

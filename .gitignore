@@ -23,3 +23,4 @@ docker/volumes/
 **/*.gguf
 **/*.bin
 **/*.safetensors
+/.tmp

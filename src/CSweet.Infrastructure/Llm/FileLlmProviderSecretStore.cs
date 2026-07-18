@@ -54,6 +54,25 @@ public sealed class FileLlmProviderSecretStore : ILlmProviderSecretStore
         }
     }
 
+    public async Task DeleteAsync(
+        string secretName,
+        CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var secrets = await ReadSecretsAsync(cancellationToken);
+            if (secrets.Remove(secretName))
+            {
+                await WriteSecretsAsync(secrets, cancellationToken);
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     private async Task<Dictionary<string, string>> ReadSecretsAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(_filePath))

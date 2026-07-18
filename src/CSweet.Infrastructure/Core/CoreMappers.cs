@@ -18,7 +18,10 @@ internal static class CoreMappers
             org.PrimaryGoal,
             org.ConstraintsJson,
             org.CreatedAt,
-            org.UpdatedAt);
+            org.UpdatedAt)
+        {
+            Status = org.Status.ToString()
+        };
     }
 
     #endregion

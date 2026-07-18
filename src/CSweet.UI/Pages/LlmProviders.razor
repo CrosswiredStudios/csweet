@@ -649,19 +649,21 @@
         _modelCatalogMessage = null;
         _modelCatalogSucceeded = null;
 
-        if (_providerType != LlmProviderType.LmStudio)
+        var preset = SetupWizardState.LocalProviderPresets()
+            .Concat(SetupWizardState.HostedProviderPresets())
+            .FirstOrDefault(x => x.ProviderType == _providerType);
+        if (preset is null)
         {
             return;
         }
 
-        var defaults = SetupWizardState.LmStudioDefaults();
-        _providerName = defaults.ProviderName;
-        _baseUrl = defaults.BaseUrl;
-        _apiKey = defaults.ApiKey;
-        _supportsStreaming = defaults.SupportsStreaming;
-        _supportsToolCalling = defaults.SupportsToolCalling;
-        _supportsStructuredOutput = defaults.SupportsStructuredOutput;
-        _supportsVision = defaults.SupportsVision;
+        _providerName = preset.ProviderName;
+        _baseUrl = preset.BaseUrl;
+        _apiKey = preset.IsHosted ? string.Empty : preset.ApiKeyPlaceholder;
+        _supportsStreaming = true;
+        _supportsToolCalling = false;
+        _supportsStructuredOutput = false;
+        _supportsVision = false;
     }
 
     private void SetActionMessage(string? message, bool? succeeded = null)
@@ -724,10 +726,18 @@
         return providerType switch
         {
             LlmProviderType.LmStudio => "LM Studio",
+            LlmProviderType.UnslothStudio => "Unsloth Studio",
+            LlmProviderType.Ollama => "Ollama",
+            LlmProviderType.Vllm => "vLLM",
             LlmProviderType.OpenAiCompatible => "OpenAI-compatible",
             LlmProviderType.OpenAi => "OpenAI",
+            LlmProviderType.GoogleGemini => "Google Gemini",
+            LlmProviderType.OpenRouter => "OpenRouter",
+            LlmProviderType.Groq => "Groq",
+            LlmProviderType.TogetherAi => "Together AI",
             LlmProviderType.AzureOpenAi => "Azure OpenAI",
             LlmProviderType.MicrosoftFoundry => "Microsoft Foundry",
+            LlmProviderType.Custom => "Custom endpoint",
             _ => providerType.ToString()
         };
     }
