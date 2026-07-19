@@ -1,5 +1,4 @@
 using CSweet.Application.Core;
-using CSweet.Application.Setup;
 using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
 using CSweet.Infrastructure.Persistence;
@@ -10,44 +9,10 @@ namespace CSweet.Infrastructure.Core;
 public sealed class ConversationService : IConversationService
 {
     private readonly CSweetDbContext _dbContext;
-    private readonly IAuditEventWriter _auditEventWriter;
 
-    public ConversationService(CSweetDbContext dbContext, IAuditEventWriter auditEventWriter)
+    public ConversationService(CSweetDbContext dbContext)
     {
         _dbContext = dbContext;
-        _auditEventWriter = auditEventWriter;
-    }
-
-    public async Task<IReadOnlyList<ConversationResponse>> ListAsync(
-        Guid organizationId,
-        Guid agentOrganizationUserId,
-        CancellationToken cancellationToken = default)
-    {
-        return await _dbContext.CoreConversations
-            .Where(x => x.OrganizationId == organizationId &&
-                x.AgentOrganizationUserId == agentOrganizationUserId)
-            .OrderByDescending(x => x.UpdatedAt)
-            .Select(x => x.ToResponse())
-            .ToListAsync(cancellationToken);
-    }
-
-    public async Task<ConversationResponse?> GetAsync(Guid conversationId, CancellationToken cancellationToken = default)
-    {
-        var conversation = await _dbContext.CoreConversations
-            .SingleOrDefaultAsync(x => x.Id == conversationId, cancellationToken);
-
-        return conversation?.ToResponse();
-    }
-
-    public async Task<IReadOnlyList<ConversationMessageResponse>> ListMessagesAsync(
-        Guid conversationId,
-        CancellationToken cancellationToken = default)
-    {
-        return await _dbContext.CoreConversationMessages
-            .Where(x => x.ConversationId == conversationId)
-            .OrderBy(x => x.CreatedAt)
-            .Select(x => x.ToResponse())
-            .ToListAsync(cancellationToken);
     }
 
     public async Task<Guid?> GetDefaultProviderProfileIdAsync(CancellationToken cancellationToken = default)
@@ -67,86 +32,9 @@ public sealed class ConversationService : IConversationService
             x => x.Id == providerProfileId && x.IsEnabled,
             cancellationToken);
 
-    public Task<Guid?> GetAgentInstallationIdAsync(
-        Guid conversationId,
-        CancellationToken cancellationToken = default) =>
-        _dbContext.CoreConversations
-            .Where(x => x.Id == conversationId)
-            .Select(x => x.AgentOrganizationUser!.AgentInstallationId)
-            .SingleOrDefaultAsync(cancellationToken);
-
     public Task<Guid?> GetAgentInstallationIdForEmployeeAsync(Guid organizationUserId, CancellationToken cancellationToken = default) =>
         _dbContext.CoreOrganizationUsers.Where(x => x.Id == organizationUserId && x.IsActive)
             .Select(x => x.AgentInstallationId).SingleOrDefaultAsync(cancellationToken);
-
-    public async Task<ConversationActionResponse> StartAsync(
-        Guid organizationId,
-        StartConversationRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var agent = await _dbContext.CoreOrganizationUsers
-            .SingleOrDefaultAsync(
-                x => x.Id == request.AgentOrganizationUserId && x.OrganizationId == organizationId && x.IsActive,
-                cancellationToken);
-
-        if (agent is null)
-        {
-            return new ConversationActionResponse(false, "agent_not_found",
-                "The agent employee was not found in this organization.");
-        }
-
-        if (agent.EmployeeType != EmployeeType.Agent)
-        {
-            return new ConversationActionResponse(false, "not_an_agent",
-                "Conversations can only be started with agent employees.");
-        }
-
-        // The initiator is the org's "Self" human owner. Auth is out of scope for now.
-        var self = await _dbContext.CoreOrganizationUsers
-            .Where(x => x.OrganizationId == organizationId && x.EmployeeType == EmployeeType.Human)
-            .OrderBy(x => x.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (self is null)
-        {
-            return new ConversationActionResponse(false, "no_owner",
-                "This organization has no human owner to initiate the conversation.");
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        var conversation = new Conversation
-        {
-            Id = Guid.NewGuid(),
-            OrganizationId = organizationId,
-            AgentOrganizationUserId = agent.Id,
-            InitiatedByOrganizationUserId = self.Id,
-            Kind = ConversationKind.DirectHumanAgent,
-            Title = null,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        conversation.Participants.Add(new ConversationParticipant
-        {
-            Id = Guid.NewGuid(), OrganizationUserId = self.Id, Role = ConversationParticipantRole.Member, JoinedAt = now
-        });
-        conversation.Participants.Add(new ConversationParticipant
-        {
-            Id = Guid.NewGuid(), OrganizationUserId = agent.Id, Role = ConversationParticipantRole.Member, JoinedAt = now
-        });
-
-        _dbContext.CoreConversations.Add(conversation);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        await _auditEventWriter.WriteAsync(
-            "conversation.started",
-            "Conversation",
-            conversation.Id,
-            $"Conversation started with agent '{agent.DisplayName}'.",
-            cancellationToken: cancellationToken);
-
-        return new ConversationActionResponse(true, null, "Conversation started.",
-            conversation.ToResponse());
-    }
 
     public async Task<ConversationMessageResponse> AppendMessageAsync(
         Guid conversationId,

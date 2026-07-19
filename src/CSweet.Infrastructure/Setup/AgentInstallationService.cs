@@ -6,6 +6,7 @@ using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CSweet.Infrastructure.Setup;
 
@@ -20,17 +21,20 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
     private readonly CSweetDbContext _dbContext;
     private readonly IAuditEventWriter _auditWriter;
     private readonly IAgentContainerRunner _containers;
+    private readonly AgentRuntimeManagerOptions _runtimeOptions;
     private readonly ILogger<AgentInstallationService> _logger;
 
     public AgentInstallationService(
         CSweetDbContext dbContext,
         IAuditEventWriter auditWriter,
         IAgentContainerRunner containers,
+        IOptions<AgentRuntimeManagerOptions> runtimeOptions,
         ILogger<AgentInstallationService> logger)
     {
         _dbContext = dbContext;
         _auditWriter = auditWriter;
         _containers = containers;
+        _runtimeOptions = runtimeOptions.Value;
         _logger = logger;
     }
 
@@ -711,17 +715,17 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
             // every historical failed attempt during installation removal or update.
             var containerIdentifier = runtime.ContainerId ??
                 (AgentRuntimeInstance.IsActive(runtime.Status) ? runtime.ContainerName : null);
-            if (string.IsNullOrWhiteSpace(containerIdentifier))
-            {
-                continue;
-            }
-
             try
             {
-                if (await _containers.InspectAsync(containerIdentifier, cleanupCancellation.Token) is not null)
+                if (!string.IsNullOrWhiteSpace(containerIdentifier) &&
+                    await _containers.InspectAsync(containerIdentifier, cleanupCancellation.Token) is not null)
                 {
                     await _containers.RemoveAsync(containerIdentifier, force: true, cleanupCancellation.Token);
                 }
+                await _containers.RemoveNetworkAsync(
+                    $"{_runtimeOptions.DockerNetworkName}-{runtime.Id:N}",
+                    _runtimeOptions.BrokerGatewayContainer,
+                    cleanupCancellation.Token);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {

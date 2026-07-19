@@ -280,6 +280,7 @@ public sealed class AgentRuntimeManager(
                 {
                     await containers.RemoveAsync(containerId, force: true, cancellationToken: cancellationToken);
                 }
+                await RemoveRuntimeNetworkAsync(instance, cancellationToken);
                 instance.ContainerId = null;
             }
             catch (AgentContainerException exception)
@@ -301,35 +302,35 @@ public sealed class AgentRuntimeManager(
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        var containerName = instance.ContainerName;
-        if (!string.IsNullOrWhiteSpace(containerName))
+        var containerName = instance.ContainerName ?? $"csweet-agent-{instance.Id:N}";
+        try
         {
-            try
+            var status = await containers.InspectAsync(containerName, cancellationToken);
+            if (status?.State == AgentContainerState.Running)
             {
-                var status = await containers.InspectAsync(containerName, cancellationToken);
-                if (status?.State == AgentContainerState.Running)
-                {
-                    instance.ContainerId = status.ContainerId;
-                    instance.RuntimeDeadlineAt = now.AddSeconds(instance.AgentInstallation!.Schedule!.MaxRuntimeSeconds);
-                    Transition(
-                        instance,
-                        AgentRuntimeStatus.WaitingForBrokerRegistration,
-                        now,
-                        $"Recovered running container {status.ContainerId}; awaiting broker registration at {options.Value.BrokerEndpoint}.");
-                    await dbContext.SaveChangesAsync(cancellationToken);
-                    return;
-                }
+                instance.ContainerId = status.ContainerId;
+                instance.RuntimeDeadlineAt = now.AddSeconds(instance.AgentInstallation!.Schedule!.MaxRuntimeSeconds);
+                Transition(
+                    instance,
+                    AgentRuntimeStatus.WaitingForBrokerRegistration,
+                    now,
+                    $"Recovered running container {status.ContainerId}; awaiting broker registration at {options.Value.BrokerEndpoint}.");
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
 
-                if (status is not null)
-                {
-                    await containers.RemoveAsync(containerName, force: true, cancellationToken: cancellationToken);
-                }
-            }
-            catch (AgentContainerException exception)
+            if (status is not null)
             {
-                logger.LogWarning(exception, "Interrupted start inspection failed for runtime {RuntimeInstanceId}.", instance.Id);
-                instance.LogExcerpt = $"Could not recover interrupted container start: {exception.Message}";
+                await containers.RemoveAsync(containerName, force: true, cancellationToken: cancellationToken);
             }
+            await RemoveRuntimeNetworkAsync(instance, cancellationToken);
+            instance.ContainerId = null;
+        }
+        catch (AgentContainerException exception)
+        {
+            logger.LogWarning(exception, "Interrupted start cleanup failed for runtime {RuntimeInstanceId}.", instance.Id);
+            instance.ContainerId = containerName;
+            instance.LogExcerpt = $"Could not recover interrupted container start: {exception.Message}";
         }
 
         const string recoveryReason = "Container startup was interrupted before completion; retry to start a fresh runtime.";
@@ -482,7 +483,7 @@ public sealed class AgentRuntimeManager(
                     settings.DotNetRuntimeBaseImage,
                     package.TargetFramework),
                 package.PackagePath, entryAssembly,
-                options.Value.BrokerEndpoint, token, "/app/csweet-plugin.json", $"{options.Value.DockerNetworkName}-{instance.Id:N}",
+                options.Value.BrokerEndpoint, token, "/app/csweet-plugin.json", RuntimeNetworkName(instance),
                 installation.Grant.MemoryMb, installation.Grant.CpuPercent, settings.DefaultContainerPidsLimit,
                 installation.Schedule.MaxRuntimeSeconds,
                 null, options.Value.BrokerGatewayContainer), startTimeout.Token);
@@ -494,7 +495,7 @@ public sealed class AgentRuntimeManager(
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            await TryRemoveFailedStartAsync(instance.ContainerName, cancellationToken);
+            await TryRemoveFailedStartAsync(instance, cancellationToken);
             instance.LogExcerpt =
                 $"Container launch timed out. Image: {settings.DotNetRuntimeBaseImage}; network: {options.Value.DockerNetworkName}; broker: {options.Value.BrokerEndpoint}.";
             Transition(instance, AgentRuntimeStatus.StartFailed, DateTimeOffset.UtcNow, "Container start timed out.");
@@ -502,7 +503,7 @@ public sealed class AgentRuntimeManager(
         catch (Exception exception) when (exception is AgentContainerException or InvalidOperationException)
         {
             logger.LogError(exception, "Failed to start runtime {RuntimeInstanceId}", instance.Id);
-            await TryRemoveFailedStartAsync(instance.ContainerName, cancellationToken);
+            await TryRemoveFailedStartAsync(instance, cancellationToken);
             instance.LogExcerpt =
                 $"Container launch failed. Image: {settings.DotNetRuntimeBaseImage}; network: {options.Value.DockerNetworkName}; broker: {options.Value.BrokerEndpoint}.{Environment.NewLine}{exception.Message}";
             Transition(instance, AgentRuntimeStatus.StartFailed, DateTimeOffset.UtcNow, exception.Message);
@@ -530,10 +531,23 @@ public sealed class AgentRuntimeManager(
         await AuditOutcomeAsync(instance, AgentRuntimeStatus.Failed, cancellationToken);
     }
 
-    private async Task TryRemoveFailedStartAsync(string containerName, CancellationToken cancellationToken)
+    private async Task TryRemoveFailedStartAsync(AgentRuntimeInstance instance, CancellationToken cancellationToken)
     {
-        try { await containers.RemoveAsync(containerName, force: true, cancellationToken: cancellationToken); }
-        catch (AgentContainerException exception) { logger.LogDebug(exception, "No failed-start container remained for {ContainerName}.", containerName); }
+        var containerName = instance.ContainerName ?? $"csweet-agent-{instance.Id:N}";
+        try
+        {
+            if (await containers.InspectAsync(containerName, cancellationToken) is not null)
+                await containers.RemoveAsync(containerName, force: true, cancellationToken: cancellationToken);
+            await RemoveRuntimeNetworkAsync(instance, cancellationToken);
+            instance.ContainerId = null;
+        }
+        catch (AgentContainerException exception)
+        {
+            // Retain a name-based cleanup marker so the background cleanup service can retry
+            // both the container and its per-runtime network after this attempt is terminal.
+            instance.ContainerId = containerName;
+            logger.LogWarning(exception, "Failed-start resource cleanup will be retried for runtime {RuntimeInstanceId}.", instance.Id);
+        }
     }
 
     private async Task StopAndFinishAsync(AgentRuntimeInstance instance, AgentRuntimeStatus terminal, string reason, DateTimeOffset now, CancellationToken cancellationToken)
@@ -559,6 +573,7 @@ public sealed class AgentRuntimeManager(
                 if (settings.RemoveContainersAfterCompletion)
                 {
                     await containers.RemoveAsync(containerId, cancellationToken: cancellationToken);
+                    await RemoveRuntimeNetworkAsync(instance, cancellationToken);
                     instance.ContainerId = null;
                 }
                 AgentRuntimeMetrics.ContainerStopped(terminal.ToString());
@@ -644,4 +659,13 @@ public sealed class AgentRuntimeManager(
 
     private async Task<AgentRuntimeGlobalSettings> SettingsAsync(CancellationToken cancellationToken)
         => await dbContext.AgentRuntimeGlobalSettings.SingleAsync(cancellationToken);
+
+    private string RuntimeNetworkName(AgentRuntimeInstance instance)
+        => $"{options.Value.DockerNetworkName}-{instance.Id:N}";
+
+    private Task RemoveRuntimeNetworkAsync(AgentRuntimeInstance instance, CancellationToken cancellationToken)
+        => containers.RemoveNetworkAsync(
+            RuntimeNetworkName(instance),
+            options.Value.BrokerGatewayContainer,
+            cancellationToken);
 }

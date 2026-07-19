@@ -95,7 +95,8 @@
 }
 
 .business-dialog-close:focus-visible,
-.chief-source-card:focus-visible {
+.chief-source-card:focus-visible,
+.agent-details-toggle:focus-visible {
     outline: 3px solid rgba(155, 231, 194, .72);
     outline-offset: 2px;
 }
@@ -313,6 +314,13 @@
 }
 
 .agent-review-header {
+    display: grid;
+    gap: .75rem;
+}
+
+.agent-review-summary {
+    display: flex;
+    align-items: center;
     gap: .7rem;
 }
 
@@ -323,7 +331,7 @@
     color: #fff;
 }
 
-.agent-review-header > div {
+.agent-review-summary > div {
     min-width: 0;
     flex: 1;
 }
@@ -352,6 +360,50 @@
     color: #167552;
     font-size: .63rem;
     font-weight: 800;
+}
+
+.agent-details-toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .62rem .72rem;
+    border: 1px solid var(--cs-border);
+    border-radius: 9px;
+    background: #f4f7f8;
+    color: var(--cs-navy);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color .15s ease, background .15s ease;
+}
+
+.agent-details-toggle:hover {
+    border-color: #b5c9d6;
+    background: #eef4f6;
+}
+
+.agent-details-toggle > span {
+    display: grid;
+    gap: .08rem;
+}
+
+.agent-details-toggle strong {
+    font-size: .7rem;
+}
+
+.agent-details-toggle small {
+    color: var(--cs-muted);
+    font-size: .6rem;
+}
+
+.agent-details-toggle ::deep .mud-icon-root {
+    color: var(--cs-muted);
+}
+
+.agent-review-details {
+    display: grid;
+    gap: .85rem;
 }
 
 .agent-review-facts {
@@ -464,10 +516,19 @@
     .business-dialog-stage {
         animation: business-stage-in .25s cubic-bezier(.22, .75, .2, 1) both;
     }
+
+    .agent-review-details {
+        animation: agent-details-in .18s ease-out both;
+    }
 }
 
 @keyframes business-stage-in {
     from { opacity: 0; transform: translateX(.45rem); }
+    to { opacity: 1; transform: none; }
+}
+
+@keyframes agent-details-in {
+    from { opacity: 0; transform: translateY(-.25rem); }
     to { opacity: 1; transform: none; }
 }
 
@@ -546,6 +607,7 @@
 @media (prefers-reduced-motion: reduce) {
     .business-dialog-close,
     .chief-source-card,
+    .agent-details-toggle,
     .business-progress > div > span {
         transition: none;
     }

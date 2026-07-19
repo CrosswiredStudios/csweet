@@ -125,6 +125,43 @@ public static class LlmProviderProfileEndpoints
             return profile is null ? Results.NotFound() : Results.Ok(profile);
         });
 
+        group.MapGet("/{id:guid}/models", async (
+            Guid id,
+            ILlmProviderProfileService providerService,
+            IModelCatalogClient modelCatalogClient,
+            CancellationToken cancellationToken) =>
+        {
+            var profile = await providerService.GetAsync(id, cancellationToken);
+            if (profile is null)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var models = await modelCatalogClient.ListModelsAsync(id, cancellationToken);
+                return Results.Ok(new PreviewModelCatalogResponse(
+                    true,
+                    null,
+                    models.Count == 0
+                        ? "Connected, but the provider did not return any models."
+                        : $"Found {models.Count} model(s).",
+                    models));
+            }
+            catch (LlmProviderHttpException ex)
+            {
+                return Results.Ok(new PreviewModelCatalogResponse(false, "provider_http_error", ex.Message, []));
+            }
+            catch (HttpRequestException)
+            {
+                return Results.Ok(new PreviewModelCatalogResponse(false, "provider_unreachable", "Could not connect to this provider.", []));
+            }
+            catch (TaskCanceledException)
+            {
+                return Results.Ok(new PreviewModelCatalogResponse(false, "provider_timeout", "Timed out while loading models.", []));
+            }
+        });
+
         group.MapPost("/{id:guid}/test", async (
             Guid id,
             ILlmProviderProfileService providerService,

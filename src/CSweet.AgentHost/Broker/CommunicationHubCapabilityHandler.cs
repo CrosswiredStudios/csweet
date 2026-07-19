@@ -98,7 +98,7 @@ public sealed class CommunicationHubCapabilityHandler(
         return message is null
             ? Failure(request.RequestId, PlatformCapabilityErrorCode.ValidationFailed,
                 "The message was empty or the employee is not a member of the chat.")
-            : Success(request.RequestId, message);
+            : Success(request.RequestId, message.Message);
     }
 
     private static T Read<T>(RequestCapability request) =>

@@ -81,6 +81,16 @@ public sealed class ChatTurnService(CSweetDbContext db) : IChatTurnService
         await db.ChatTurns.Where(x => x.Id == turnId && x.OrganizationId == organizationId)
             .Select(x => ToResponse(x)).SingleOrDefaultAsync(cancellationToken);
 
+    public async Task<IReadOnlyList<ChatTurnResponse>> ListForConversationAsync(
+        Guid organizationId,
+        Guid conversationId,
+        CancellationToken cancellationToken = default) =>
+        await db.ChatTurns
+            .Where(x => x.OrganizationId == organizationId && x.ConversationId == conversationId)
+            .OrderBy(x => x.CreatedAt)
+            .Select(x => ToResponse(x))
+            .ToListAsync(cancellationToken);
+
     public async Task<IReadOnlyList<ChatTurnTraceEventResponse>> ListEventsAsync(Guid organizationId, Guid turnId, long afterSequence = -1, CancellationToken cancellationToken = default) =>
         await db.ChatTurnTraceEvents.Where(x => x.ChatTurnId == turnId && x.ChatTurn!.OrganizationId == organizationId && x.Sequence > afterSequence)
             .OrderBy(x => x.Sequence).Select(x => ToResponse(x)).ToListAsync(cancellationToken);

@@ -7,6 +7,7 @@ using CSweet.Infrastructure.Persistence;
 using CSweet.Infrastructure.Setup;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace CSweet.UnitTests;
 
@@ -311,9 +312,10 @@ public sealed class AgentInstallationServiceTests
         var containers = new TestAgentContainerRunner(containerExists: true);
         var service = CreateService(dbContext, containers);
         var installation = await service.InstallAsync(package.Id, ValidRequest());
+        var runtimeId = Guid.NewGuid();
         dbContext.AgentRuntimeInstances.Add(new AgentRuntimeInstance
         {
-            Id = Guid.NewGuid(),
+            Id = runtimeId,
             TickId = Guid.NewGuid(),
             AgentInstallationId = installation.Id,
             ContainerId = "retained-container",
@@ -324,6 +326,7 @@ public sealed class AgentInstallationServiceTests
         await service.RemoveAsync(installation.Id);
 
         Assert.Contains("retained-container", containers.Removed);
+        Assert.Contains(("csweet-runtime-" + runtimeId.ToString("N"), "agenthost"), containers.NetworksRemoved);
     }
 
     [Fact]
@@ -490,12 +493,14 @@ public sealed class AgentInstallationServiceTests
             dbContext,
             new TestAuditEventWriter(),
             containers ?? new TestAgentContainerRunner(),
+            Options.Create(new AgentRuntimeManagerOptions()),
             NullLogger<AgentInstallationService>.Instance);
 
     private sealed class TestAgentContainerRunner(bool containerExists = false, string logs = "") : IAgentContainerRunner
     {
         public List<string> Inspected { get; } = [];
         public List<string> Removed { get; } = [];
+        public List<(string NetworkName, string BrokerGatewayContainer)> NetworksRemoved { get; } = [];
 
         public Task<AgentContainerStatus> StartAsync(AgentContainerStartRequest request, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
@@ -514,6 +519,12 @@ public sealed class AgentInstallationServiceTests
         public Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default)
         {
             Removed.Add(containerId);
+            return Task.CompletedTask;
+        }
+
+        public Task RemoveNetworkAsync(string networkName, string brokerGatewayContainer, CancellationToken cancellationToken = default)
+        {
+            NetworksRemoved.Add((networkName, brokerGatewayContainer));
             return Task.CompletedTask;
         }
 

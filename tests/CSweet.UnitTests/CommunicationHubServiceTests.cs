@@ -21,7 +21,7 @@ public sealed class CommunicationHubServiceTests
         var engineer = User(organization.Id, "Ellis", OrganizationPermissionLevel.Contributor, department.Id);
         db.AddRange(organization, department, manager, designer, engineer);
         await db.SaveChangesAsync();
-        var service = new CommunicationHubService(db, new TestAuditEventWriter());
+        var service = CreateService(db);
 
         var created = await service.CreateAsync(organization.Id, manager.Id,
             new CreateCommunicationChatRequest("product-launch", "Launch coordination", false, false,
@@ -35,7 +35,7 @@ public sealed class CommunicationHubServiceTests
         var replay = await service.SendAsync(organization.Id, created.Chat.Id, designer.Id,
             new SendCommunicationMessageRequest("Design review is ready.", "design-review-ready"));
         Assert.NotNull(sent);
-        Assert.Equal(sent.Id, replay!.Id);
+        Assert.Equal(sent!.Message.Id, replay!.Message.Id);
         var messages = await service.ListMessagesAsync(organization.Id, created.Chat.Id, engineer.Id);
         Assert.NotNull(messages);
         Assert.Single(messages);
@@ -52,7 +52,7 @@ public sealed class CommunicationHubServiceTests
         var outsider = User(organization.Id, "Outsider", OrganizationPermissionLevel.Contributor);
         db.AddRange(organization, manager, member, outsider);
         await db.SaveChangesAsync();
-        var service = new CommunicationHubService(db, new TestAuditEventWriter());
+        var service = CreateService(db);
         var created = await service.CreateAsync(organization.Id, manager.Id,
             new CreateCommunicationChatRequest("operations", null, false, true, [member.Id]));
         await service.SendAsync(organization.Id, created.Chat!.Id, member.Id, new SendCommunicationMessageRequest("Status update"));
@@ -77,7 +77,7 @@ public sealed class CommunicationHubServiceTests
         var second = User(organization.Id, "Second", OrganizationPermissionLevel.Contributor);
         db.AddRange(organization, first, second);
         await db.SaveChangesAsync();
-        var service = new CommunicationHubService(db, new TestAuditEventWriter());
+        var service = CreateService(db);
 
         var direct = await service.CreateAsync(organization.Id, first.Id,
             new CreateCommunicationChatRequest(null, null, true, true, [second.Id]));
@@ -99,7 +99,7 @@ public sealed class CommunicationHubServiceTests
         var second = User(organization.Id, "Second", OrganizationPermissionLevel.Contributor);
         db.AddRange(organization, first, second);
         await db.SaveChangesAsync();
-        var service = new CommunicationHubService(db, new TestAuditEventWriter());
+        var service = CreateService(db);
         var chat = (await service.CreateAsync(organization.Id, first.Id,
             new CreateCommunicationChatRequest(null, null, true, true, [second.Id]))).Chat!;
         var own = await service.SendAsync(organization.Id, chat.Id, first.Id, new("My message"));
@@ -109,9 +109,9 @@ public sealed class CommunicationHubServiceTests
         Assert.Equal(1, unread!.TotalUnreadCount);
         Assert.Equal(1, unread.ChatUnreadCounts[chat.Id]);
 
-        var read = await service.MarkReadAsync(organization.Id, chat.Id, first.Id, received!.Sequence);
+        var read = await service.MarkReadAsync(organization.Id, chat.Id, first.Id, received!.Message.Sequence);
         Assert.Equal(0, read!.TotalUnreadCount);
-        Assert.True(own!.Sequence < received.Sequence);
+        Assert.True(own!.Message.Sequence < received.Message.Sequence);
         Assert.Contains(await db.CommunicationEventOutbox.ToListAsync(), x => x.EventType == CommunicationEvents.ReadUpdated);
     }
 
@@ -133,7 +133,7 @@ public sealed class CommunicationHubServiceTests
         chat.Participants.Add(new() { Id = Guid.NewGuid(), OrganizationUserId = agent.Id, Role = ConversationParticipantRole.Member, JoinedAt = DateTimeOffset.UtcNow });
         db.AddRange(organization, owner, agent, chat);
         await db.SaveChangesAsync();
-        var service = new CommunicationHubService(db, new TestAuditEventWriter());
+        var service = CreateService(db);
 
         var update = await service.UpdateAsync(organization.Id, chat.Id, owner.Id,
             new UpdateCommunicationChatRequest("Changed", null, true, [owner.Id, agent.Id]));
@@ -142,6 +142,56 @@ public sealed class CommunicationHubServiceTests
         Assert.Equal("protected_chat_immutable", update.ErrorCode);
         Assert.Equal("protected_chat_delete_denied", archive.ErrorCode);
         Assert.Null(chat.ArchivedAt);
+    }
+
+    [Fact]
+    public async Task DirectHumanAgentMessage_QueuesDurableTurnAndReusesProtectedChat()
+    {
+        await using var db = CreateDb();
+        var organization = Organization();
+        var owner = User(organization.Id, "Owner", OrganizationPermissionLevel.Owner);
+        var agent = User(organization.Id, "Operator", OrganizationPermissionLevel.Contributor);
+        agent.EmployeeType = EmployeeType.Agent;
+        db.AddRange(organization, owner, agent);
+        await db.SaveChangesAsync();
+        var service = CreateService(db);
+
+        var first = await service.CreateAsync(organization.Id, owner.Id,
+            new CreateCommunicationChatRequest(null, null, true, true, [agent.Id]));
+        var second = await service.CreateAsync(organization.Id, owner.Id,
+            new CreateCommunicationChatRequest(null, null, true, true, [agent.Id]));
+        var sent = await service.SendAsync(organization.Id, first.Chat!.Id, owner.Id,
+            new SendCommunicationMessageRequest("Prepare the report.", "report-request"));
+
+        Assert.Equal(first.Chat.Id, second.Chat!.Id);
+        Assert.True((await db.CoreConversations.SingleAsync()).IsDeletionProtected);
+        Assert.NotNull(sent?.Turn);
+        Assert.Equal(owner.Id, sent!.Message.SenderOrganizationUserId);
+        Assert.Equal(sent.Turn!.Id, sent.Message.ChatTurnId);
+        Assert.Equal(ChatTurnStatus.Queued, (await db.ChatTurns.SingleAsync()).Status);
+        Assert.Single(await db.CoreConversationMessages.ToListAsync());
+    }
+
+    [Fact]
+    public async Task GroupMessage_WithAgentParticipant_DoesNotQueueTurn()
+    {
+        await using var db = CreateDb();
+        var organization = Organization();
+        var manager = User(organization.Id, "Manager", OrganizationPermissionLevel.Manager);
+        var agent = User(organization.Id, "Operator", OrganizationPermissionLevel.Contributor);
+        agent.EmployeeType = EmployeeType.Agent;
+        db.AddRange(organization, manager, agent);
+        await db.SaveChangesAsync();
+        var service = CreateService(db);
+        var chat = (await service.CreateAsync(organization.Id, manager.Id,
+            new CreateCommunicationChatRequest("operations", null, false, false, [agent.Id]))).Chat!;
+
+        var sent = await service.SendAsync(organization.Id, chat.Id, manager.Id,
+            new SendCommunicationMessageRequest("Status update."));
+
+        Assert.NotNull(sent);
+        Assert.Null(sent!.Turn);
+        Assert.Empty(await db.ChatTurns.ToListAsync());
     }
 
     private static Organization Organization() => new() { Id = Guid.NewGuid(), Name = "Example",
@@ -153,4 +203,6 @@ public sealed class CommunicationHubServiceTests
     };
     private static CSweetDbContext CreateDb() => new(new DbContextOptionsBuilder<CSweetDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+    private static CommunicationHubService CreateService(CSweetDbContext db) =>
+        new(db, new TestAuditEventWriter(), new CSweet.Infrastructure.Core.ChatTurnService(db));
 }

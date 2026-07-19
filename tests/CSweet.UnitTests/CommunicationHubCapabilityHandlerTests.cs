@@ -30,7 +30,10 @@ public sealed class CommunicationHubCapabilityHandlerTests
             CreatedAt = DateTimeOffset.UtcNow };
         db.AddRange(organization, chief, member);
         await db.SaveChangesAsync();
-        var service = new CommunicationHubService(db, new TestAuditEventWriter());
+        var service = new CommunicationHubService(
+            db,
+            new TestAuditEventWriter(),
+            new CSweet.Infrastructure.Core.ChatTurnService(db));
         var handler = new CommunicationHubCapabilityHandler(db, service);
         var payload = new CreateCommunicationChatRequest("product", null, false, false, [member.Id]);
 

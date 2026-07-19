@@ -6,6 +6,7 @@ public interface ILlmProviderApiClient
 {
     Task<IReadOnlyList<LlmProviderProfileResponse>> ListAsync(CancellationToken cancellationToken = default);
     Task<PreviewModelCatalogResponse> PreviewModelCatalogAsync(PreviewModelCatalogRequest request, CancellationToken cancellationToken = default);
+    Task<PreviewModelCatalogResponse> GetModelCatalogAsync(Guid providerProfileId, CancellationToken cancellationToken = default);
     Task<LlmProviderProfileResponse> CreateAsync(CreateLlmProviderProfileRequest request, CancellationToken cancellationToken = default);
     Task<LlmProviderProfileActionResponse> UpdateAsync(Guid providerProfileId, UpdateLlmProviderProfileRequest request, CancellationToken cancellationToken = default);
     Task<LlmProviderProfileActionResponse> DeleteAsync(Guid providerProfileId, CancellationToken cancellationToken = default);

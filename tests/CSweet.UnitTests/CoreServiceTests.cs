@@ -126,6 +126,19 @@ public class CoreServiceTests
         Assert.Equal("not_found", result.ErrorCode);
     }
 
+    [Fact]
+    public void LeadershipAssignmentDeletion_CascadesFromOrganizationUser()
+    {
+        using var dbContext = CreateDbContext();
+
+        var foreignKey = dbContext.Model
+            .FindEntityType(typeof(LeadershipAssignment))!
+            .GetForeignKeys()
+            .Single(x => x.PrincipalEntityType.ClrType == typeof(OrganizationUser));
+
+        Assert.Equal(DeleteBehavior.Cascade, foreignKey.DeleteBehavior);
+    }
+
     #endregion
 
     #region Organization User Tests

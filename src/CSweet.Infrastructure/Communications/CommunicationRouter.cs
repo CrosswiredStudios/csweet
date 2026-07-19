@@ -180,7 +180,8 @@ public sealed class CommunicationRouter(CSweetDbContext db, IChatTurnService tur
             Id = Guid.NewGuid(), OrganizationId = organizationId, Kind = kind,
             AgentOrganizationUserId = isDirect || channel?.OrganizationUserId != null ? targetAgentId : null,
             InitiatedByOrganizationUserId = humanId, TeamId = channel?.TeamId, ProjectId = channel?.ProjectId,
-            Title = channel?.DisplayName, CreatedAt = now, UpdatedAt = now
+            Title = channel?.DisplayName, IsPrivate = isDirect, IsDeletionProtected = isDirect,
+            CreatedAt = now, UpdatedAt = now
         };
         conversation.Participants.Add(new ConversationParticipant
         {

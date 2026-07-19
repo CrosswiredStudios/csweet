@@ -8,6 +8,7 @@ public sealed record ConversationMessageResponse(
     DateTimeOffset CreatedAt,
     Guid? ChatTurnId = null)
 {
+    public long Sequence { get; init; }
     public Guid? SenderOrganizationUserId { get; init; }
     public Guid? ReplyToMessageId { get; init; }
     public Guid CorrelationId { get; init; }

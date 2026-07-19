@@ -86,8 +86,21 @@ public sealed class PlatformLlmCapabilityHandler
             yield break;
         }
 
-        if (!string.IsNullOrWhiteSpace(input.Model) &&
-            !string.Equals(input.Model, profile.DefaultChatModel, StringComparison.Ordinal))
+        var selectedModel = string.IsNullOrWhiteSpace(input.Model)
+            ? profile.DefaultChatModel
+            : input.Model.Trim();
+        if (string.IsNullOrWhiteSpace(selectedModel))
+        {
+            yield return Failure(request.RequestId, "No model is configured for this LLM request.");
+            yield break;
+        }
+
+        if (!await IsModelApprovedAsync(
+                session,
+                input.ProviderProfileId,
+                selectedModel,
+                profile.DefaultChatModel,
+                requestToken))
         {
             yield return Failure(request.RequestId, "The selected model is not approved for this provider profile.");
             yield break;
@@ -104,6 +117,7 @@ public sealed class PlatformLlmCapabilityHandler
         {
             var chatClient = await _providerFactory.CreateChatClientAsync(
                 input.ProviderProfileId,
+                selectedModel,
                 requestToken);
             updates = chatClient.GetStreamingResponseAsync(
                 messages,
@@ -187,6 +201,52 @@ public sealed class PlatformLlmCapabilityHandler
         }
 
         yield return Success(request.RequestId, new BrokerLlmChunk(null), sequence, hasMore: false);
+    }
+
+    private async Task<bool> IsModelApprovedAsync(
+        AgentSession session,
+        Guid providerProfileId,
+        string selectedModel,
+        string defaultModel,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(defaultModel) &&
+            string.Equals(selectedModel, defaultModel, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!Guid.TryParse(session.InstallationId, out var installationId))
+        {
+            return false;
+        }
+
+        var settingsJson = await _dbContext.AgentInstallationConfigurations
+            .AsNoTracking()
+            .Where(x => x.AgentInstallationId == installationId)
+            .Select(x => x.SettingsJson)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(settingsJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(settingsJson);
+            var root = document.RootElement;
+            return root.TryGetProperty("llmProviderId", out var providerElement) &&
+                providerElement.ValueKind == JsonValueKind.String &&
+                Guid.TryParse(providerElement.GetString(), out var configuredProviderId) &&
+                configuredProviderId == providerProfileId &&
+                root.TryGetProperty("llmModel", out var modelElement) &&
+                modelElement.ValueKind == JsonValueKind.String &&
+                string.Equals(modelElement.GetString(), selectedModel, StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static ChatRole ParseRole(string role) => role.ToLowerInvariant() switch

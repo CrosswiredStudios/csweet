@@ -56,6 +56,34 @@ public sealed class AgentContainerRunnerTests
     }
 
     [Fact]
+    public async Task RemoveNetworkAsync_DetachesBrokerAndRemovesRuntimeNetwork()
+    {
+        var docker = new FakeDockerCommandExecutor(
+            new DockerCommandResult(0, "[]", string.Empty),
+            new DockerCommandResult(0, string.Empty, string.Empty),
+            new DockerCommandResult(0, "csweet-broker", string.Empty));
+        var runner = new DockerAgentContainerRunner(docker, NullLogger<DockerAgentContainerRunner>.Instance);
+
+        await runner.RemoveNetworkAsync("csweet-broker", "agenthost");
+
+        Assert.Equal(["network", "inspect", "csweet-broker"], docker.Commands[0]);
+        Assert.Equal(["network", "disconnect", "--force", "csweet-broker", "agenthost"], docker.Commands[1]);
+        Assert.Equal(["network", "rm", "csweet-broker"], docker.Commands[2]);
+    }
+
+    [Fact]
+    public async Task RemoveNetworkAsync_MissingNetworkIsAlreadyClean()
+    {
+        var docker = new FakeDockerCommandExecutor(
+            new DockerCommandResult(1, string.Empty, "Error: No such network: csweet-broker"));
+        var runner = new DockerAgentContainerRunner(docker, NullLogger<DockerAgentContainerRunner>.Instance);
+
+        await runner.RemoveNetworkAsync("csweet-broker", "agenthost");
+
+        Assert.Single(docker.Commands);
+    }
+
+    [Fact]
     public void RuntimeOptions_DefaultToContainerizedBrokerGateway()
     {
         var options = new AgentRuntimeManagerOptions();
@@ -141,6 +169,7 @@ public sealed class AgentContainerRunnerTests
         public Task StopAsync(string containerId, TimeSpan gracePeriod, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default) => Task.FromResult<AgentContainerStatus?>(null);
         public Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RemoveNetworkAsync(string networkName, string brokerGatewayContainer, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<string> GetLogsAsync(string containerId, int maximumBytes, CancellationToken cancellationToken = default) => Task.FromResult(string.Empty);
     }
 }

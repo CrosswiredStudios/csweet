@@ -34,6 +34,23 @@ public sealed class LlmProviderApiClient : ILlmProviderApiClient
             ?? throw new ApiClientException(response.StatusCode, "Model catalog preview response was empty.");
     }
 
+    public async Task<PreviewModelCatalogResponse> GetModelCatalogAsync(
+        Guid providerProfileId,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync(
+            $"api/llm-provider-profiles/{providerProfileId}/models",
+            cancellationToken);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return await response.Content.ReadFromJsonAsync<PreviewModelCatalogResponse>(cancellationToken)
+                ?? throw new ApiClientException(response.StatusCode, "Model catalog response was empty.");
+        }
+
+        throw new ApiClientException(response.StatusCode, "Models could not be loaded for this provider.");
+    }
+
     public async Task<LlmProviderProfileResponse> CreateAsync(
         CreateLlmProviderProfileRequest request,
         CancellationToken cancellationToken = default)

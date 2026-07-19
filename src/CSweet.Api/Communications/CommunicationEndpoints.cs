@@ -18,6 +18,7 @@ public static class CommunicationEndpoints
             return await memory.CanExploreAsync(organizationId, context.HttpContext.User.GetApplicationUserId(), context.HttpContext.RequestAborted)
                 ? await next(context) : Results.Forbid();
         });
+        group.MapCommunicationChatTurnEndpoints();
 
         group.MapGet("/discord", async (Guid organizationId, ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
             await service.GetDiscordAsync(organizationId, cancellationToken) is { } connection ? Results.Ok(connection) : Results.NotFound());
@@ -95,9 +96,20 @@ public static class CommunicationEndpoints
         {
             var actorId = await ResolveActorAsync(organizationId, http, service, cancellationToken);
             if (actorId is null) return Results.Forbid();
-            var message = await service.SendAsync(organizationId, chatId, actorId.Value, request, cancellationToken);
-            return message is null ? Results.BadRequest(new CommunicationHubActionResponse(false, "message_rejected",
-                "The message was empty or you are not an active member of this chat.")) : Results.Ok(message);
+            try
+            {
+                var result = await service.SendAsync(organizationId, chatId, actorId.Value, request, cancellationToken);
+                if (result is null)
+                    return Results.BadRequest(new CommunicationHubActionResponse(false, "message_rejected",
+                        "The message was empty or you are not an active member of this chat."));
+                return result.Turn is null
+                    ? Results.Ok(result)
+                    : Results.Accepted($"/api/organizations/{organizationId}/communications/hub/chats/{chatId}/turns/{result.Turn.Id}", result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.Conflict(new CommunicationHubActionResponse(false, "turn_active", exception.Message));
+            }
         });
 
         group.MapGet("/providers/{providerKey}", async (Guid organizationId, string providerKey,

@@ -85,7 +85,7 @@ The ambition is simple: make entrepreneurship feel less like juggling every job 
 - Guided first-run setup for the root administrator, model providers, optional email, and communications
 - Multi-business enterprise view and business onboarding
 - CEO command center with objectives, roles, tasks, workers, artifacts, approvals, and next actions
-- Personal Assistant chat with durable conversations, streaming, retry, cancellation, and execution traces
+- Unified Communications workspace with durable human and agent conversations, streaming, retry, cancellation, and execution traces
 - Agent import, validation, configuration, containerized runtime management, and memory
 - Human and agent employee directory with reporting relationships
 - Scheduled and on-demand executive briefings

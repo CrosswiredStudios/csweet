@@ -39,10 +39,14 @@ public static class BusinessNavigation
         if (segments.Length >= 3 &&
             string.Equals(segments[0], "organizations", StringComparison.OrdinalIgnoreCase))
         {
-            if (string.Equals(segments[2], "employees", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(segments[2], "chat", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(segments[2], "employees", StringComparison.OrdinalIgnoreCase))
             {
                 return $"/organizations/{businessId}/employees";
+            }
+
+            if (string.Equals(segments[2], "communications", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"/organizations/{businessId}/communications";
             }
 
             if (string.Equals(segments[2], "command-center", StringComparison.OrdinalIgnoreCase))
@@ -59,8 +63,7 @@ public static class BusinessNavigation
         var segments = PathSegments(path);
         return segments.Length >= 3 &&
                string.Equals(segments[0], "organizations", StringComparison.OrdinalIgnoreCase) &&
-               (string.Equals(segments[2], "employees", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(segments[2], "chat", StringComparison.OrdinalIgnoreCase));
+               string.Equals(segments[2], "employees", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string[] PathSegments(string? path) =>

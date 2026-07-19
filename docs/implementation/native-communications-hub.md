@@ -2,6 +2,16 @@
 
 `/organizations/{organizationId}/communications` is C-Sweet's authoritative communication workspace. External providers such as Discord are optional mirrors configured beneath `/communications/providers/{provider}`.
 
+The canonical deep link for a conversation is `/organizations/{organizationId}/communications/{chatId}`. Employee and briefing entry points resolve the appropriate conversation and navigate to that route; there is no separate employee-chat page.
+
+## Agent direct messages
+
+- A human-agent relationship has one private, deletion-protected direct conversation.
+- A human message in that direct conversation creates a durable chat turn. The turn worker starts the runtime, recalls memory, publishes execution trace events, persists the response, and captures memory.
+- The Communications UI streams trace/output events and supports cancellation, retry, reconnect, and page-reload recovery.
+- Human direct messages and group-channel messages are persisted normally. Merely adding an agent to an in-app channel does not invoke it.
+- Turn list, trace, stream, retry, and cancel operations are scoped beneath the Communications chat API and require active membership in that conversation.
+
 ## Platform capabilities
 
 Communication access is deny-by-default for agents. A plugin must declare a capability in its manifest and an administrator must grant it to the installed revision.
@@ -25,7 +35,7 @@ Modify, archive, and send payloads include `chatId`. Send also includes `content
 - The creator is a coordinator and can maintain that group later.
 - Archive is used instead of hard deletion so communication history and auditability are retained.
 - Hiring an agent employee creates one private, deletion-protected direct conversation between that logical agent instance and the hiring human. Separate installations of the same agent therefore keep separate histories and memory contexts.
-- Agent manifests may provide `onboarding.introduction` and `onboarding.startingQuestion`. C-Sweet uses a role-aware fallback when either value is absent and persists the resulting introduction as an agent-authored message.
+- Agent onboarding creates the protected conversation and a durable targeted lifecycle event; the agent decides whether to send an introduction through the communication capability.
 
 ## Unread state and live controls
 

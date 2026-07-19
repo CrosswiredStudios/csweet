@@ -6,6 +6,7 @@ public interface IAgentContainerRunner
     Task StopAsync(string containerId, TimeSpan gracePeriod, CancellationToken cancellationToken = default);
     Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default);
     Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default);
+    Task RemoveNetworkAsync(string networkName, string brokerGatewayContainer, CancellationToken cancellationToken = default);
     Task<string> GetLogsAsync(string containerId, int maximumBytes, CancellationToken cancellationToken = default);
 }
 

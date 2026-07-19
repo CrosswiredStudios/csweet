@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using CSweet.Contracts.Agents;
+using CSweet.Contracts.Communications;
 using CSweet.Contracts.Core;
 using CSweet.Contracts.Llm;
 using CSweet.UI.Components.Employees;
@@ -372,11 +373,31 @@ public partial class Employees
         }
     }
 
-    private void OpenChat(OrganizationUserResponse employee)
+    private async Task OpenChatAsync(OrganizationUserResponse employee)
     {
-        if (IsChattableAgent(employee))
+        if (!IsChattableAgent(employee)) return;
+        try
         {
-            Navigation.NavigateTo($"/organizations/{OrganizationId}/chat/{employee.Id}");
+            var response = await Http.PostAsJsonAsync(
+                $"api/organizations/{OrganizationId}/communications/hub/chats",
+                new CreateCommunicationChatRequest(null, null, true, true, [employee.Id]),
+                _disposeCts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                _actionError = await response.Content.ReadAsStringAsync(_disposeCts.Token);
+                return;
+            }
+            var chat = await response.Content.ReadFromJsonAsync<CommunicationChatResponse>(_disposeCts.Token);
+            if (chat is null)
+            {
+                _actionError = "The conversation could not be opened.";
+                return;
+            }
+            Navigation.NavigateTo($"/organizations/{OrganizationId}/communications/{chat.Id}");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _actionError = exception.Message;
         }
     }
 
@@ -428,7 +449,7 @@ public partial class Employees
         switch (request.Action)
         {
             case EmployeeAction.OpenChat:
-                OpenChat(employee);
+                await OpenChatAsync(employee);
                 break;
             case EmployeeAction.StartRuntime:
                 await StartRuntimeAsync(employee);

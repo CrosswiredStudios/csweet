@@ -278,6 +278,7 @@ public sealed class ChatTurnWorker(
                         turns,
                         turnId,
                         providerId.Value,
+                        GetConfiguredString(configuration, "llmModel"),
                         prompt,
                         memoryWasRecalled,
                         fallbackTimeout.Token));
@@ -375,12 +376,13 @@ public sealed class ChatTurnWorker(
         IChatTurnService turns,
         Guid turnId,
         Guid providerId,
+        string? model,
         string prompt,
         bool memoryUsed,
         CancellationToken cancellationToken)
     {
         var providerFactory = services.GetRequiredService<ILlmProviderFactory>();
-        using var chatClient = await providerFactory.CreateChatClientAsync(providerId, cancellationToken);
+        using var chatClient = await providerFactory.CreateChatClientAsync(providerId, model, cancellationToken);
         var messages = new List<ChatMessage>
         {
             new(ChatRole.System,

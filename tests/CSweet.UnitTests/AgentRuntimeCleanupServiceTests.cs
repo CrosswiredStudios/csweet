@@ -4,6 +4,7 @@ using CSweet.Infrastructure.Persistence;
 using CSweet.Infrastructure.Setup;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace CSweet.UnitTests;
 
@@ -49,7 +50,16 @@ public sealed class AgentRuntimeCleanupServiceTests
             await db.SaveChangesAsync();
             var runner = new CleanupRunner();
             var audit = new CapturingAuditWriter();
-            var service = new AgentRuntimeCleanupService(db, runner, audit, NullLogger<AgentRuntimeCleanupService>.Instance);
+            var service = new AgentRuntimeCleanupService(
+                db,
+                runner,
+                audit,
+                Options.Create(new AgentRuntimeManagerOptions
+                {
+                    DockerNetworkName = "cleanup-network",
+                    BrokerGatewayContainer = "cleanup-broker"
+                }),
+                NullLogger<AgentRuntimeCleanupService>.Instance);
 
             var result = await service.CleanupAsync();
 
@@ -57,6 +67,8 @@ public sealed class AgentRuntimeCleanupServiceTests
             Assert.Equal(1, result.WorkspacesRemoved);
             Assert.Equal(1, result.BuildLogsRemoved);
             Assert.Equal(1, result.RuntimeHistoriesRemoved);
+            Assert.Equal(2, runner.NetworkRemoves.Count);
+            Assert.All(runner.NetworkRemoves, removal => Assert.Equal("cleanup-broker", removal.BrokerGatewayContainer));
             Assert.False(Directory.Exists(workspace));
             Assert.False(File.Exists(logPath));
             Assert.Null(job.SourceWorkspacePath);
@@ -97,10 +109,12 @@ public sealed class AgentRuntimeCleanupServiceTests
 
     private sealed class CleanupRunner : IAgentContainerRunner
     {
+        public List<(string NetworkName, string BrokerGatewayContainer)> NetworkRemoves { get; } = [];
         public Task<AgentContainerStatus> StartAsync(AgentContainerStartRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task StopAsync(string containerId, TimeSpan gracePeriod, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default) => Task.FromResult<AgentContainerStatus?>(new(containerId, containerId, AgentContainerState.Exited, 0, null, DateTimeOffset.UtcNow, null));
         public Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RemoveNetworkAsync(string networkName, string brokerGatewayContainer, CancellationToken cancellationToken = default) { NetworkRemoves.Add((networkName, brokerGatewayContainer)); return Task.CompletedTask; }
         public Task<string> GetLogsAsync(string containerId, int maximumBytes, CancellationToken cancellationToken = default) => Task.FromResult(string.Empty);
     }
 

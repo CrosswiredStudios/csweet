@@ -49,10 +49,13 @@ var agentHost = builder.AddDockerfile(
     .WithReference(postgres)
     .WaitFor(postgres)
     .WaitForCompletion(migrator);
+var agentHostEndpoint = agentHost.GetEndpoint("http");
 
 var api = builder.AddProject<Projects.CSweet_Api>("api")
     .WithReference(postgres)
-    .WithReference(agentHost.GetEndpoint("http"))
+    .WithReference(agentHostEndpoint)
+    .WithEnvironment("CSweet__ApiGateway__BrokerEndpoint", agentHostEndpoint)
+    .WithEnvironment("CSweet__CommunicationPlugins__BrokerEndpoint", agentHostEndpoint)
     .WaitFor(postgres)
     .WaitFor(agentHost)
     .WaitForCompletion(migrator);
@@ -63,7 +66,8 @@ builder.AddProject<Projects.CSweet_App>("app", launchProfileName: "http")
 
 builder.AddProject<Projects.CSweet_WorkerHost>("workerhost")
     .WithReference(api)
-    .WithReference(agentHost.GetEndpoint("http"))
+    .WithReference(agentHostEndpoint)
+    .WithEnvironment("CSweet__CommunicationPlugins__BrokerEndpoint", agentHostEndpoint)
     .WithReference(postgres)
     .WaitFor(postgres)
     .WaitForCompletion(migrator)

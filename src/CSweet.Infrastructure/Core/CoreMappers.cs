@@ -90,21 +90,6 @@ internal static class CoreMappers
 
     #region Conversation
 
-    public static ConversationResponse ToResponse(this Conversation conversation)
-    {
-        return new ConversationResponse(
-            conversation.Id,
-            conversation.OrganizationId,
-            conversation.AgentOrganizationUserId,
-            conversation.InitiatedByOrganizationUserId,
-            conversation.Title,
-            conversation.CreatedAt,
-            conversation.UpdatedAt)
-        {
-            Kind = conversation.Kind.ToString()
-        };
-    }
-
     public static ConversationMessageResponse ToResponse(this ConversationMessage message)
     {
         return new ConversationMessageResponse(
@@ -115,6 +100,7 @@ internal static class CoreMappers
             message.CreatedAt,
             message.ChatTurnId)
         {
+            Sequence = message.Sequence,
             SenderOrganizationUserId = message.SenderOrganizationUserId,
             ReplyToMessageId = message.ReplyToMessageId,
             CorrelationId = message.CorrelationId,

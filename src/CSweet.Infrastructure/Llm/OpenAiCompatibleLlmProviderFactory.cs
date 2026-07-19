@@ -30,6 +30,12 @@ public sealed class OpenAiCompatibleLlmProviderFactory : ILlmProviderFactory
 
     public async Task<IChatClient> CreateChatClientAsync(
         Guid providerProfileId,
+        CancellationToken cancellationToken = default) =>
+        await CreateChatClientAsync(providerProfileId, model: null, cancellationToken);
+
+    public async Task<IChatClient> CreateChatClientAsync(
+        Guid providerProfileId,
+        string? model,
         CancellationToken cancellationToken = default)
     {
         var profile = await _dbContext.LlmProviderProfiles
@@ -66,6 +72,13 @@ public sealed class OpenAiCompatibleLlmProviderFactory : ILlmProviderFactory
         }
 
         var endpoint = NormalizeBaseEndpoint(configuredEndpoint, profile.ProviderType);
+        var selectedModel = string.IsNullOrWhiteSpace(model)
+            ? profile.DefaultChatModel
+            : model.Trim();
+        if (string.IsNullOrWhiteSpace(selectedModel))
+        {
+            throw new InvalidOperationException("No chat model was selected for this provider request.");
+        }
         var expectedModelsEndpoint = new Uri(endpoint, "models");
         var expectedChatCompletionsEndpoint = new Uri(endpoint, "chat/completions");
 
@@ -77,12 +90,12 @@ public sealed class OpenAiCompatibleLlmProviderFactory : ILlmProviderFactory
             endpoint,
             expectedModelsEndpoint,
             expectedChatCompletionsEndpoint,
-            profile.DefaultChatModel,
+            selectedModel,
             profile.SupportsStreaming);
 
         var apiKey = await ResolveApiKeyAsync(profile, cancellationToken);
         var options = new OpenAIClientOptions { Endpoint = endpoint };
-        var chatClient = new ChatClient(profile.DefaultChatModel, new ApiKeyCredential(apiKey), options);
+        var chatClient = new ChatClient(selectedModel, new ApiKeyCredential(apiKey), options);
 
         return chatClient.AsIChatClient();
     }
@@ -116,6 +129,17 @@ public sealed class OpenAiCompatibleLlmProviderFactory : ILlmProviderFactory
             builder.Path = "/v1/";
         }
 
+        if (IsRunningInContainer() && configuredEndpoint.IsLoopback)
+        {
+            builder.Host = "host.docker.internal";
+        }
+
         return builder.Uri;
     }
+
+    private static bool IsRunningInContainer() =>
+        string.Equals(
+            Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
 }

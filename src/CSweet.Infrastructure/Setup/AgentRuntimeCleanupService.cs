@@ -3,6 +3,7 @@ using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CSweet.Infrastructure.Setup;
 
@@ -10,6 +11,7 @@ public sealed class AgentRuntimeCleanupService(
     CSweetDbContext dbContext,
     IAgentContainerRunner containers,
     IAuditEventWriter auditWriter,
+    IOptions<AgentRuntimeManagerOptions> runtimeOptions,
     ILogger<AgentRuntimeCleanupService> logger) : IAgentRuntimeCleanupService
 {
     public async Task<AgentRuntimeCleanupResult> CleanupAsync(CancellationToken cancellationToken = default)
@@ -49,6 +51,10 @@ public sealed class AgentRuntimeCleanupService(
             {
                 var status = await containers.InspectAsync(instance.ContainerId!, cancellationToken);
                 if (status is not null) await containers.RemoveAsync(instance.ContainerId!, force: true, cancellationToken: cancellationToken);
+                await containers.RemoveNetworkAsync(
+                    $"{runtimeOptions.Value.DockerNetworkName}-{instance.Id:N}",
+                    runtimeOptions.Value.BrokerGatewayContainer,
+                    cancellationToken);
                 instance.ContainerId = null;
                 removed++;
             }

@@ -13,7 +13,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IBusinessContext, BusinessContext>();
         services.AddScoped<IBusinessOnboardingApiClient, BusinessOnboardingApiClient>();
         services.AddScoped<IPlanningApiClient, PlanningApiClient>();
-        services.AddScoped<IChatApiClient, ChatApiClient>();
+        services.AddScoped<IChatTurnApiClient, ChatTurnApiClient>();
         services.AddScoped<IAgentApiClient, AgentApiClient>();
         services.AddScoped<IPluginApiClient, PluginApiClient>();
         services.AddScoped<AuthSessionStore>();

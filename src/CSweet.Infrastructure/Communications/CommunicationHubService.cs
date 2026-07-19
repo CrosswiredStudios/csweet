@@ -1,13 +1,18 @@
 using CSweet.Application.Communications;
+using CSweet.Application.Core;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Communications;
+using CSweet.Domain.Communications;
 using CSweet.Domain.Core;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace CSweet.Infrastructure.Communications;
 
-public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWriter audit) : ICommunicationHubService
+public sealed class CommunicationHubService(
+    CSweetDbContext db,
+    IAuditEventWriter audit,
+    IChatTurnService turns) : ICommunicationHubService
 {
     public async Task<Guid?> ResolveOrganizationUserIdAsync(
         Guid organizationId,
@@ -69,6 +74,13 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
                 x.Id, x.DisplayName, x.EmployeeType.ToString(), x.RoleId, x.Role?.Name)).ToList(),
             audiences);
     }
+
+    public Task<bool> CanAccessChatAsync(
+        Guid organizationId,
+        Guid chatId,
+        Guid actorOrganizationUserId,
+        CancellationToken cancellationToken = default) =>
+        IsActiveMemberAsync(organizationId, chatId, actorOrganizationUserId, cancellationToken);
 
     public async Task<IReadOnlyList<CommunicationHubMessageResponse>?> ListMessagesAsync(
         Guid organizationId,
@@ -174,6 +186,7 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
             Kind = request.IsDirect ? ConversationKind.DirectHumanAgent : ConversationKind.Team,
             Title = request.IsDirect ? null : request.Title?.Trim(),
             Description = Clean(request.Description), IsPrivate = request.IsDirect || request.IsPrivate,
+            IsDeletionProtected = otherAgent is not null,
             CreatedAt = now, UpdatedAt = now
         };
         if (!request.IsDirect && string.IsNullOrWhiteSpace(chat.Title))
@@ -272,7 +285,7 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
         return Success("Chat archived. Its history was preserved.");
     }
 
-    public async Task<CommunicationHubMessageResponse?> SendAsync(
+    public async Task<CommunicationMessageSendResponse?> SendAsync(
         Guid organizationId,
         Guid chatId,
         Guid actorOrganizationUserId,
@@ -281,6 +294,7 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
     {
         var actor = await ActiveUserAsync(organizationId, actorOrganizationUserId, cancellationToken);
         var chat = await db.CoreConversations
+            .Include(x => x.Participants)
             .SingleOrDefaultAsync(x => x.Id == chatId && x.OrganizationId == organizationId && x.ArchivedAt == null &&
                 x.Participants.Any(p => p.OrganizationUserId == actorOrganizationUserId && p.LeftAt == null), cancellationToken);
         if (actor is null || chat is null || string.IsNullOrWhiteSpace(request.Content)) return null;
@@ -298,8 +312,43 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
                 .SingleOrDefaultAsync(x => x.ConversationId == chat.Id &&
                     x.SenderOrganizationUserId == actor.Id && x.IdempotencyKey == idempotencyKey, cancellationToken);
             if (existing is not null)
-                return new CommunicationHubMessageResponse(existing.Id, existing.Sequence, chat.Id, actor.Id, actor.DisplayName,
-                    actor.EmployeeType.ToString(), existing.Content, existing.CreatedAt);
+                return new CommunicationMessageSendResponse(
+                    MapMessage(existing, new Dictionary<Guid, OrganizationUser> { [actor.Id] = actor }),
+                    existing.ChatTurnId.HasValue
+                        ? await turns.GetAsync(organizationId, existing.ChatTurnId.Value, cancellationToken)
+                        : null);
+        }
+
+        var targetAgentId = actor.EmployeeType == EmployeeType.Human &&
+            chat.Kind == ConversationKind.DirectHumanAgent &&
+            chat.AgentOrganizationUserId.HasValue &&
+            chat.Participants.Any(x => x.OrganizationUserId == chat.AgentOrganizationUserId.Value && x.LeftAt == null)
+                ? chat.AgentOrganizationUserId
+                : null;
+        if (targetAgentId.HasValue)
+        {
+            var started = await turns.StartForAgentAsync(
+                organizationId,
+                chat.Id,
+                targetAgentId.Value,
+                request.Content,
+                actor.Id,
+                CommunicationProviderKeys.InApp,
+                idempotencyKey: idempotencyKey,
+                cancellationToken: cancellationToken);
+            if (started is null) return null;
+            return new CommunicationMessageSendResponse(
+                new CommunicationHubMessageResponse(
+                    started.UserMessage.Id,
+                    started.UserMessage.Sequence,
+                    chat.Id,
+                    actor.Id,
+                    actor.DisplayName,
+                    actor.EmployeeType.ToString(),
+                    started.UserMessage.Content,
+                    started.UserMessage.CreatedAt,
+                    started.Turn.Id),
+                started.Turn);
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -313,8 +362,9 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
         chat.UpdatedAt = now;
         db.CoreConversationMessages.Add(message);
         await db.SaveChangesAsync(cancellationToken);
-        return new CommunicationHubMessageResponse(message.Id, message.Sequence, chat.Id, actor.Id, actor.DisplayName,
-            actor.EmployeeType.ToString(), message.Content, message.CreatedAt);
+        return new CommunicationMessageSendResponse(
+            new CommunicationHubMessageResponse(message.Id, message.Sequence, chat.Id, actor.Id, actor.DisplayName,
+                actor.EmployeeType.ToString(), message.Content, message.CreatedAt, message.ChatTurnId));
     }
 
     private Task<OrganizationUser?> ActiveUserAsync(Guid organizationId, Guid userId, CancellationToken token) =>
@@ -379,7 +429,7 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
         return new CommunicationHubMessageResponse(message.Id, message.Sequence, message.ConversationId, message.SenderOrganizationUserId,
             sender?.DisplayName ?? (message.Role == ConversationRole.Assistant ? "Assistant" : "Unknown"),
             sender?.EmployeeType.ToString() ?? (message.Role == ConversationRole.Assistant ? "Agent" : "Human"),
-            message.Content, message.CreatedAt);
+            message.Content, message.CreatedAt, message.ChatTurnId);
     }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

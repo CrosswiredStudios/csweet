@@ -26,9 +26,12 @@ public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IA
             x.AgentOrganizationUserId == agent.Id && x.Kind == ConversationKind.DirectHumanAgent)
             ?? await db.CoreConversations
                 .Include(x => x.Participants)
-                .SingleOrDefaultAsync(x => x.OrganizationId == organizationId &&
+                .Where(x => x.OrganizationId == organizationId &&
                     x.InitiatedByOrganizationUserId == hiringUser.Id && x.AgentOrganizationUserId == agent.Id &&
-                    x.Kind == ConversationKind.DirectHumanAgent, cancellationToken);
+                    x.Kind == ConversationKind.DirectHumanAgent)
+                .OrderByDescending(x => x.IsDeletionProtected)
+                .ThenBy(x => x.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var conversation = existing ?? new Conversation

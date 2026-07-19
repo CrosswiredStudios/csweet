@@ -50,7 +50,12 @@ public sealed record CommunicationHubMessageResponse(
     string SenderDisplayName,
     string SenderEmployeeType,
     string Content,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    Guid? ChatTurnId = null);
+
+public sealed record CommunicationMessageSendResponse(
+    CommunicationHubMessageResponse Message,
+    CSweet.Contracts.Core.ChatTurnResponse? Turn = null);
 
 public sealed record CommunicationUnreadSummaryResponse(
     int TotalUnreadCount,

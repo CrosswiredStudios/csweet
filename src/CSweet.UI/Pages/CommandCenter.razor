@@ -90,7 +90,7 @@
                                 <MudTd DataLabel="Status">@context.Status</MudTd>
                                 <MudTd DataLabel="Created">@context.CreatedAt.ToLocalTime().ToString("g")</MudTd>
                                 <MudTd DataLabel="Delivery">@(context.DeliveryStatus ?? context.FailureMessage ?? "Waiting")</MudTd>
-                                <MudTd>@if (context.ConversationId.HasValue) { <MudButton Size="Size.Small" Href="@($"/organizations/{OrganizationId}/chat/{_briefingSettings.ChiefOrganizationUserId}")">Open</MudButton> }</MudTd>
+                                <MudTd>@if (context.ConversationId.HasValue) { <MudButton Size="Size.Small" Href="@($"/organizations/{OrganizationId}/communications/{context.ConversationId}")">Open</MudButton> }</MudTd>
                             </RowTemplate>
                         </MudTable>
                     }

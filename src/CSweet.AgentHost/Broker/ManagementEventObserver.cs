@@ -152,7 +152,8 @@ public sealed class ManagementEventObserver(CSweetDbContext db, IAuditEventWrite
             {
                 Id = Guid.NewGuid(), OrganizationId = organizationId, AgentOrganizationUserId = reporter.Id,
                 InitiatedByOrganizationUserId = recipient.Id, Kind = ConversationKind.DirectHumanAgent,
-                Title = "Chief of Staff briefings", CreatedAt = now, UpdatedAt = now
+                Title = "Chief of Staff briefings", IsPrivate = true, IsDeletionProtected = true,
+                CreatedAt = now, UpdatedAt = now
             };
             conversation.Participants.Add(new ConversationParticipant
             {
@@ -179,7 +180,7 @@ public sealed class ManagementEventObserver(CSweetDbContext db, IAuditEventWrite
             Severity = NormalizeSeverity(report.Severity) == "Urgent" ? NotificationSeverity.Urgent : NotificationSeverity.Important,
             Category = "ExecutiveBriefing", Title = report.Severity == "Urgent" ? "Chief of Staff: immediate attention" : "Chief of Staff briefing",
             Body = report.Summary.Length <= 1024 ? report.Summary : report.Summary[..1024],
-            ActionUri = $"/organizations/{organizationId:D}/chat/{reporter.Id:D}",
+            ActionUri = $"/organizations/{organizationId:D}/communications/{conversation.Id:D}",
             DeduplicationKey = $"executive-briefing:{request.Id:D}", CreatedAt = now
         };
         db.CoreConversationMessages.Add(message);

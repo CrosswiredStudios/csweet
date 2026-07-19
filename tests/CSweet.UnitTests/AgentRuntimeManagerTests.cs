@@ -411,6 +411,29 @@ public sealed class AgentRuntimeManagerTests
     }
 
     [Fact]
+    public async Task FailedContainerStart_RemovesPerRuntimeNetwork()
+    {
+        await using var db = CreateDb();
+        await SeedAsync(db);
+        var containers = new FakeRunner
+        {
+            StartException = new AgentContainerException("Docker could not start the container."),
+            InspectStatus = null
+        };
+        var manager = CreateManager(db, containers);
+
+        await manager.ProcessDueSchedulesAsync();
+        await manager.ReconcileAsync();
+
+        var runtime = await db.AgentRuntimeInstances.SingleAsync();
+        Assert.Equal(AgentRuntimeStatus.StartFailed, runtime.Status);
+        Assert.Null(runtime.ContainerId);
+        Assert.Equal(
+            ($"broker-only-{runtime.Id:N}", "agenthost"),
+            Assert.Single(containers.NetworkRemoves));
+    }
+
+    [Fact]
     public async Task CompletionSignal_StopsContainerAndCompletesRuntime()
     {
         await using var db = CreateDb();
@@ -429,6 +452,9 @@ public sealed class AgentRuntimeManagerTests
         Assert.Equal(AgentRuntimeStatus.Completed, (await db.AgentRuntimeInstances.SingleAsync()).Status);
         Assert.Single(containers.Stops);
         Assert.Single(containers.Removes);
+        Assert.Equal(
+            ($"broker-only-{request.RuntimeInstanceId:N}", "agenthost"),
+            Assert.Single(containers.NetworkRemoves));
     }
 
     [Fact]
@@ -476,6 +502,9 @@ public sealed class AgentRuntimeManagerTests
         Assert.Equal(AgentRuntimeStatus.Failed, runtime.Status);
         Assert.Null(runtime.ContainerId);
         Assert.Contains("fresh attempt", runtime.Reason);
+        Assert.Equal(
+            ($"broker-only-{runtime.Id:N}", "agenthost"),
+            Assert.Single(containers.NetworkRemoves));
         Assert.True(await manager.EnsureRuntimeQueuedAsync(installation.Id, "Retry chat.", interactive: true));
     }
 
@@ -504,12 +533,16 @@ public sealed class AgentRuntimeManagerTests
         });
         db.AgentRuntimeInstances.Add(runtime);
         await db.SaveChangesAsync();
-        var manager = CreateManager(db, new FakeRunner { InspectStatus = null });
+        var containers = new FakeRunner { InspectStatus = null };
+        var manager = CreateManager(db, containers);
 
         await manager.ReconcileAsync();
 
         Assert.Equal(AgentRuntimeStatus.StartFailed, runtime.Status);
         Assert.Contains("interrupted", runtime.Reason);
+        Assert.Equal(
+            ($"broker-only-{runtime.Id:N}", "agenthost"),
+            Assert.Single(containers.NetworkRemoves));
         Assert.True(await manager.EnsureRuntimeQueuedAsync(installation.Id, "Retry chat.", interactive: true));
     }
 
@@ -605,14 +638,23 @@ public sealed class AgentRuntimeManagerTests
     private sealed class FakeRunner : IAgentContainerRunner
     {
         public AgentContainerStatus? InspectStatus { get; init; } = new("container-id", "agent", AgentContainerState.Running, null, null, null, null);
+        public Exception? StartException { get; init; }
         public string Logs { get; init; } = string.Empty;
         public List<AgentContainerStartRequest> Starts { get; } = [];
         public List<string> Stops { get; } = [];
         public List<string> Removes { get; } = [];
-        public Task<AgentContainerStatus> StartAsync(AgentContainerStartRequest request, CancellationToken cancellationToken = default) { Starts.Add(request); return Task.FromResult(new AgentContainerStatus("container-id", request.ContainerName, AgentContainerState.Running, null, DateTimeOffset.UtcNow, null, null)); }
+        public List<(string NetworkName, string BrokerGatewayContainer)> NetworkRemoves { get; } = [];
+        public Task<AgentContainerStatus> StartAsync(AgentContainerStartRequest request, CancellationToken cancellationToken = default)
+        {
+            Starts.Add(request);
+            return StartException is null
+                ? Task.FromResult(new AgentContainerStatus("container-id", request.ContainerName, AgentContainerState.Running, null, DateTimeOffset.UtcNow, null, null))
+                : Task.FromException<AgentContainerStatus>(StartException);
+        }
         public Task StopAsync(string containerId, TimeSpan gracePeriod, CancellationToken cancellationToken = default) { Stops.Add(containerId); return Task.CompletedTask; }
         public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default) => Task.FromResult(InspectStatus);
         public Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default) { Removes.Add(containerId); return Task.CompletedTask; }
+        public Task RemoveNetworkAsync(string networkName, string brokerGatewayContainer, CancellationToken cancellationToken = default) { NetworkRemoves.Add((networkName, brokerGatewayContainer)); return Task.CompletedTask; }
         public Task<string> GetLogsAsync(string containerId, int maximumBytes, CancellationToken cancellationToken = default) => Task.FromResult(Logs);
     }
 }

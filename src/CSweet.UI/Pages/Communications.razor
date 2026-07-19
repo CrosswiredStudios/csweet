@@ -1,10 +1,14 @@
 @page "/organizations/{OrganizationId:guid}/communications"
+@page "/organizations/{OrganizationId:guid}/communications/{ChatId:guid}"
 @using CSweet.Contracts.Communications
+@using CSweet.Contracts.Core
 @implements IAsyncDisposable
 @inject HttpClient Http
+@inject IChatTurnApiClient ChatTurns
 @inject AppRealtimeState Realtime
 @inject CommunicationUnreadState Unread
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
 
 <PageTitle>Communications - C-Sweet</PageTitle>
 
@@ -114,9 +118,33 @@
                     {
                         <article class="hub-message @(message.SenderOrganizationUserId == _hub.CurrentOrganizationUserId ? "mine" : null)">
                             <div class="hub-avatar @AvatarClass(message.SenderEmployeeType)">@Initials(message.SenderDisplayName)</div>
-                            <div>
+                            <div class="hub-message-body">
                                 <div class="hub-message-meta"><strong>@message.SenderDisplayName</strong>@if (message.SenderEmployeeType == "Agent") { <span>AGENT</span> }<time>@message.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</time></div>
-                                <p>@message.Content</p>
+                                <ChatMarkdown Content="@message.Content" />
+                                @if (message.ChatTurnId is Guid messageTurnId &&
+                                    _turns.TryGetValue(messageTurnId, out var messageTurn) &&
+                                    messageTurn.Turn.AssistantMessageId == message.Id)
+                                {
+                                    @TracePanel(messageTurn)
+                                }
+                            </div>
+                        </article>
+                    }
+                    @foreach (var pending in ActiveTurns)
+                    {
+                        <article class="hub-message hub-message-pending">
+                            <div class="hub-avatar agent">AI</div>
+                            <div class="hub-message-body">
+                                <div class="hub-message-meta"><strong>@_selected.Title</strong><span>AGENT</span></div>
+                                @if (string.IsNullOrWhiteSpace(pending.StreamingText))
+                                {
+                                    <div class="hub-turn-running"><MudProgressLinear Indeterminate="true" Color="Color.Primary" /><span>The agent turn is running.</span></div>
+                                }
+                                else
+                                {
+                                    <ChatMarkdown Content="@pending.StreamingText" />
+                                }
+                                @TracePanel(pending)
                             </div>
                         </article>
                     }
@@ -124,9 +152,9 @@
 
                 <footer class="hub-composer">
                     <MudTextField @bind-Value="_draft" Placeholder="@ComposerPlaceholder"
-                                  Variant="Variant.Outlined" Lines="2" Immediate="true" OnKeyDown="OnComposerKeyDown" Disabled="_sending" />
+                                  Variant="Variant.Outlined" Lines="2" Immediate="true" OnKeyDown="OnComposerKeyDown" Disabled="@(_sending || ComposerBlocked)" />
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendAsync"
-                               Disabled="@(_sending || string.IsNullOrWhiteSpace(_draft))" EndIcon="@Icons.Material.Filled.Send">Send</MudButton>
+                               Disabled="@(_sending || ComposerBlocked || string.IsNullOrWhiteSpace(_draft))" EndIcon="@Icons.Material.Filled.Send">Send</MudButton>
                 </footer>
             }
         </main>
@@ -195,18 +223,23 @@
 
 @code {
     [Parameter] public Guid OrganizationId { get; set; }
+    [Parameter] public Guid? ChatId { get; set; }
     private readonly CancellationTokenSource _disposeCts = new();
+    private CancellationTokenSource? _chatCts;
     private IJSObjectReference? _visibilityModule;
     private CommunicationHubResponse? _hub;
     private CommunicationChatResponse? _selected;
     private CommunicationChatResponse? _editing;
     private readonly List<CommunicationHubMessageResponse> _messages = [];
+    private readonly Dictionary<Guid, TurnView> _turns = [];
+    private readonly HashSet<Guid> _observingTurns = [];
     private readonly HashSet<Guid> _selectedMembers = [];
     private readonly HashSet<string> _selectedAudiences = [];
     private bool _loading = true, _sending, _showMembers, _showEditor, _editorBusy, _editorPrivate, _confirmArchive;
     private string _search = string.Empty, _draft = string.Empty, _editorTitle = string.Empty, _editorDescription = string.Empty;
     private string? _error, _notice, _editorError;
     private bool _realtimeRefreshing;
+    private Guid? _observedChatId;
     private string BasePath => $"api/organizations/{OrganizationId}/communications/hub";
     private IEnumerable<CommunicationChatResponse> FilteredChats => (_hub?.Chats ?? []).Where(x => string.IsNullOrWhiteSpace(_search) || x.Title.Contains(_search, StringComparison.OrdinalIgnoreCase));
     private IEnumerable<CommunicationPersonResponse> VisiblePeople => _selected is null || !_showMembers
@@ -214,6 +247,11 @@
         : _hub!.People.Where(x => _selected.Participants.Any(p => p.OrganizationUserId == x.Id));
     private string ComposerPlaceholder => _selected is null ? "Message" :
         $"Message {(_selected.IsDirect ? _selected.Title : $"#{_selected.Title}")}";
+    private bool HasActiveTurn => _turns.Values.Any(x => !IsTerminal(x.Turn.Status));
+    private bool ComposerBlocked => _selected?.IsDirect == true && HasActiveTurn;
+    private IEnumerable<TurnView> ActiveTurns => _turns.Values
+        .Where(x => !IsTerminal(x.Turn.Status) && x.Turn.AssistantMessageId is null)
+        .OrderBy(x => x.Turn.CreatedAt);
 
     protected override void OnInitialized() => Realtime.EventReceived += OnRealtimeEvent;
 
@@ -225,39 +263,70 @@
         try
         {
             _hub = await Http.GetFromJsonAsync<CommunicationHubResponse>(BasePath, _disposeCts.Token);
-            _selected = _hub?.Chats.FirstOrDefault(x => x.Id == _selected?.Id) ?? _hub?.Chats.FirstOrDefault();
+            _selected = ChatId.HasValue
+                ? _hub?.Chats.FirstOrDefault(x => x.Id == ChatId.Value)
+                : _hub?.Chats.FirstOrDefault(x => x.Id == _selected?.Id) ?? _hub?.Chats.FirstOrDefault();
+            if (ChatId.HasValue && _selected is null)
+                throw new InvalidOperationException("This conversation was not found or is not available to you.");
             if (_selected is not null) await LoadMessagesAsync();
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { _error = ex.Message; }
         finally { _loading = false; }
     }
 
-    private async Task SelectChatAsync(CommunicationChatResponse chat) { _selected = chat; _showMembers = false; _notice = null; await LoadMessagesAsync(); }
+    private Task SelectChatAsync(CommunicationChatResponse chat)
+    {
+        _showMembers = false;
+        _notice = null;
+        Navigation.NavigateTo(ChatHref(chat.Id));
+        return Task.CompletedTask;
+    }
     private async Task LoadMessagesAsync(bool markRead = true)
     {
         if (_selected is null) return;
-        var items = await Http.GetFromJsonAsync<List<CommunicationHubMessageResponse>>($"{BasePath}/chats/{_selected.Id}/messages", _disposeCts.Token) ?? [];
+        if (_observedChatId != _selected.Id)
+        {
+            _chatCts?.Cancel();
+            _chatCts?.Dispose();
+            _chatCts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+            _observedChatId = _selected.Id;
+            _observingTurns.Clear();
+            _turns.Clear();
+        }
+        var token = _chatCts?.Token ?? _disposeCts.Token;
+        var items = await Http.GetFromJsonAsync<List<CommunicationHubMessageResponse>>($"{BasePath}/chats/{_selected.Id}/messages", token) ?? [];
         _messages.Clear(); _messages.AddRange(items);
+        await LoadTurnsAsync(_selected.Id, token);
         if (markRead && items.LastOrDefault() is { } last)
         {
             var response = await Http.PostAsJsonAsync($"{BasePath}/chats/{_selected.Id}/read",
-                new MarkCommunicationChatReadRequest(last.Sequence), _disposeCts.Token);
-            if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<CommunicationUnreadSummaryResponse>(_disposeCts.Token) is { } summary)
+                new MarkCommunicationChatReadRequest(last.Sequence), token);
+            if (response.IsSuccessStatusCode && await response.Content.ReadFromJsonAsync<CommunicationUnreadSummaryResponse>(token) is { } summary)
                 Unread.Apply(summary);
         }
     }
 
     private async Task SendAsync()
     {
-        if (_selected is null || string.IsNullOrWhiteSpace(_draft)) return;
+        if (_selected is null || ComposerBlocked || string.IsNullOrWhiteSpace(_draft)) return;
         _sending = true; _notice = null;
         var content = _draft.Trim(); _draft = string.Empty;
         try
         {
-            var response = await Http.PostAsJsonAsync($"{BasePath}/chats/{_selected.Id}/messages", new SendCommunicationMessageRequest(content), _disposeCts.Token);
+            var response = await Http.PostAsJsonAsync($"{BasePath}/chats/{_selected.Id}/messages",
+                new SendCommunicationMessageRequest(content, Guid.NewGuid().ToString("N")), _disposeCts.Token);
             if (!response.IsSuccessStatusCode) throw new InvalidOperationException(await response.Content.ReadAsStringAsync(_disposeCts.Token));
-            var message = await response.Content.ReadFromJsonAsync<CommunicationHubMessageResponse>(_disposeCts.Token);
-            if (message is not null) _messages.Add(message);
+            var sent = await response.Content.ReadFromJsonAsync<CommunicationMessageSendResponse>(_disposeCts.Token);
+            if (sent is not null)
+            {
+                _messages.Add(sent.Message);
+                if (sent.Turn is not null)
+                {
+                    var view = new TurnView(sent.Turn) { Expanded = true };
+                    _turns[sent.Turn.Id] = view;
+                    _ = ObserveTurnAsync(_selected.Id, view, _chatCts?.Token ?? _disposeCts.Token);
+                }
+            }
         }
         catch (Exception ex) { _draft = content; _notice = ex.Message; }
         finally { _sending = false; }
@@ -269,13 +338,13 @@
     {
         if (_hub is null || person.Id == _hub.CurrentOrganizationUserId) return;
         var existing = _hub.Chats.FirstOrDefault(x => x.IsDirect && x.Participants.Any(p => p.OrganizationUserId == person.Id));
-        if (existing is not null) { await SelectChatAsync(existing); return; }
+        if (existing is not null) { Navigation.NavigateTo(ChatHref(existing.Id)); return; }
         var request = new CreateCommunicationChatRequest(null, null, true, true, [person.Id]);
         var response = await Http.PostAsJsonAsync($"{BasePath}/chats", request, _disposeCts.Token);
         if (!response.IsSuccessStatusCode) { _notice = await response.Content.ReadAsStringAsync(_disposeCts.Token); return; }
         var chat = await response.Content.ReadFromJsonAsync<CommunicationChatResponse>(_disposeCts.Token);
         if (chat is null) return;
-        await RefreshHubAsync(chat.Id);
+        Navigation.NavigateTo(ChatHref(chat.Id));
     }
 
     private void OpenCreateGroup()
@@ -307,6 +376,7 @@
         _editorBusy = true; _editorError = null;
         try
         {
+            var creating = _editing is null;
             var roles = SelectedAudienceIds("Role"); var workstreams = SelectedAudienceIds("Workstream");
             HttpResponseMessage response;
             if (_editing is null)
@@ -315,7 +385,9 @@
                 response = await Http.PutAsJsonAsync($"{BasePath}/chats/{_editing.Id}", new UpdateCommunicationChatRequest(_editorTitle, _editorDescription, _editorPrivate, _selectedMembers.ToList(), roles, workstreams), _disposeCts.Token);
             if (!response.IsSuccessStatusCode) { _editorError = await response.Content.ReadAsStringAsync(_disposeCts.Token); return; }
             var chat = await response.Content.ReadFromJsonAsync<CommunicationChatResponse>(_disposeCts.Token);
-            _showEditor = false; await RefreshHubAsync(chat?.Id ?? _editing?.Id);
+            _showEditor = false;
+            if (creating && chat is not null) Navigation.NavigateTo(ChatHref(chat.Id));
+            else await RefreshHubAsync(chat?.Id ?? _editing?.Id);
         }
         finally { _editorBusy = false; }
     }
@@ -329,7 +401,9 @@
         {
             var response = await Http.DeleteAsync($"{BasePath}/chats/{_editing.Id}", _disposeCts.Token);
             if (!response.IsSuccessStatusCode) { _editorError = await response.Content.ReadAsStringAsync(_disposeCts.Token); return; }
-            _showEditor = false; _selected = null; await RefreshHubAsync();
+            _showEditor = false;
+            _selected = null;
+            Navigation.NavigateTo($"/organizations/{OrganizationId}/communications");
         }
         finally { _editorBusy = false; }
     }
@@ -338,9 +412,165 @@
     private async Task RefreshHubAsync(Guid? selectId = null, bool markRead = true)
     {
         _hub = await Http.GetFromJsonAsync<CommunicationHubResponse>(BasePath, _disposeCts.Token);
-        _selected = _hub?.Chats.FirstOrDefault(x => x.Id == selectId) ?? _hub?.Chats.FirstOrDefault();
+        var targetId = selectId ?? ChatId ?? _selected?.Id;
+        _selected = _hub?.Chats.FirstOrDefault(x => x.Id == targetId) ?? _hub?.Chats.FirstOrDefault();
         if (_selected is not null) await LoadMessagesAsync(markRead); else _messages.Clear();
     }
+
+    private async Task LoadTurnsAsync(Guid chatId, CancellationToken cancellationToken)
+    {
+        var snapshots = await ChatTurns.ListTurnsAsync(OrganizationId, chatId, cancellationToken);
+        var ids = snapshots.Select(x => x.Id).ToHashSet();
+        foreach (var removed in _turns.Keys.Where(x => !ids.Contains(x)).ToList()) _turns.Remove(removed);
+        foreach (var snapshot in snapshots)
+        {
+            if (!_turns.TryGetValue(snapshot.Id, out var view))
+            {
+                view = new TurnView(snapshot)
+                {
+                    Expanded = !IsTerminal(snapshot.Status),
+                    StreamingText = snapshot.PartialResponse
+                };
+                _turns[snapshot.Id] = view;
+            }
+            else
+            {
+                view.Turn = snapshot;
+                if (string.IsNullOrEmpty(view.StreamingText)) view.StreamingText = snapshot.PartialResponse;
+            }
+            if (!IsTerminal(snapshot.Status)) _ = ObserveTurnAsync(chatId, view, cancellationToken);
+        }
+    }
+
+    private async Task ObserveTurnAsync(Guid chatId, TurnView view, CancellationToken cancellationToken)
+    {
+        if (!_observingTurns.Add(view.Turn.Id)) return;
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested && _selected?.Id == chatId)
+            {
+                var cursor = view.Events.Count == 0 ? -1 : view.Events.Max(x => x.Sequence);
+                try
+                {
+                    await foreach (var traceEvent in ChatTurns.StreamTurnEventsAsync(
+                        OrganizationId, chatId, view.Turn.Id, cursor, cancellationToken))
+                    {
+                        if (view.Events.All(x => x.Sequence != traceEvent.Sequence)) view.Events.Add(traceEvent);
+                        if (traceEvent.EventType == "turn.restarted") view.StreamingText = string.Empty;
+                        if (traceEvent.EventType == "output.delta" && !string.IsNullOrEmpty(traceEvent.Summary))
+                            view.StreamingText += traceEvent.Summary;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+                catch
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                }
+
+                var latest = await ChatTurns.GetTurnAsync(OrganizationId, chatId, view.Turn.Id, cancellationToken);
+                if (latest is null) return;
+                view.Turn = latest;
+                if (!IsTerminal(latest.Status)) continue;
+                view.Expanded = false;
+                var visible = await IsDocumentVisibleAsync();
+                await RefreshHubAsync(chatId, visible);
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+        }
+        finally
+        {
+            _observingTurns.Remove(view.Turn.Id);
+        }
+    }
+
+    private async Task ToggleTraceAsync(TurnView view)
+    {
+        view.Expanded = !view.Expanded;
+        if (!view.Expanded || _selected is null) return;
+        var latest = await ChatTurns.GetTurnTraceAsync(OrganizationId, _selected.Id, view.Turn.Id, _disposeCts.Token);
+        view.Events.Clear();
+        view.Events.AddRange(latest);
+        view.Turn = await ChatTurns.GetTurnAsync(OrganizationId, _selected.Id, view.Turn.Id, _disposeCts.Token) ?? view.Turn;
+    }
+
+    private async Task RetryTurnAsync(TurnView failed)
+    {
+        if (_selected is null || HasActiveTurnFor(failed)) return;
+        _notice = null;
+        try
+        {
+            var started = await ChatTurns.RetryTurnAsync(OrganizationId, _selected.Id, failed.Turn.Id, _disposeCts.Token);
+            var view = new TurnView(started.Turn) { Expanded = true };
+            _turns[started.Turn.Id] = view;
+            await RefreshHubAsync(_selected.Id, markRead: false);
+            _ = ObserveTurnAsync(_selected.Id, view, _chatCts?.Token ?? _disposeCts.Token);
+        }
+        catch (Exception ex) { _notice = ex.Message; }
+    }
+
+    private async Task CancelTurnAsync(TurnView view)
+    {
+        if (_selected is null) return;
+        try
+        {
+            view.Turn = await ChatTurns.CancelTurnAsync(OrganizationId, _selected.Id, view.Turn.Id, _disposeCts.Token);
+            view.Expanded = false;
+        }
+        catch (Exception ex) { _notice = ex.Message; }
+    }
+
+    private RenderFragment TracePanel(TurnView view) => @<div class="chat-trace @TraceClass(view.Turn.Status)">
+        <button type="button" class="chat-trace-summary" aria-expanded="@view.Expanded" @onclick="@(() => ToggleTraceAsync(view))">
+            <MudIcon Icon="@TraceIcon(view.Turn.Status)" Size="Size.Small" />
+            <span>@TraceSummary(view)</span>
+            <MudIcon Icon="@(view.Expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
+        </button>
+        @if (view.Expanded)
+        {
+            <div class="chat-trace-events" role="list" aria-label="Execution trace" tabindex="0">
+                @foreach (var traceEvent in view.Events.OrderBy(x => x.Sequence))
+                {
+                    <div class="chat-trace-event" role="listitem">
+                        <div><strong>@traceEvent.Title</strong><small>@traceEvent.OccurredAt.ToLocalTime().ToString("T") @if (traceEvent.DurationMs.HasValue) { <span>· @traceEvent.DurationMs ms</span> }</small></div>
+                        @if (!string.IsNullOrWhiteSpace(traceEvent.Summary)) { <pre>@traceEvent.Summary</pre> }
+                        @if (traceEvent.Details.HasValue) { <details><summary>Structured details</summary><pre>@traceEvent.Details.Value.ToString()</pre></details> }
+                    </div>
+                }
+                @if (!IsTerminal(view.Turn.Status))
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => CancelTurnAsync(view))">Cancel</MudButton>
+                }
+                else if (view.Turn.Status is "Failed" or "CompletedWithWarnings" or "Cancelled")
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@HasActiveTurnFor(view)" OnClick="@(() => RetryTurnAsync(view))">Retry</MudButton>
+                }
+            </div>
+        }
+    </div>;
+
+    private static bool IsTerminal(string status) => status is "Completed" or "CompletedWithWarnings" or "Failed" or "Cancelled";
+    private bool HasActiveTurnFor(TurnView view) => _turns.Values.Any(x =>
+        x.Turn.Id != view.Turn.Id &&
+        x.Turn.TargetAgentOrganizationUserId == view.Turn.TargetAgentOrganizationUserId &&
+        !IsTerminal(x.Turn.Status));
+    private static string TraceClass(string status) => status switch { "Failed" => "chat-trace-failed", "CompletedWithWarnings" => "chat-trace-warning", _ => string.Empty };
+    private static string TraceIcon(string status) => status switch
+    {
+        "Completed" => Icons.Material.Filled.CheckCircle,
+        "Failed" => Icons.Material.Filled.Error,
+        "CompletedWithWarnings" => Icons.Material.Filled.Warning,
+        "Cancelled" => Icons.Material.Filled.Cancel,
+        _ => Icons.Material.Filled.Psychology
+    };
+    private static string TraceSummary(TurnView view)
+    {
+        var duration = (view.Turn.CompletedAt ?? DateTimeOffset.UtcNow) - view.Turn.CreatedAt;
+        return $"{view.Turn.Status} · {Math.Max(0, (int)duration.TotalSeconds)}s";
+    }
+
+    private string ChatHref(Guid chatId) => $"/organizations/{OrganizationId}/communications/{chatId}";
 
     private void OnRealtimeEvent(CSweet.Contracts.Realtime.AppRealtimeEventEnvelope envelope)
     {
@@ -376,9 +606,19 @@
     private static string ParticipantSummary(CommunicationChatResponse chat) => string.Join(", ", chat.Participants.Take(4).Select(x => x.DisplayName)) + (chat.Participants.Count > 4 ? $" +{chat.Participants.Count - 4}" : string.Empty);
     private static string AvatarClass(string type) => type == "Agent" ? "agent" : "human";
     private static string Initials(string name) => string.Join(string.Empty, name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(x => char.ToUpperInvariant(x[0])));
+    private sealed class TurnView(ChatTurnResponse turn)
+    {
+        public ChatTurnResponse Turn { get; set; } = turn;
+        public List<ChatTurnTraceEventResponse> Events { get; } = [];
+        public string StreamingText { get; set; } = string.Empty;
+        public bool Expanded { get; set; }
+    }
+
     public async ValueTask DisposeAsync()
     {
         Realtime.EventReceived -= OnRealtimeEvent;
+        _chatCts?.Cancel();
+        _chatCts?.Dispose();
         _disposeCts.Cancel();
         _disposeCts.Dispose();
         if (_visibilityModule is not null) await _visibilityModule.DisposeAsync();

@@ -7,6 +7,7 @@ public interface IChatTurnService
     Task<ChatTurnStartResponse?> StartAsync(Guid organizationId, Guid conversationId, string message, Guid? retryOfTurnId = null, CancellationToken cancellationToken = default);
     Task<ChatTurnStartResponse?> StartForAgentAsync(Guid organizationId, Guid conversationId, Guid targetAgentOrganizationUserId, string message, Guid? senderOrganizationUserId = null, string sourceProvider = "InApp", string? sourceChannelExternalId = null, string? idempotencyKey = null, CancellationToken cancellationToken = default);
     Task<ChatTurnResponse?> GetAsync(Guid organizationId, Guid turnId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ChatTurnResponse>> ListForConversationAsync(Guid organizationId, Guid conversationId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ChatTurnTraceEventResponse>> ListEventsAsync(Guid organizationId, Guid turnId, long afterSequence = -1, CancellationToken cancellationToken = default);
     Task<bool> CancelAsync(Guid organizationId, Guid turnId, CancellationToken cancellationToken = default);
     Task<ChatTurnStartResponse?> RetryAsync(Guid organizationId, Guid turnId, CancellationToken cancellationToken = default);

@@ -115,6 +115,44 @@ public sealed class DockerAgentContainerRunner(
         return ExecuteRequiredAsync(args, "remove", cancellationToken);
     }
 
+    public async Task RemoveNetworkAsync(
+        string networkName,
+        string brokerGatewayContainer,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateNetworkName(networkName);
+        ValidateContainerId(brokerGatewayContainer);
+
+        var inspect = await docker.ExecuteAsync(["network", "inspect", networkName], cancellationToken);
+        if (inspect.ExitCode != 0)
+        {
+            if (IsMissingNetworkError(inspect.StandardError)) return;
+            throw new AgentContainerException(
+                $"Docker failed to inspect agent runtime network '{networkName}' during cleanup: {SanitizeError(inspect.StandardError)}");
+        }
+
+        var disconnect = await docker.ExecuteAsync(
+            ["network", "disconnect", "--force", networkName, brokerGatewayContainer],
+            cancellationToken);
+        if (disconnect.ExitCode != 0 &&
+            !disconnect.StandardError.Contains("is not connected", StringComparison.OrdinalIgnoreCase) &&
+            !disconnect.StandardError.Contains("No such container", StringComparison.OrdinalIgnoreCase) &&
+            !IsMissingNetworkError(disconnect.StandardError))
+        {
+            throw new AgentContainerException(
+                $"Docker could not detach the broker gateway from runtime network '{networkName}': {SanitizeError(disconnect.StandardError)}");
+        }
+
+        var remove = await docker.ExecuteAsync(["network", "rm", networkName], cancellationToken);
+        if (remove.ExitCode != 0 && !IsMissingNetworkError(remove.StandardError))
+        {
+            throw new AgentContainerException(
+                $"Docker failed to remove agent runtime network '{networkName}': {SanitizeError(remove.StandardError)}");
+        }
+
+        logger.LogInformation("Removed isolated agent runtime network {NetworkName}.", networkName);
+    }
+
     public async Task<string> GetLogsAsync(string containerId, int maximumBytes, CancellationToken cancellationToken = default)
     {
         ValidateContainerId(containerId);
@@ -140,6 +178,7 @@ public sealed class DockerAgentContainerRunner(
 
     private async Task EnsureNetworkAsync(string networkName, CancellationToken cancellationToken)
     {
+        ValidateNetworkName(networkName);
         var inspect = await docker.ExecuteAsync(["network", "inspect", networkName], cancellationToken);
         if (inspect.ExitCode == 0)
         {
@@ -147,8 +186,7 @@ public sealed class DockerAgentContainerRunner(
             return;
         }
 
-        if (!inspect.StandardError.Contains("not found", StringComparison.OrdinalIgnoreCase) &&
-            !inspect.StandardError.Contains("No such network", StringComparison.OrdinalIgnoreCase))
+        if (!IsMissingNetworkError(inspect.StandardError))
         {
             throw new AgentContainerException(
                 $"Docker failed to inspect agent runtime network '{networkName}': {SanitizeError(inspect.StandardError)}");
@@ -182,8 +220,7 @@ public sealed class DockerAgentContainerRunner(
             throw new AgentContainerException("Container resource and runtime limits must be positive.");
         if (string.IsNullOrWhiteSpace(request.AgentId) || string.IsNullOrWhiteSpace(request.BusinessId) || string.IsNullOrWhiteSpace(request.RuntimeImage) || string.IsNullOrWhiteSpace(request.NetworkName) || string.IsNullOrWhiteSpace(request.BrokerEndpoint) || string.IsNullOrWhiteSpace(request.WorkloadToken))
             throw new AgentContainerException("Runtime image, broker endpoint, workload token, and isolated network are required.");
-        if (request.NetworkName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')))
-            throw new AgentContainerException("The runtime network name contains unsupported characters.");
+        ValidateNetworkName(request.NetworkName);
         if (!Path.IsPathFullyQualified(request.PackagePath) || request.PackagePath.Contains(',', StringComparison.Ordinal))
             throw new AgentContainerException("The package path must be absolute and cannot contain Docker mount delimiters.");
         if (request.EntryAssembly != Path.GetFileName(request.EntryAssembly) || !request.EntryAssembly.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
@@ -205,6 +242,17 @@ public sealed class DockerAgentContainerRunner(
         if (string.IsNullOrWhiteSpace(containerId) || containerId.Any(c => !(char.IsLetterOrDigit(c) || c is '-' or '_' or '.')))
             throw new AgentContainerException("The container identifier is invalid.");
     }
+
+    private static void ValidateNetworkName(string networkName)
+    {
+        if (string.IsNullOrWhiteSpace(networkName) ||
+            networkName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')))
+            throw new AgentContainerException("The runtime network name contains unsupported characters.");
+    }
+
+    private static bool IsMissingNetworkError(string error)
+        => error.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+           error.Contains("No such network", StringComparison.OrdinalIgnoreCase);
 
     private static AgentContainerState ParseState(string? state) => state?.ToLowerInvariant() switch
     {

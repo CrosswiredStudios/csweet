@@ -30,9 +30,9 @@ Read these files in order:
 
 Cross-cutting features are documented as a phased series in their own folder:
 
-- [Personal Assistant Chat](./features/personal-assistant-chat/README.md) - click an agent
-  employee to open a streaming chat with the Personal Assistant (MAF agent plugin, governed
-  API gateway, conversation persistence, SSE streaming).
+- [Native Communications Hub](./native-communications-hub.md) - the authoritative in-app
+  workspace for human and agent conversations, durable agent turns, unread state, realtime
+  updates, and optional external-provider mirrors.
 - [GitHub Agent Import](./features/github-agent-import/README.md) - import public GitHub-hosted
   agent packages by URL, review the root manifest, approve bounded grants, and run community
   agents inside broker-governed sandboxes.

@@ -103,6 +103,22 @@ public class LlmProviderEndpointTests
     }
 
     [Fact]
+    public async Task SavedProviderModelCatalog_ReturnsAvailableModels()
+    {
+        await using var factory = CreateFactory();
+        var client = factory.CreateClient();
+        var created = await CreateProfileAsync(client);
+
+        var response = await client.GetAsync($"/api/llm-provider-profiles/{created.Id}/models");
+        var result = await response.Content.ReadFromJsonAsync<PreviewModelCatalogResponse>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(result);
+        Assert.True(result.Succeeded);
+        Assert.Contains(result.Models, model => model.Id == "local-model");
+    }
+
+    [Fact]
     public async Task TestProvider_PersistsCapabilityTestAndUpdatesLastSuccessfulConnection()
     {
         await using var factory = CreateFactory();

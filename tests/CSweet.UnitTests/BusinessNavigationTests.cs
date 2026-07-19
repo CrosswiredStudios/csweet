@@ -32,7 +32,7 @@ public sealed class BusinessNavigationTests
     [InlineData("organizations/{0}/command-center", "command-center")]
     [InlineData("organizations/{0}/employees", "employees")]
     [InlineData("organizations/{0}/employees/00000000-0000-0000-0000-000000000001/memory", "employees")]
-    [InlineData("organizations/{0}/chat/00000000-0000-0000-0000-000000000001", "employees")]
+    [InlineData("organizations/{0}/communications/00000000-0000-0000-0000-000000000001", "communications")]
     [InlineData("settings/security", "command-center")]
     public void SwitchDestination_PreservesSafeBusinessSection(string pathTemplate, string expectedSection)
     {
@@ -48,13 +48,15 @@ public sealed class BusinessNavigationTests
     {
         var id = Guid.NewGuid();
         Assert.Equal(id, BusinessNavigation.OrganizationIdFromPath($"/organizations/{id}/employees?view=graph#team"));
-        Assert.True(BusinessNavigation.IsEmployeePath($"organizations/{id}/chat/{Guid.NewGuid()}"));
+        Assert.False(BusinessNavigation.IsEmployeePath($"organizations/{id}/communications/{Guid.NewGuid()}"));
         Assert.False(BusinessNavigation.IsEmployeePath($"organizations/{id}/command-center"));
     }
 
     [Fact]
     public void SettingsPages_ExposeCanonicalAndLegacyRoutes()
     {
+        Assert.Contains("/organizations/{OrganizationId:guid}/communications", RoutesFor<CSweet.UI.Pages.Communications>());
+        Assert.Contains("/organizations/{OrganizationId:guid}/communications/{ChatId:guid}", RoutesFor<CSweet.UI.Pages.Communications>());
         Assert.Contains("/settings/llm-providers", RoutesFor<CSweet.UI.Pages.LlmProviders>());
         Assert.Contains("/settings/agents", RoutesFor<CSweet.UI.Pages.Agents>());
         Assert.Contains("/settings/agents/runtime", RoutesFor<CSweet.UI.Pages.AgentRuntimeSettings>());
