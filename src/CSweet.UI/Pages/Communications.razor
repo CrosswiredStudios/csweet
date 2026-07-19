@@ -105,7 +105,7 @@
                     <div class="hub-notice">@_notice</div>
                 }
 
-                <section class="hub-message-list" role="log" aria-live="polite">
+                <section class="hub-message-list" role="log" aria-live="polite" @ref="_messageList">
                     @if (_messages.Count == 0)
                     {
                         <div class="hub-welcome">
@@ -226,7 +226,8 @@
     [Parameter] public Guid? ChatId { get; set; }
     private readonly CancellationTokenSource _disposeCts = new();
     private CancellationTokenSource? _chatCts;
-    private IJSObjectReference? _visibilityModule;
+    private IJSObjectReference? _communicationsModule;
+    private ElementReference _messageList;
     private CommunicationHubResponse? _hub;
     private CommunicationChatResponse? _selected;
     private CommunicationChatResponse? _editing;
@@ -239,6 +240,7 @@
     private string _search = string.Empty, _draft = string.Empty, _editorTitle = string.Empty, _editorDescription = string.Empty;
     private string? _error, _notice, _editorError;
     private bool _realtimeRefreshing;
+    private bool _scrollToBottomPending;
     private Guid? _observedChatId;
     private string BasePath => $"api/organizations/{OrganizationId}/communications/hub";
     private IEnumerable<CommunicationChatResponse> FilteredChats => (_hub?.Chats ?? []).Where(x => string.IsNullOrWhiteSpace(_search) || x.Title.Contains(_search, StringComparison.OrdinalIgnoreCase));
@@ -256,6 +258,20 @@
     protected override void OnInitialized() => Realtime.EventReceived += OnRealtimeEvent;
 
     protected override Task OnParametersSetAsync() => LoadAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_scrollToBottomPending) return;
+        _scrollToBottomPending = false;
+
+        try
+        {
+            var module = await GetCommunicationsModuleAsync();
+            await module.InvokeVoidAsync("scrollToBottom", _messageList);
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+    }
 
     private async Task LoadAsync()
     {
@@ -297,6 +313,7 @@
         var items = await Http.GetFromJsonAsync<List<CommunicationHubMessageResponse>>($"{BasePath}/chats/{_selected.Id}/messages", token) ?? [];
         _messages.Clear(); _messages.AddRange(items);
         await LoadTurnsAsync(_selected.Id, token);
+        RequestScrollToBottom();
         if (markRead && items.LastOrDefault() is { } last)
         {
             var response = await Http.PostAsJsonAsync($"{BasePath}/chats/{_selected.Id}/read",
@@ -320,9 +337,10 @@
             if (sent is not null)
             {
                 _messages.Add(sent.Message);
+                RequestScrollToBottom();
                 if (sent.Turn is not null)
                 {
-                    var view = new TurnView(sent.Turn) { Expanded = true };
+                    var view = new TurnView(sent.Turn);
                     _turns[sent.Turn.Id] = view;
                     _ = ObserveTurnAsync(_selected.Id, view, _chatCts?.Token ?? _disposeCts.Token);
                 }
@@ -428,7 +446,6 @@
             {
                 view = new TurnView(snapshot)
                 {
-                    Expanded = !IsTerminal(snapshot.Status),
                     StreamingText = snapshot.PartialResponse
                 };
                 _turns[snapshot.Id] = view;
@@ -502,7 +519,7 @@
         try
         {
             var started = await ChatTurns.RetryTurnAsync(OrganizationId, _selected.Id, failed.Turn.Id, _disposeCts.Token);
-            var view = new TurnView(started.Turn) { Expanded = true };
+            var view = new TurnView(started.Turn);
             _turns[started.Turn.Id] = view;
             await RefreshHubAsync(_selected.Id, markRead: false);
             _ = ObserveTurnAsync(_selected.Id, view, _chatCts?.Token ?? _disposeCts.Token);
@@ -595,9 +612,14 @@
 
     private async Task<bool> IsDocumentVisibleAsync()
     {
-        _visibilityModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/CSweet.UI/js/communications.js");
-        return await _visibilityModule.InvokeAsync<bool>("isDocumentVisible");
+        var module = await GetCommunicationsModuleAsync();
+        return await module.InvokeAsync<bool>("isDocumentVisible");
     }
+
+    private async Task<IJSObjectReference> GetCommunicationsModuleAsync() =>
+        _communicationsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/CSweet.UI/js/communications.js");
+
+    private void RequestScrollToBottom() => _scrollToBottomPending = true;
 
     private int ChatUnread(CommunicationChatResponse chat) =>
         Unread.ChatUnreadCounts.TryGetValue(chat.Id, out var count) ? count : chat.UnreadCount;
@@ -621,6 +643,6 @@
         _chatCts?.Dispose();
         _disposeCts.Cancel();
         _disposeCts.Dispose();
-        if (_visibilityModule is not null) await _visibilityModule.DisposeAsync();
+        if (_communicationsModule is not null) await _communicationsModule.DisposeAsync();
     }
 }
