@@ -95,6 +95,7 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
     public DbSet<CommunicationEventOutboxItem> CommunicationEventOutbox => Set<CommunicationEventOutboxItem>();
+    public DbSet<AgentOnboardingEventOutboxItem> AgentOnboardingEventOutbox => Set<AgentOnboardingEventOutboxItem>();
     public DbSet<ApplicationRealtimeOutboxItem> ApplicationRealtimeOutbox => Set<ApplicationRealtimeOutboxItem>();
     public DbSet<MemoryCaptureOutboxItem> MemoryCaptureOutbox => Set<MemoryCaptureOutboxItem>();
     public DbSet<AgentMemoryNamespaceRegistration> AgentMemoryNamespaces => Set<AgentMemoryNamespaceRegistration>();

@@ -48,6 +48,14 @@ An installation version is an immutable revision with a stable installation key 
 
 A staged or retired revision cannot register, invoke the broker, receive credentials, receive events, or be enabled. Runtime tokens are short-lived and revision-bound.
 
+## Agent employee onboarding lifecycle
+
+When an agent installation is assigned to a new organization employee, the core atomically creates that employee's protected human-agent conversation and a durable `com.csweet.agent.onboarded.v1` event. The event payload contains the organization, agent employee, hiring employee, protected conversation, and occurrence timestamp. The core does not create an introductory message or prescribe what the agent must do.
+
+The AgentHost offers the event only to the matching installation after it connects. This trusted targeted lifecycle event does not depend on an optional event-subscription grant. Its stable event ID is retried until the agent invokes `agent.onboarding.complete.v1`; agents must therefore handle it idempotently and acknowledge only after their chosen onboarding behavior succeeds. Agent-authored chat messages should use `communication.message.send.v1` with an idempotency key derived from the lifecycle event ID.
+
+Delivery is bounded by `CSweet:AgentOnboardingDelivery:MaximumAttempts` (default `12`). Exhaustion marks the lifecycle event failed and creates an important, real-time notification for the hiring user with the agent employee, installation, event ID, and last delivery or acknowledgement problem.
+
 ## Plugin author checklist
 
 - Use the C-Sweet Plugin SDK and load the canonical manifest at startup.

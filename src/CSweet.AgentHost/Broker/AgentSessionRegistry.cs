@@ -170,24 +170,25 @@ public sealed class AgentSessionRegistry
 
     /// <summary>Publishes a trusted, durable application event without impersonating an agent.</summary>
     public int PublishPlatformEvent(string businessId, string eventType, string subject, ByteString payload, string correlationId,
-        string? targetInstallationId = null)
+        string? targetInstallationId = null, string? eventId = null, bool requireSubscription = true,
+        DateTimeOffset? occurredAt = null)
     {
         var delivered = new DeliveredEvent
         {
-            EventId = Guid.NewGuid().ToString("N"),
+            EventId = eventId ?? Guid.NewGuid().ToString("N"),
             SourceAgentId = "platform.csweet",
             EventType = eventType,
             SchemaVersion = "1.0",
             Subject = subject,
             ContentType = "application/json",
             Payload = payload,
-            OccurredAt = Timestamp.FromDateTime(DateTime.UtcNow)
+            OccurredAt = Timestamp.FromDateTime((occurredAt ?? DateTimeOffset.UtcNow).UtcDateTime)
         };
         var count = 0;
         foreach (var target in _sessions.Values.Where(x =>
                      string.Equals(x.BusinessId, businessId, StringComparison.Ordinal) &&
                      (targetInstallationId is null || string.Equals(x.InstallationId, targetInstallationId, StringComparison.OrdinalIgnoreCase)) &&
-                     x.Grant.Subscriptions.Contains(eventType)))
+                     (!requireSubscription || x.Grant.Subscriptions.Contains(eventType))))
         {
             if (target.TrySend(new BrokerToAgentMessage
                 {

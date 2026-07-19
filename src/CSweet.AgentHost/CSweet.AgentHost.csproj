@@ -16,4 +16,8 @@
     <ProjectReference Include="..\CSweet.ServiceDefaults\CSweet.ServiceDefaults.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="CSweet.UnitTests" />
+  </ItemGroup>
+
 </Project>

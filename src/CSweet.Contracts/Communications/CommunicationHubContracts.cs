@@ -76,7 +76,8 @@ public sealed record UpdateCommunicationChatRequest(
     IReadOnlyList<Guid>? AudienceWorkstreamIds = null);
 
 public sealed record SendCommunicationMessageRequest(
-    [property: Required, MaxLength(32768)] string Content);
+    [property: Required, MaxLength(32768)] string Content,
+    [property: MaxLength(160)] string? IdempotencyKey = null);
 
 public sealed record CommunicationHubActionResponse(
     bool Succeeded,

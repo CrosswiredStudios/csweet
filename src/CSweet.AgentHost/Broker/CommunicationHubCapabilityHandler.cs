@@ -94,7 +94,7 @@ public sealed class CommunicationHubCapabilityHandler(
     {
         var input = Read<SendMessageCapabilityRequest>(request);
         var message = await hub.SendAsync(organizationId, input.ChatId, actorId,
-            new SendCommunicationMessageRequest(input.Content), token);
+            new SendCommunicationMessageRequest(input.Content, input.IdempotencyKey), token);
         return message is null
             ? Failure(request.RequestId, PlatformCapabilityErrorCode.ValidationFailed,
                 "The message was empty or the employee is not a member of the chat.")
@@ -128,5 +128,5 @@ public sealed class CommunicationHubCapabilityHandler(
         IReadOnlyList<Guid> ParticipantOrganizationUserIds,
         IReadOnlyList<Guid>? AudienceRoleIds = null,
         IReadOnlyList<Guid>? AudienceWorkstreamIds = null);
-    private sealed record SendMessageCapabilityRequest(Guid ChatId, string Content);
+    private sealed record SendMessageCapabilityRequest(Guid ChatId, string Content, string? IdempotencyKey = null);
 }

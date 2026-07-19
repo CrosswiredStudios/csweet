@@ -22,7 +22,13 @@ builder.Services.AddSingleton<ConfiguredAgentAuthorizationPolicy>();
 builder.Services.AddScoped<IAgentAuthorizationPolicy, PersistedAgentAuthorizationPolicy>();
 builder.Services.AddSingleton<AgentSessionRegistry>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services
+    .AddOptions<AgentOnboardingDeliveryOptions>()
+    .Bind(builder.Configuration.GetSection(AgentOnboardingDeliveryOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 builder.Services.AddHostedService<ManagementReviewScheduler>();
+builder.Services.AddHostedService<AgentOnboardingEventDispatcher>();
 builder.Services.AddScoped<IAgentRuntimeSignalService, AgentRuntimeSignalService>();
 builder.Services.AddScoped<PlatformLlmCapabilityHandler>();
 builder.Services.AddSingleton<IMemoryStore>(_ => new PostgreSqlMemoryStore(
@@ -38,6 +44,7 @@ builder.Services.AddScoped<IPlatformCapabilityHandler, WebPlatformCapabilityAdap
 builder.Services.AddScoped<IPlatformCapabilityHandler, WebSocketPlatformCapabilityAdapter>();
 builder.Services.AddScoped<IPlatformCapabilityHandler, WorkforcePlatformCapabilityHandler>();
 builder.Services.AddScoped<IPlatformCapabilityHandler, CommunicationHubCapabilityHandler>();
+builder.Services.AddScoped<IPlatformCapabilityHandler, AgentOnboardingCapabilityHandler>();
 builder.Services.AddScoped<IPlatformEventObserver, ManagementEventObserver>();
 builder.Services.AddScoped<IAgentMemoryIdentityResolver, AgentMemoryIdentityResolver>();
 

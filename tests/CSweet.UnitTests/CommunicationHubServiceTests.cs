@@ -31,8 +31,11 @@ public sealed class CommunicationHubServiceTests
         Assert.Equal(3, created.Chat!.Participants.Count);
         Assert.Contains(created.Chat.Participants, x => x.OrganizationUserId == designer.Id);
         var sent = await service.SendAsync(organization.Id, created.Chat.Id, designer.Id,
-            new SendCommunicationMessageRequest("Design review is ready."));
+            new SendCommunicationMessageRequest("Design review is ready.", "design-review-ready"));
+        var replay = await service.SendAsync(organization.Id, created.Chat.Id, designer.Id,
+            new SendCommunicationMessageRequest("Design review is ready.", "design-review-ready"));
         Assert.NotNull(sent);
+        Assert.Equal(sent.Id, replay!.Id);
         var messages = await service.ListMessagesAsync(organization.Id, created.Chat.Id, engineer.Id);
         Assert.NotNull(messages);
         Assert.Single(messages);

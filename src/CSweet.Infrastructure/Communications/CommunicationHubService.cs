@@ -285,13 +285,30 @@ public sealed class CommunicationHubService(CSweetDbContext db, IAuditEventWrite
                 x.Participants.Any(p => p.OrganizationUserId == actorOrganizationUserId && p.LeftAt == null), cancellationToken);
         if (actor is null || chat is null || string.IsNullOrWhiteSpace(request.Content)) return null;
 
+        var suppliedIdempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            ? null
+            : request.IdempotencyKey.Trim();
+        if (suppliedIdempotencyKey?.Length > 160) return null;
+        var idempotencyKey = suppliedIdempotencyKey is null
+            ? null
+            : $"communication-message:{actor.Id:N}:{suppliedIdempotencyKey}";
+        if (idempotencyKey is not null)
+        {
+            var existing = await db.CoreConversationMessages.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.ConversationId == chat.Id &&
+                    x.SenderOrganizationUserId == actor.Id && x.IdempotencyKey == idempotencyKey, cancellationToken);
+            if (existing is not null)
+                return new CommunicationHubMessageResponse(existing.Id, existing.Sequence, chat.Id, actor.Id, actor.DisplayName,
+                    actor.EmployeeType.ToString(), existing.Content, existing.CreatedAt);
+        }
+
         var now = DateTimeOffset.UtcNow;
         var message = new ConversationMessage
         {
             Id = Guid.NewGuid(), ConversationId = chat.Id, SenderOrganizationUserId = actor.Id,
             Role = actor.EmployeeType == EmployeeType.Agent ? ConversationRole.Assistant : ConversationRole.User,
             Content = request.Content.Trim(), CorrelationId = Guid.NewGuid(), DeliveryIntent = CommunicationDeliveryIntent.Inform,
-            SourceProvider = "InApp", CreatedAt = now
+            SourceProvider = "InApp", IdempotencyKey = idempotencyKey, CreatedAt = now
         };
         chat.UpdatedAt = now;
         db.CoreConversationMessages.Add(message);

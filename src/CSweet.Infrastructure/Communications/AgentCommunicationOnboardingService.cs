@@ -1,6 +1,5 @@
-using System.Text.Json;
 using CSweet.Application.Communications;
-using CSweet.Contracts.Plugins;
+using CSweet.Domain.Communications;
 using CSweet.Domain.Core;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -9,11 +8,6 @@ namespace CSweet.Infrastructure.Communications;
 
 public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IAgentCommunicationOnboardingService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        PropertyNameCaseInsensitive = true
-    };
-
     public async Task<AgentCommunicationOnboardingResult> EnsureAsync(
         Guid organizationId,
         OrganizationUser agent,
@@ -32,7 +26,6 @@ public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IA
             x.AgentOrganizationUserId == agent.Id && x.Kind == ConversationKind.DirectHumanAgent)
             ?? await db.CoreConversations
                 .Include(x => x.Participants)
-                .Include(x => x.Messages)
                 .SingleOrDefaultAsync(x => x.OrganizationId == organizationId &&
                     x.InitiatedByOrganizationUserId == hiringUser.Id && x.AgentOrganizationUserId == agent.Id &&
                     x.Kind == ConversationKind.DirectHumanAgent, cancellationToken);
@@ -57,27 +50,21 @@ public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IA
         EnsureParticipant(conversation, hiringUser, ConversationParticipantRole.Coordinator, now);
         EnsureParticipant(conversation, agent, ConversationParticipantRole.Member, now);
 
-        var idempotencyKey = $"agent-onboarding:{agent.Id:D}";
-        var introExists = conversation.Messages.Any(x => x.IdempotencyKey == idempotencyKey) ||
-            await db.CoreConversationMessages.AnyAsync(x => x.ConversationId == conversation.Id && x.IdempotencyKey == idempotencyKey,
-                cancellationToken);
-        if (!introExists)
+        var eventExists = db.AgentOnboardingEventOutbox.Local.Any(x => x.AgentOrganizationUserId == agent.Id) ||
+            await db.AgentOnboardingEventOutbox.AnyAsync(x => x.AgentOrganizationUserId == agent.Id, cancellationToken);
+        if (!eventExists)
         {
-            var content = await BuildIntroductionAsync(agent, cancellationToken);
-            conversation.Messages.Add(new ConversationMessage
+            db.AgentOnboardingEventOutbox.Add(new AgentOnboardingEventOutboxItem
             {
                 Id = Guid.NewGuid(),
+                OrganizationId = organizationId,
+                AgentOrganizationUserId = agent.Id,
+                HiringOrganizationUserId = hiringUser.Id,
                 ConversationId = conversation.Id,
-                SenderOrganizationUserId = agent.Id,
-                Role = ConversationRole.Assistant,
-                Content = content,
-                CorrelationId = Guid.NewGuid(),
-                DeliveryIntent = CommunicationDeliveryIntent.RequestResponse,
-                SourceProvider = "InApp",
-                IdempotencyKey = idempotencyKey,
-                CreatedAt = now
+                Status = AgentOnboardingEventOutboxStatus.Pending,
+                NextAttemptAt = now,
+                OccurredAt = now
             });
-            conversation.UpdatedAt = now;
         }
 
         if (existing is null) db.CoreConversations.Add(conversation);
@@ -103,29 +90,6 @@ public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IA
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    private async Task<string> BuildIntroductionAsync(OrganizationUser agent, CancellationToken cancellationToken)
-    {
-        var package = await db.AgentInstallations.AsNoTracking()
-            .Where(x => x.Id == agent.AgentInstallationId)
-            .Select(x => new { x.PackageVersion!.ManifestJson, x.PackageVersion.AgentName })
-            .SingleAsync(cancellationToken);
-        var role = agent.RoleId.HasValue
-            ? await db.CoreRoles.AsNoTracking().Where(x => x.Id == agent.RoleId)
-                .Select(x => new { x.Name, x.Description }).SingleOrDefaultAsync(cancellationToken)
-            : null;
-
-        PluginOnboarding onboarding;
-        try { onboarding = JsonSerializer.Deserialize<PluginManifest>(package.ManifestJson, JsonOptions)?.Onboarding ?? new(); }
-        catch (JsonException) { onboarding = new(); }
-
-        var jobName = role?.Name ?? agent.DisplayName ?? package.AgentName;
-        var introduction = Clean(onboarding.Introduction)
-            ?? $"Thank you for hiring me as your {jobName}. I'm ready to get started and help move the work forward.";
-        var question = Clean(onboarding.StartingQuestion)
-            ?? $"What is the most important outcome you would like me to focus on first as your {jobName}?";
-        return $"{introduction}\n\n{question}"[..Math.Min(32768, introduction.Length + question.Length + 2)];
-    }
-
     private static void EnsureParticipant(Conversation conversation, OrganizationUser user,
         ConversationParticipantRole role, DateTimeOffset now)
     {
@@ -143,6 +107,5 @@ public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IA
         }
     }
 
-    private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static AgentCommunicationOnboardingResult Failure(string code, string message) => new(false, code, message);
 }

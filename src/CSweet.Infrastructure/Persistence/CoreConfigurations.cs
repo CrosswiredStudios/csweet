@@ -39,6 +39,7 @@ internal static class CoreConfigurations
         modelBuilder.Entity<UserNotification>(ConfigureUserNotification);
         modelBuilder.Entity<NotificationPreference>(ConfigureNotificationPreference);
         modelBuilder.Entity<CommunicationEventOutboxItem>(ConfigureCommunicationEventOutbox);
+        modelBuilder.Entity<AgentOnboardingEventOutboxItem>(ConfigureAgentOnboardingEventOutbox);
         modelBuilder.Entity<ApplicationRealtimeOutboxItem>(ConfigureApplicationRealtimeOutbox);
         ConfigureWorkforcePlatform(modelBuilder);
     }
@@ -130,7 +131,7 @@ internal static class CoreConfigurations
         {
             entity.HasKey(x => x.Id); entity.Property(x => x.PositionKey).HasMaxLength(80).IsRequired();
             entity.HasIndex(x => new { x.OrganizationId, x.PositionKey }).IsUnique().HasFilter("\"EndsAt\" IS NULL");
-            entity.HasOne<OrganizationUser>().WithMany().HasForeignKey(x => x.OrganizationUserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<OrganizationUser>().WithMany().HasForeignKey(x => x.OrganizationUserId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<Workstream>(entity =>
         {
@@ -614,6 +615,18 @@ internal static class CoreConfigurations
         entity.HasIndex(x => x.Sequence).IsUnique();
         entity.HasIndex(x => new { x.Status, x.NextAttemptAt, x.Sequence });
         entity.HasIndex(x => new { x.OrganizationId, x.ChatId, x.Sequence });
+    }
+
+    static void ConfigureAgentOnboardingEventOutbox(EntityTypeBuilder<AgentOnboardingEventOutboxItem> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
+        entity.Property(x => x.LastError).HasMaxLength(2048);
+        entity.HasIndex(x => x.AgentOrganizationUserId).IsUnique();
+        entity.HasIndex(x => new { x.Status, x.NextAttemptAt });
+        entity.HasOne<OrganizationUser>().WithMany().HasForeignKey(x => x.AgentOrganizationUserId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne<OrganizationUser>().WithMany().HasForeignKey(x => x.HiringOrganizationUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
     }
 
     static void ConfigureApplicationRealtimeOutbox(EntityTypeBuilder<ApplicationRealtimeOutboxItem> entity)
