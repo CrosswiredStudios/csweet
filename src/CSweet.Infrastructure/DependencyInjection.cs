@@ -107,6 +107,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentInteractiveRuntimeService, AgentInteractiveRuntimeService>();
         builder.Services.AddScoped<IAgentRuntimeSignalService, AgentRuntimeSignalService>();
         builder.Services.AddScoped<IAgentRuntimeCleanupService, AgentRuntimeCleanupService>();
+        builder.Services.AddScoped<AgentRuntimeStartupCleanupService>();
         builder.Services.AddOptions<AgentRuntimeManagerOptions>()
             .Bind(builder.Configuration.GetSection(AgentRuntimeManagerOptions.SectionName));
         builder.Services.AddHttpClient<GitHubAgentRepositoryClient>(client =>

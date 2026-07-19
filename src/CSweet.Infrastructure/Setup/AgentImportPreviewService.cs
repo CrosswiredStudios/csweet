@@ -230,6 +230,7 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
         AddListError(manifest.Requires.Select(x => x.Name).ToArray(), "requires", errors);
         AddListError(manifest.Events.Subscribes, "events.subscribes", errors);
         AddListError(manifest.Events.Publishes, "events.publishes", errors);
+        ValidateConfigurationContract(manifest, errors);
         ValidateWebAccess(manifest, errors);
 
         if (errors.Count > 0)
@@ -333,6 +334,28 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
         var port = rule.Port is null ? string.Empty : $":{rule.Port}";
         var methods = string.Join(',', rule.Methods.Select(x => x.ToUpperInvariant()).Order(StringComparer.Ordinal));
         return $"{rule.Protocol.ToLowerInvariant()}|{rule.Scheme.ToLowerInvariant()}://{rule.Host.ToLowerInvariant()}{port}{rule.PathPrefix}|{methods}|{rule.Credential ?? string.Empty}";
+    }
+
+    private static void ValidateConfigurationContract(PluginManifest manifest, ICollection<string> errors)
+    {
+        var provided = manifest.Provides
+            .Select(capability => capability.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (string.Equals(manifest.Kind, "agent", StringComparison.OrdinalIgnoreCase) &&
+            manifest.Configuration.Count > 0)
+        {
+            if (!provided.Contains(AgentConfigurationCapabilities.Describe))
+                errors.Add($"Configurable agents must provide '{AgentConfigurationCapabilities.Describe}'.");
+            if (!provided.Contains(AgentConfigurationCapabilities.Update))
+                errors.Add($"Configurable agents must provide '{AgentConfigurationCapabilities.Update}'.");
+        }
+
+        foreach (var contribution in manifest.Ui.Where(x => !string.IsNullOrWhiteSpace(x.Capability)))
+        {
+            if (!provided.Contains(contribution.Capability!))
+                errors.Add($"UI contribution '{contribution.Id}' references capability '{contribution.Capability}' that is not declared in provides.");
+        }
     }
 
     private static void ValidateWebAccess(PluginManifest manifest, List<string> errors)

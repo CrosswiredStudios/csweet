@@ -1,21 +1,83 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using CSweet.Application.Setup;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CSweet.Infrastructure.Setup;
 
 public sealed class DockerAgentContainerRunner(
     IDockerCommandExecutor docker,
+    IOptions<AgentRuntimeManagerOptions> options,
     ILogger<DockerAgentContainerRunner> logger) : IPluginContainerRunner
 {
     private const int RuntimeUserId = 1654;
+    private const string ManagedLabel = "com.csweet.agent-runtime=true";
+    private static readonly Regex ManagedContainerName = new(
+        @"^csweet-agent-(?<runtime>[0-9a-f]{32})$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private const string BrokerWatchdogScript = """
+        agent_assembly="$1"
+        dotnet "$agent_assembly" &
+        agent_pid=$!
+        watchdog_pid=
+
+        stop_children() {
+          if [ -n "$watchdog_pid" ]; then kill "$watchdog_pid" 2>/dev/null || true; fi
+          kill -TERM "$agent_pid" 2>/dev/null || true
+        }
+        trap stop_children TERM INT
+
+        (
+          sleep "$CSWEET_BROKER_WATCHDOG_STARTUP_GRACE_SECONDS"
+          failed_seconds=0
+          while kill -0 "$agent_pid" 2>/dev/null; do
+            if bash -c ': > "/dev/tcp/$1/$2"' -- "$CSWEET_BROKER_HOST" "$CSWEET_BROKER_PORT" 2>/dev/null; then
+              failed_seconds=0
+            else
+              failed_seconds=$((failed_seconds + CSWEET_BROKER_WATCHDOG_INTERVAL_SECONDS))
+              if [ "$failed_seconds" -ge "$CSWEET_BROKER_DISCONNECT_SHUTDOWN_SECONDS" ]; then
+                echo "C-Sweet broker watchdog: broker unreachable for ${failed_seconds}s; stopping agent." >&2
+                kill -TERM "$agent_pid" 2>/dev/null || true
+                sleep 5
+                kill -KILL "$agent_pid" 2>/dev/null || true
+                exit 0
+              fi
+            fi
+            sleep "$CSWEET_BROKER_WATCHDOG_INTERVAL_SECONDS"
+          done
+        ) &
+        watchdog_pid=$!
+
+        wait "$agent_pid"
+        exit_code=$?
+        kill "$watchdog_pid" 2>/dev/null || true
+        wait "$watchdog_pid" 2>/dev/null || true
+        exit "$exit_code"
+        """;
+
+    public DockerAgentContainerRunner(
+        IDockerCommandExecutor docker,
+        ILogger<DockerAgentContainerRunner> logger)
+        : this(docker, Options.Create(new AgentRuntimeManagerOptions()), logger)
+    {
+    }
 
     public async Task<AgentContainerStatus> StartAsync(
         AgentContainerStartRequest request,
         CancellationToken cancellationToken = default)
     {
         ValidateStartRequest(request);
+        if (!Uri.TryCreate(request.BrokerEndpoint, UriKind.Absolute, out var brokerUri) ||
+            brokerUri.Scheme is not ("http" or "https") ||
+            string.IsNullOrWhiteSpace(brokerUri.Host))
+        {
+            throw new AgentContainerException("The broker endpoint must be an absolute HTTP or HTTPS URI.");
+        }
+        var runtimeOptions = options.Value;
+        if (runtimeOptions.BrokerWatchdogEnabled) ValidateWatchdogOptions(runtimeOptions);
         await EnsureNetworkAsync(request.NetworkName, cancellationToken);
         await ConnectBrokerGatewayAsync(request, cancellationToken);
         var cpus = (request.CpuPercent / 100m).ToString("0.##", CultureInfo.InvariantCulture);
@@ -23,6 +85,9 @@ public sealed class DockerAgentContainerRunner(
         {
             "run", "--detach", "--init",
             "--name", request.ContainerName,
+            "--label", ManagedLabel,
+            "--label", $"com.csweet.runtime-instance-id={request.RuntimeInstanceId:N}",
+            "--label", $"com.csweet.installation-id={request.InstallationId:N}",
             "--network", request.NetworkName,
             "--read-only",
             "--cap-drop", "ALL",
@@ -44,9 +109,28 @@ public sealed class DockerAgentContainerRunner(
             "--env", $"CSweet__Plugin__BrokerEndpoint={request.BrokerEndpoint}",
             "--env", "DOTNET_CLI_HOME=/tmp/dotnet",
             "--env", "DOTNET_NOLOGO=1",
-            request.RuntimeImage,
-            "dotnet", $"/app/{request.EntryAssembly}"
         };
+
+        if (runtimeOptions.BrokerWatchdogEnabled)
+        {
+            args.AddRange([
+                "--env", $"CSWEET_BROKER_HOST={brokerUri.Host}",
+                "--env", $"CSWEET_BROKER_PORT={brokerUri.Port}",
+                "--env", $"CSWEET_BROKER_WATCHDOG_STARTUP_GRACE_SECONDS={runtimeOptions.BrokerWatchdogStartupGraceSeconds}",
+                "--env", $"CSWEET_BROKER_WATCHDOG_INTERVAL_SECONDS={runtimeOptions.BrokerWatchdogIntervalSeconds}",
+                "--env", $"CSWEET_BROKER_DISCONNECT_SHUTDOWN_SECONDS={runtimeOptions.BrokerDisconnectShutdownSeconds}"
+            ]);
+        }
+
+        args.Add(request.RuntimeImage);
+        if (runtimeOptions.BrokerWatchdogEnabled)
+        {
+            args.AddRange(["/bin/bash", "-c", BrokerWatchdogScript, "--", $"/app/{request.EntryAssembly}"]);
+        }
+        else
+        {
+            args.AddRange(["dotnet", $"/app/{request.EntryAssembly}"]);
+        }
 
         if (!string.IsNullOrWhiteSpace(request.PersistentDataVolumeName))
         {
@@ -105,6 +189,30 @@ public sealed class DockerAgentContainerRunner(
             ParseTimestamp(state, "StartedAt"),
             ParseTimestamp(state, "FinishedAt"),
             state.TryGetProperty("Error", out var error) && !string.IsNullOrWhiteSpace(error.GetString()) ? error.GetString() : null);
+    }
+
+    public async Task<IReadOnlyList<AgentManagedContainer>> ListManagedAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var result = await docker.ExecuteAsync(
+            ["ps", "--all", "--filter", "name=csweet-agent-", "--format", "{{.ID}}\t{{.Names}}"],
+            cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            throw new AgentContainerException(
+                $"Docker failed to list managed agent containers: {SanitizeError(result.StandardError)}");
+        }
+
+        var managed = new List<AgentManagedContainer>();
+        foreach (var line in result.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var fields = line.Split('\t', 2, StringSplitOptions.TrimEntries);
+            if (fields.Length != 2) continue;
+            var match = ManagedContainerName.Match(fields[1]);
+            if (!match.Success || !Guid.TryParseExact(match.Groups["runtime"].Value, "N", out var runtimeId)) continue;
+            managed.Add(new AgentManagedContainer(fields[0], fields[1], runtimeId));
+        }
+        return managed;
     }
 
     public Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default)
@@ -229,6 +337,17 @@ public sealed class DockerAgentContainerRunner(
             throw new AgentContainerException("The manifest path must be inside the read-only package mount.");
         if (request.ContainerName.Any(c => !(char.IsLetterOrDigit(c) || c is '-' or '_' or '.')))
             throw new AgentContainerException("The container name contains unsupported characters.");
+    }
+
+    private static void ValidateWatchdogOptions(AgentRuntimeManagerOptions runtimeOptions)
+    {
+        if (runtimeOptions.BrokerWatchdogStartupGraceSeconds < 0 ||
+            runtimeOptions.BrokerWatchdogIntervalSeconds <= 0 ||
+            runtimeOptions.BrokerDisconnectShutdownSeconds < runtimeOptions.BrokerWatchdogIntervalSeconds)
+        {
+            throw new AgentContainerException(
+                "Broker watchdog timing must use a non-negative startup grace, a positive interval, and a disconnect timeout at least as long as the interval.");
+        }
     }
 
     private static void ValidateVolumeName(string volumeName)

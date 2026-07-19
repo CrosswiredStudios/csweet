@@ -11,6 +11,7 @@ builder.AddServiceDefaults();
 builder.AddCSweetInfrastructure();
 builder.Services.AddCommunicationPluginBroker(builder.Configuration);
 
+builder.Services.AddHostedService<AgentRuntimeStartupCleanupWorker>();
 builder.Services.AddHostedService<AgentBuildWorker>();
 builder.Services.AddHostedService<AgentScheduleWorker>();
 builder.Services.AddHostedService<AgentRuntimeCleanupWorker>();

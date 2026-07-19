@@ -123,7 +123,7 @@ public class BusinessOnboardingServiceTests
         {
             Id = Guid.NewGuid(), PackageSourceId = Guid.NewGuid(), AgentId = "example.chief", AgentName = "Example Chief",
             Version = "1.0.0", PluginKind = PluginKind.Agent,
-            ManifestJson = """{"kind":"agent","provides":[{"name":"assistant.converse.v1"},{"name":"assistant.plan-work.v1"},{"name":"management.check-in.v1"},{"name":"plugin.configuration.describe.v1"}]}""",
+            ManifestJson = """{"kind":"agent","provides":[{"name":"assistant.converse.v1"},{"name":"assistant.plan-work.v1"},{"name":"management.check-in.v1"},{"name":"agent.configuration.describe.v1"}]}""",
             ImportedAt = DateTimeOffset.UtcNow
         };
         var installation = new AgentInstallation

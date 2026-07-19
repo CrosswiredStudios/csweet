@@ -1,3 +1,4 @@
+using CSweet.Contracts.Agents;
 using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
 
@@ -45,7 +46,7 @@ internal static class CoreMappers
             ApplicationUserId = user.ApplicationUserId,
             AgentInstallationId = user.AgentInstallationId,
             SupportsAgentConfiguration = user.AgentInstallation?.Grant?.CapabilitiesJson.Contains(
-                "\"agent.configuration.describe.v1\"",
+                $"\"{AgentConfigurationCapabilities.Describe}\"",
                 StringComparison.Ordinal) == true,
             IsActive = user.IsActive,
             ArchivedAt = user.ArchivedAt

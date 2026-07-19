@@ -103,6 +103,11 @@ services:
       CSWEET_AGENT_PACKAGE_VOLUME: csweet-agent-packages
       CSweet__AgentRuntime__BrokerEndpoint: http://csweet-agenthost:8080
       CSweet__AgentRuntime__DockerNetworkName: csweet-runtime
+      CSweet__AgentRuntime__CleanupContainersOnStartup: ${CSWEET_AGENT_RUNTIME_CLEANUP_ON_STARTUP:-true}
+      CSweet__AgentRuntime__BrokerWatchdogEnabled: ${CSWEET_AGENT_RUNTIME_BROKER_WATCHDOG_ENABLED:-true}
+      CSweet__AgentRuntime__BrokerWatchdogStartupGraceSeconds: ${CSWEET_AGENT_RUNTIME_BROKER_WATCHDOG_STARTUP_GRACE_SECONDS:-30}
+      CSweet__AgentRuntime__BrokerWatchdogIntervalSeconds: ${CSWEET_AGENT_RUNTIME_BROKER_WATCHDOG_INTERVAL_SECONDS:-10}
+      CSweet__AgentRuntime__BrokerDisconnectShutdownSeconds: ${CSWEET_AGENT_RUNTIME_BROKER_DISCONNECT_SHUTDOWN_SECONDS:-120}
     group_add:
       - "${DOCKER_GID:-0}"
     volumes:

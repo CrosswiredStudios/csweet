@@ -2,6 +2,7 @@ using System.Text.Json;
 using CSweet.Application.BusinessOnboarding;
 using CSweet.Application.Core;
 using CSweet.Application.Setup;
+using CSweet.Contracts.Agents;
 using CSweet.Contracts.BusinessOnboarding;
 using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
@@ -455,7 +456,7 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
                 : [];
             var warnings = new List<string>();
             AddReadinessWarning(provided, warnings, "assistant.converse.v1", "conversation");
-            AddReadinessWarning(provided, warnings, "plugin.configuration.describe.v1", "configuration");
+            AddReadinessWarning(provided, warnings, AgentConfigurationCapabilities.Describe, "configuration");
             AddReadinessWarning(provided, warnings, "management.check-in.v1", "management check-in");
             AddReadinessWarning(provided, warnings, "assistant.plan-work.v1", "planning");
             return warnings;

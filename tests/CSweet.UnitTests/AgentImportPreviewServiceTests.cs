@@ -85,6 +85,27 @@ public class AgentImportPreviewServiceTests
     }
 
     [Fact]
+    public async Task PreviewAsync_RejectsConfigurableAgentWithoutCanonicalConfigurationCapabilities()
+    {
+        await using var dbContext = CreateDbContext();
+        var invalidManifest = ValidManifest()
+            .Replace("agent.configuration.describe.v1", "plugin.configuration.describe.v1", StringComparison.Ordinal)
+            .Replace("agent.configuration.update.v1", "plugin.configuration.update.v1", StringComparison.Ordinal);
+        var service = new AgentImportPreviewService(
+            dbContext,
+            new FakeGitHubAgentRepositoryClient(invalidManifest),
+            new TestAuditEventWriter());
+
+        var exception = await Assert.ThrowsAsync<AgentImportPreviewException>(() =>
+            service.PreviewAsync(new PreviewAgentImportRequest(
+                "https://github.com/example/research-agent")));
+
+        Assert.Contains("agent.configuration.describe.v1", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("agent.configuration.update.v1", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(await dbContext.AgentPackageVersions.ToListAsync());
+    }
+
+    [Fact]
     public async Task PreviewAsync_ReusesExistingImmutablePreview()
     {
         await using var dbContext = CreateDbContext();
@@ -125,7 +146,11 @@ public class AgentImportPreviewServiceTests
             "defaultActivationMode": "Periodic"
           },
           "protocol": { "minimumVersion": "1.0", "maximumVersion": "1.x" },
-          "provides": [{"name":"research.execute.v1"}],
+          "provides": [
+            {"name":"research.execute.v1"},
+            {"name":"agent.configuration.describe.v1"},
+            {"name":"agent.configuration.update.v1"}
+          ],
           "requires": [{"name":"documents.read.v1","scope":"organization"}],
           "events": {
             "subscribes": ["research.requested.v1"],

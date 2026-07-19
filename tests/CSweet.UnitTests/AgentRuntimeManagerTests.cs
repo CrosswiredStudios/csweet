@@ -653,6 +653,7 @@ public sealed class AgentRuntimeManagerTests
         }
         public Task StopAsync(string containerId, TimeSpan gracePeriod, CancellationToken cancellationToken = default) { Stops.Add(containerId); return Task.CompletedTask; }
         public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default) => Task.FromResult(InspectStatus);
+        public Task<IReadOnlyList<AgentManagedContainer>> ListManagedAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<AgentManagedContainer>>([]);
         public Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default) { Removes.Add(containerId); return Task.CompletedTask; }
         public Task RemoveNetworkAsync(string networkName, string brokerGatewayContainer, CancellationToken cancellationToken = default) { NetworkRemoves.Add((networkName, brokerGatewayContainer)); return Task.CompletedTask; }
         public Task<string> GetLogsAsync(string containerId, int maximumBytes, CancellationToken cancellationToken = default) => Task.FromResult(Logs);

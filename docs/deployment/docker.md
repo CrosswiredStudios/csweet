@@ -152,6 +152,24 @@ postgres        pg_isready
 
 Health checks should be used by Compose dependencies where practical so the app does not start before the database is ready.
 
+## Agent container lifecycle safety
+
+The worker owns transient agent containers named `csweet-agent-<runtime-id>`. When the worker starts, it removes containers with that exact reserved naming pattern from an earlier worker lifetime and removes their isolated runtime networks. Database reconciliation then records interrupted runtimes and restarts eligible always-on agents.
+
+Each newly launched agent also runs under a broker watchdog. After the startup grace period, the watchdog probes the configured agent broker from inside the runtime network. If the broker remains unreachable for the disconnect timeout, it terminates the agent process. This prevents a debugger kill, worker crash, or broker outage from leaving a resource-consuming agent running indefinitely.
+
+The Compose defaults are:
+
+```env
+CSWEET_AGENT_RUNTIME_CLEANUP_ON_STARTUP=true
+CSWEET_AGENT_RUNTIME_BROKER_WATCHDOG_ENABLED=true
+CSWEET_AGENT_RUNTIME_BROKER_WATCHDOG_STARTUP_GRACE_SECONDS=30
+CSWEET_AGENT_RUNTIME_BROKER_WATCHDOG_INTERVAL_SECONDS=10
+CSWEET_AGENT_RUNTIME_BROKER_DISCONNECT_SHUTDOWN_SECONDS=120
+```
+
+Disable startup cleanup when multiple independent scheduler processes intentionally share the same Docker daemon. The watchdog requires the supported Linux .NET runtime image to provide `/bin/bash`.
+
 ## First-run Docker flow
 
 ```text

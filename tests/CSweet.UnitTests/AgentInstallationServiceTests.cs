@@ -508,6 +508,9 @@ public sealed class AgentInstallationServiceTests
         public Task StopAsync(string containerId, TimeSpan gracePeriod, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
+        public Task<IReadOnlyList<AgentManagedContainer>> ListManagedAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<AgentManagedContainer>>([]);
+
         public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default)
         {
             Inspected.Add(containerId);

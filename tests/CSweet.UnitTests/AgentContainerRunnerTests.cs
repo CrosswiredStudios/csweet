@@ -1,6 +1,7 @@
 using CSweet.Application.Setup;
 using CSweet.Infrastructure.Setup;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace CSweet.UnitTests;
 
@@ -32,9 +33,13 @@ public sealed class AgentContainerRunnerTests
         Assert.DoesNotContain("--privileged", args);
         Assert.DoesNotContain(args, value => value.Contains("docker.sock", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(args, value => value.Contains("ConnectionStrings", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(11, args.Count(value => value == "--env"));
+        Assert.Equal(16, args.Count(value => value == "--env"));
         Assert.Contains("CSweet__Plugin__InstallationId=22222222-2222-2222-2222-222222222222", args);
         Assert.Contains(args, value => value.StartsWith("CSweet__Plugin__BrokerEndpoint=", StringComparison.Ordinal));
+        Assert.Contains("com.csweet.agent-runtime=true", args);
+        Assert.Contains("com.csweet.runtime-instance-id=11111111111111111111111111111111", args);
+        Assert.Contains("/bin/bash", args);
+        Assert.Contains(args, value => value.Contains("C-Sweet broker watchdog", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -84,6 +89,26 @@ public sealed class AgentContainerRunnerTests
     }
 
     [Fact]
+    public async Task ListManagedAsync_ReturnsOnlyReservedRuntimeNames()
+    {
+        var docker = new FakeDockerCommandExecutor(new DockerCommandResult(0, """
+            runtime-id	csweet-agent-11111111111111111111111111111111
+            build-id	csweet-agent-build-22222222222222222222222222222222
+            friendly-id	csweet-agent-not-managed
+            """, string.Empty));
+        var runner = new DockerAgentContainerRunner(docker, NullLogger<DockerAgentContainerRunner>.Instance);
+
+        var managed = await runner.ListManagedAsync();
+
+        var container = Assert.Single(managed);
+        Assert.Equal("runtime-id", container.ContainerId);
+        Assert.Equal(Guid.Parse("11111111-1111-1111-1111-111111111111"), container.RuntimeInstanceId);
+        Assert.Equal(
+            ["ps", "--all", "--filter", "name=csweet-agent-", "--format", "{{.ID}}\t{{.Names}}"],
+            docker.Commands[0]);
+    }
+
+    [Fact]
     public void RuntimeOptions_DefaultToContainerizedBrokerGateway()
     {
         var options = new AgentRuntimeManagerOptions();
@@ -124,6 +149,45 @@ public sealed class AgentContainerRunnerTests
         await Assert.ThrowsAsync<AgentContainerException>(() => runner.StartAsync(request));
 
         Assert.Empty(docker.Commands);
+    }
+
+    [Fact]
+    public async Task StartAsync_RejectsInvalidWatchdogTimingBeforeDockerRuns()
+    {
+        var docker = new FakeDockerCommandExecutor();
+        var runner = new DockerAgentContainerRunner(
+            docker,
+            Options.Create(new AgentRuntimeManagerOptions
+            {
+                BrokerWatchdogIntervalSeconds = 10,
+                BrokerDisconnectShutdownSeconds = 5
+            }),
+            NullLogger<DockerAgentContainerRunner>.Instance);
+
+        await Assert.ThrowsAsync<AgentContainerException>(() => runner.StartAsync(CreateRequest()));
+
+        Assert.Empty(docker.Commands);
+    }
+
+    [Fact]
+    public async Task StartAsync_CanDisableBrokerWatchdog()
+    {
+        var docker = new FakeDockerCommandExecutor(
+            new DockerCommandResult(0, "[]", string.Empty),
+            new DockerCommandResult(0, string.Empty, string.Empty),
+            new DockerCommandResult(0, "container-id\n", string.Empty),
+            new DockerCommandResult(0, InspectJson, string.Empty));
+        var runner = new DockerAgentContainerRunner(
+            docker,
+            Options.Create(new AgentRuntimeManagerOptions { BrokerWatchdogEnabled = false }),
+            NullLogger<DockerAgentContainerRunner>.Instance);
+
+        await runner.StartAsync(CreateRequest());
+
+        var args = docker.Commands[2];
+        Assert.Equal(11, args.Count(value => value == "--env"));
+        Assert.DoesNotContain("/bin/bash", args);
+        Assert.Equal(["dotnet", "/app/Example.Agent.dll"], args.TakeLast(2));
     }
 
     [Fact]
@@ -168,6 +232,7 @@ public sealed class AgentContainerRunnerTests
             => Task.FromResult(new AgentContainerStatus("fake", request.ContainerName, AgentContainerState.Running, null, DateTimeOffset.UtcNow, null, null));
         public Task StopAsync(string containerId, TimeSpan gracePeriod, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<AgentContainerStatus?> InspectAsync(string containerId, CancellationToken cancellationToken = default) => Task.FromResult<AgentContainerStatus?>(null);
+        public Task<IReadOnlyList<AgentManagedContainer>> ListManagedAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<AgentManagedContainer>>([]);
         public Task RemoveAsync(string containerId, bool force = false, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task RemoveNetworkAsync(string networkName, string brokerGatewayContainer, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<string> GetLogsAsync(string containerId, int maximumBytes, CancellationToken cancellationToken = default) => Task.FromResult(string.Empty);

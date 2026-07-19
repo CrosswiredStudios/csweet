@@ -7,6 +7,11 @@ public sealed class AgentRuntimeManagerOptions
     public string BrokerEndpoint { get; set; } = DefaultBrokerEndpoint;
     public string DockerNetworkName { get; set; } = "csweet-runtime";
     public string BrokerGatewayContainer { get; set; } = "agenthost";
+    public bool CleanupContainersOnStartup { get; set; } = true;
+    public bool BrokerWatchdogEnabled { get; set; } = true;
+    public int BrokerWatchdogStartupGraceSeconds { get; set; } = 30;
+    public int BrokerWatchdogIntervalSeconds { get; set; } = 10;
+    public int BrokerDisconnectShutdownSeconds { get; set; } = 120;
     public int MaximumScheduleClaimsPerIteration { get; set; } = 10;
     public int InteractiveIdleTimeoutSeconds { get; set; } = 300;
 }
