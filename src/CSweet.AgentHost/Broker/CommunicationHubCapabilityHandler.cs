@@ -12,7 +12,8 @@ namespace CSweet.AgentHost.Broker;
 
 public sealed class CommunicationHubCapabilityHandler(
     CSweetDbContext db,
-    ICommunicationHubService hub) : IPlatformCapabilityHandler
+    ICommunicationHubService hub,
+    IExecutiveDecisionService? decisions = null) : IPlatformCapabilityHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -56,6 +57,8 @@ public sealed class CommunicationHubCapabilityHandler(
                         Read<ChatReference>(request).ChatId ?? throw new JsonException("chatId is required."),
                         actorId.Value, token)),
                 CommunicationHubCapabilities.SendMessage => await SendAsync(request, organizationId, actorId.Value, token),
+                CommunicationHubCapabilities.CreateExecutiveDecision => await CreateDecisionAsync(
+                    request, organizationId, installationId, token),
                 _ => Failure(request.RequestId, PlatformCapabilityErrorCode.NotFound, "The communication capability is not implemented.")
             };
         }
@@ -101,6 +104,31 @@ public sealed class CommunicationHubCapabilityHandler(
             : Success(request.RequestId, message.Message);
     }
 
+    private async Task<CapabilityResult> CreateDecisionAsync(
+        RequestCapability request,
+        Guid organizationId,
+        Guid installationId,
+        CancellationToken token)
+    {
+        var input = Read<CreateDecisionCapabilityRequest>(request);
+        try
+        {
+            var decision = await (decisions ?? throw new InvalidOperationException("The executive decision service is unavailable.")).CreateAsync(new CreateExecutiveDecisionCommand(
+                organizationId, input.ConversationId, input.ChatTurnId, installationId, input.Prompt,
+                input.Options.Select(x => new CSweet.Application.Communications.CreateExecutiveDecisionOption(x.Id, x.Label, x.Description)).ToList(),
+                input.RecommendedOptionId, input.IdempotencyKey), token);
+            return Success(request.RequestId, decision);
+        }
+        catch (ArgumentException exception)
+        {
+            return Failure(request.RequestId, PlatformCapabilityErrorCode.ValidationFailed, exception.Message);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Failure(request.RequestId, PlatformCapabilityErrorCode.Denied, exception.Message);
+        }
+    }
+
     private static T Read<T>(RequestCapability request) =>
         JsonSerializer.Deserialize<T>(request.Payload.Span, JsonOptions)
         ?? throw new JsonException("The payload was empty.");
@@ -129,4 +157,12 @@ public sealed class CommunicationHubCapabilityHandler(
         IReadOnlyList<Guid>? AudienceRoleIds = null,
         IReadOnlyList<Guid>? AudienceWorkstreamIds = null);
     private sealed record SendMessageCapabilityRequest(Guid ChatId, string Content, string? IdempotencyKey = null);
+    private sealed record CreateDecisionCapabilityRequest(
+        Guid ConversationId,
+        Guid ChatTurnId,
+        string Prompt,
+        IReadOnlyList<CreateDecisionOptionCapabilityRequest> Options,
+        string RecommendedOptionId,
+        string IdempotencyKey);
+    private sealed record CreateDecisionOptionCapabilityRequest(string Id, string Label, string? Description = null);
 }

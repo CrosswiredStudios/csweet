@@ -4,13 +4,10 @@ using Microsoft.EntityFrameworkCore;
 using CSweet.Application.Setup;
 using CSweet.Infrastructure.Setup;
 using CSweet.Infrastructure;
-using Microsoft.AspNetCore.Server.Kestrel.Core;
 using CSweet.Memory;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.WebHost.ConfigureKestrel(options =>
-    options.ConfigureEndpointDefaults(endpoint => endpoint.Protocols = HttpProtocols.Http2));
 builder.AddServiceDefaults();
 builder.Services.AddGrpc();
 builder.AddCSweetInfrastructure();
@@ -21,6 +18,8 @@ builder.Services
 builder.Services.AddSingleton<ConfiguredAgentAuthorizationPolicy>();
 builder.Services.AddScoped<IAgentAuthorizationPolicy, PersistedAgentAuthorizationPolicy>();
 builder.Services.AddSingleton<AgentSessionRegistry>();
+builder.Services.AddScoped<IPlatformCapabilityDispatcher, PlatformCapabilityDispatcher>();
+builder.Services.AddSingleton<McpToolCatalog>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services
     .AddOptions<AgentOnboardingDeliveryOptions>()
@@ -43,6 +42,9 @@ builder.Services.AddScoped<IPlatformCapabilityHandler, MemoryPlatformCapabilityA
 builder.Services.AddScoped<IPlatformCapabilityHandler, WebPlatformCapabilityAdapter>();
 builder.Services.AddScoped<IPlatformCapabilityHandler, WebSocketPlatformCapabilityAdapter>();
 builder.Services.AddScoped<IPlatformCapabilityHandler, WorkforcePlatformCapabilityHandler>();
+if (builder.Environment.IsDevelopment() &&
+    builder.Configuration.GetValue<bool>("DevelopmentMarketplace:Enabled"))
+    builder.Services.AddScoped<CSweet.Agent.SDK.IWorkforceCatalogProvider, DevelopmentWorkforceMarketplaceProvider>();
 builder.Services.AddScoped<IPlatformCapabilityHandler, CommunicationHubCapabilityHandler>();
 builder.Services.AddScoped<IPlatformCapabilityHandler, AgentOnboardingCapabilityHandler>();
 builder.Services.AddScoped<IPlatformEventObserver, ManagementEventObserver>();
@@ -51,6 +53,7 @@ builder.Services.AddScoped<IAgentMemoryIdentityResolver, AgentMemoryIdentityReso
 var app = builder.Build();
 
 app.MapGrpcService<AgentBrokerService>();
+app.MapCSweetMcpGateway();
 app.MapHealthChecks("/health");
 app.MapGet("/", () => Results.Ok(new
 {

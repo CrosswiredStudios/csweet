@@ -12,7 +12,8 @@ namespace CSweet.Infrastructure.Communications;
 public sealed class CommunicationHubService(
     CSweetDbContext db,
     IAuditEventWriter audit,
-    IChatTurnService turns) : ICommunicationHubService
+    IChatTurnService turns,
+    IExecutiveDecisionService? decisions = null) : ICommunicationHubService
 {
     public async Task<Guid?> ResolveOrganizationUserIdAsync(
         Guid organizationId,
@@ -97,7 +98,10 @@ public sealed class CommunicationHubService(
             .Where(x => x.ConversationId == chatId)
             .OrderBy(x => x.CreatedAt)
             .ToListAsync(cancellationToken);
-        return messages.Select(x => MapMessage(x, users)).ToList();
+        var decisionCards = decisions is null
+            ? new Dictionary<Guid, ExecutiveDecisionCardResponse>()
+            : await decisions.ListForMessagesAsync(organizationId, chatId, cancellationToken);
+        return messages.Select(x => MapMessage(x, users, decisionCards)).ToList();
     }
 
     public async Task<CommunicationUnreadSummaryResponse?> GetUnreadSummaryAsync(
@@ -423,13 +427,18 @@ public sealed class CommunicationHubService(
             last?.Content, last?.CreatedAt, unreadCount);
     }
 
-    private static CommunicationHubMessageResponse MapMessage(ConversationMessage message, IReadOnlyDictionary<Guid, OrganizationUser> users)
+    private static CommunicationHubMessageResponse MapMessage(
+        ConversationMessage message,
+        IReadOnlyDictionary<Guid, OrganizationUser> users,
+        IReadOnlyDictionary<Guid, ExecutiveDecisionCardResponse>? decisions = null)
     {
         var sender = message.SenderOrganizationUserId.HasValue && users.TryGetValue(message.SenderOrganizationUserId.Value, out var user) ? user : null;
         return new CommunicationHubMessageResponse(message.Id, message.Sequence, message.ConversationId, message.SenderOrganizationUserId,
             sender?.DisplayName ?? (message.Role == ConversationRole.Assistant ? "Assistant" : "Unknown"),
             sender?.EmployeeType.ToString() ?? (message.Role == ConversationRole.Assistant ? "Agent" : "Human"),
-            message.Content, message.CreatedAt, message.ChatTurnId);
+            message.Content, message.CreatedAt, message.ChatTurnId,
+            message.Role == ConversationRole.Assistant && message.ChatTurnId.HasValue &&
+            decisions?.TryGetValue(message.ChatTurnId.Value, out var decision) == true ? decision : null);
     }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

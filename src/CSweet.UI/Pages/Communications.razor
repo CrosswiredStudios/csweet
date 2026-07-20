@@ -120,7 +120,61 @@
                             <div class="hub-avatar @AvatarClass(message.SenderEmployeeType)">@Initials(message.SenderDisplayName)</div>
                             <div class="hub-message-body">
                                 <div class="hub-message-meta"><strong>@message.SenderDisplayName</strong>@if (message.SenderEmployeeType == "Agent") { <span>AGENT</span> }<time>@message.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</time></div>
-                                <ChatMarkdown Content="@message.Content" />
+                                 <ChatMarkdown Content="@message.Content" />
+                                @if (message.Decision is { } decision)
+                                {
+                                    <section class="executive-decision-card" aria-label="Executive decision">
+                                        <header>
+                                            <span>DECISION</span>
+                                            <strong>@decision.Prompt</strong>
+                                        </header>
+                                        @if (decision.Status == "Pending")
+                                        {
+                                            <div class="executive-decision-options">
+                                                @foreach (var option in decision.Options)
+                                                {
+                                                    <label class="@(option.Recommended ? "recommended" : null)">
+                                                        <input type="radio" name="@($"decision-{decision.Id}")"
+                                                               checked="@SelectedDecisionOption(decision.Id, option.Id)"
+                                                               @onchange="@(() => SelectDecisionOption(decision.Id, option.Id))" />
+                                                        <span><strong>@option.Label</strong>
+                                                            @if (option.Recommended) { <small class="recommendation-badge">RECOMMENDED</small> }
+                                                            @if (!string.IsNullOrWhiteSpace(option.Description)) { <small>@option.Description</small> }
+                                                        </span>
+                                                    </label>
+                                                }
+                                                <label>
+                                                    <input type="radio" name="@($"decision-{decision.Id}")"
+                                                           checked="@SelectedDecisionOption(decision.Id, SomethingElseKey)"
+                                                           @onchange="@(() => SelectDecisionOption(decision.Id, SomethingElseKey))" />
+                                                    <span><strong>Something else</strong><small>Give the agent a different direction.</small></span>
+                                                </label>
+                                                @if (SelectedDecisionOption(decision.Id, SomethingElseKey))
+                                                {
+                                                    <textarea aria-label="Something else" placeholder="Your direction"
+                                                              value="@DecisionOther(decision.Id)"
+                                                              @oninput="@(e => SetDecisionOther(decision.Id, e.Value?.ToString()))"></textarea>
+                                                }
+                                            </div>
+                                            @if (_decisionErrors.TryGetValue(decision.Id, out var decisionError))
+                                            {
+                                                <div class="executive-decision-error">@decisionError</div>
+                                            }
+                                            <footer>
+                                                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                                           Disabled="@(!CanSubmitDecision(decision.Id) || _decisionBusy.Contains(decision.Id))"
+                                                           OnClick="@(() => SubmitDecisionAsync(message, decision))">Submit</MudButton>
+                                            </footer>
+                                        }
+                                        else
+                                        {
+                                            <div class="executive-decision-answer">
+                                                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                                                <span>@DecisionAnswer(decision)</span>
+                                            </div>
+                                        }
+                                    </section>
+                                }
                                 @if (message.ChatTurnId is Guid messageTurnId &&
                                     _turns.TryGetValue(messageTurnId, out var messageTurn) &&
                                     messageTurn.Turn.AssistantMessageId == message.Id)
@@ -236,6 +290,11 @@
     private readonly HashSet<Guid> _observingTurns = [];
     private readonly HashSet<Guid> _selectedMembers = [];
     private readonly HashSet<string> _selectedAudiences = [];
+    private readonly Dictionary<Guid, string> _decisionSelections = [];
+    private readonly Dictionary<Guid, string> _decisionOther = [];
+    private readonly HashSet<Guid> _decisionBusy = [];
+    private readonly Dictionary<Guid, string> _decisionErrors = [];
+    private const string SomethingElseKey = "__something_else__";
     private bool _loading = true, _sending, _showMembers, _showEditor, _editorBusy, _editorPrivate, _confirmArchive;
     private string _search = string.Empty, _draft = string.Empty, _editorTitle = string.Empty, _editorDescription = string.Empty;
     private string? _error, _notice, _editorError;
@@ -349,6 +408,65 @@
         catch (Exception ex) { _draft = content; _notice = ex.Message; }
         finally { _sending = false; }
     }
+
+    private bool SelectedDecisionOption(Guid decisionId, string optionId) =>
+        _decisionSelections.TryGetValue(decisionId, out var selected) && selected == optionId;
+
+    private void SelectDecisionOption(Guid decisionId, string optionId)
+    {
+        _decisionSelections[decisionId] = optionId;
+        _decisionErrors.Remove(decisionId);
+    }
+
+    private string DecisionOther(Guid decisionId) =>
+        _decisionOther.TryGetValue(decisionId, out var value) ? value : string.Empty;
+
+    private void SetDecisionOther(Guid decisionId, string? value)
+    {
+        _decisionOther[decisionId] = value ?? string.Empty;
+        _decisionErrors.Remove(decisionId);
+    }
+
+    private bool CanSubmitDecision(Guid decisionId) =>
+        _decisionSelections.TryGetValue(decisionId, out var selected) &&
+        (selected != SomethingElseKey || !string.IsNullOrWhiteSpace(DecisionOther(decisionId)));
+
+    private async Task SubmitDecisionAsync(CommunicationHubMessageResponse message, ExecutiveDecisionCardResponse decision)
+    {
+        if (_selected is null || !CanSubmitDecision(decision.Id) || !_decisionBusy.Add(decision.Id)) return;
+        _decisionErrors.Remove(decision.Id);
+        try
+        {
+            var selection = _decisionSelections[decision.Id];
+            var request = new AnswerExecutiveDecisionRequest(
+                selection == SomethingElseKey ? null : selection,
+                selection == SomethingElseKey ? DecisionOther(decision.Id) : null,
+                Guid.NewGuid().ToString("N"));
+            var response = await Http.PostAsJsonAsync(
+                $"{BasePath}/chats/{_selected.Id}/decisions/{decision.Id}/respond", request, _disposeCts.Token);
+            var result = await response.Content.ReadFromJsonAsync<AnswerExecutiveDecisionResponse>(_disposeCts.Token);
+            if (!response.IsSuccessStatusCode || result is null || !result.Succeeded)
+                throw new InvalidOperationException(result?.Message ?? "The decision could not be submitted.");
+            var index = _messages.FindIndex(x => x.Id == message.Id);
+            if (index >= 0) _messages[index] = _messages[index] with { Decision = result.Decision };
+            if (result.Turn is not null)
+            {
+                var view = new TurnView(result.Turn);
+                _turns[result.Turn.Id] = view;
+                _ = ObserveTurnAsync(_selected.Id, view, _chatCts?.Token ?? _disposeCts.Token);
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _decisionErrors[decision.Id] = exception.Message;
+        }
+        finally { _decisionBusy.Remove(decision.Id); }
+    }
+
+    private static string DecisionAnswer(ExecutiveDecisionCardResponse decision) =>
+        decision.SelectedOptionId is { } selected
+            ? decision.Options.FirstOrDefault(x => x.Id == selected)?.Label ?? "Decision submitted"
+            : decision.FreeTextAnswer ?? decision.Status;
 
     private Task OnComposerKeyDown(KeyboardEventArgs args) => args.Key == "Enter" && !args.ShiftKey ? SendAsync() : Task.CompletedTask;
 

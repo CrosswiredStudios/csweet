@@ -3,6 +3,8 @@ using System.Text.Json;
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.Agent.SDK;
 using CSweet.Application.Setup;
+using CSweet.Application.Core;
+using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
 using CSweet.Infrastructure.Persistence;
 using Google.Protobuf;
@@ -14,7 +16,8 @@ public sealed class WorkforcePlatformCapabilityHandler(
     CSweetDbContext db,
     IAuditEventWriter audit,
     IEnumerable<IWorkforceCatalogProvider> workforceCatalogs,
-    IEnumerable<IBusinessPatternProvider> businessPatternProviders) : IPlatformCapabilityHandler
+    IEnumerable<IBusinessPatternProvider> businessPatternProviders,
+    IHiringService? hiring = null) : IPlatformCapabilityHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> ExplicitFields = new(StringComparer.OrdinalIgnoreCase)
@@ -24,7 +27,8 @@ public sealed class WorkforcePlatformCapabilityHandler(
         "timeZone"
     };
 
-    public bool CanHandle(string capability) => PlatformCapabilities.All.Contains(capability);
+    public bool CanHandle(string capability) => PlatformCapabilities.All.Contains(capability) ||
+        capability is HiringCapabilities.UpsertRecommendation or HiringCapabilities.StageWorkflow;
 
     public async IAsyncEnumerable<CapabilityResult> HandleAsync(
         AgentSession session,
@@ -61,6 +65,12 @@ public sealed class WorkforcePlatformCapabilityHandler(
                 PlatformCapabilities.BudgetEvaluate => await EvaluateBudgetAsync(request, organizationId, token),
                 PlatformCapabilities.ApprovalPropose => await PersistApprovalAsync(request, organizationId, installationId, token),
                 PlatformCapabilities.ManagementCycleRead => Success(request.RequestId, await ReadManagementCycleAsync(organizationId, token)),
+                HiringCapabilities.UpsertRecommendation => Success(request.RequestId,
+                    await (hiring ?? throw new InvalidOperationException("The hiring service is unavailable.")).UpsertRecommendationAsync(organizationId, installationId,
+                        Read<CSweet.Contracts.Core.UpsertHiringRecommendationRequest>(request), token)),
+                HiringCapabilities.StageWorkflow => Success(request.RequestId,
+                    await (hiring ?? throw new InvalidOperationException("The hiring service is unavailable.")).StageWorkflowAsync(organizationId, installationId,
+                        Read<CSweet.Contracts.Core.StageHiringWorkflowRequest>(request), token)),
                 _ => Failure(request.RequestId, PlatformCapabilityErrorCode.NotFound, "The platform capability is not implemented.")
             };
         }
@@ -294,9 +304,31 @@ public sealed class WorkforcePlatformCapabilityHandler(
         }
         if (providers.Count == 0)
             unavailableReasons.Add("No marketplace provider is connected; results include current staff and installed local resources only.");
-        return new WorkforceSearchResponse(
-            candidates.OrderByDescending(x => x.Score).Take(Math.Clamp(request.MaximumResults, 1, 25)).ToList(),
-            rejected, marketplaceAvailable, unavailableReasons.Count == 0 ? null : string.Join(" ", unavailableReasons));
+        var ranked = candidates.OrderByDescending(x => x.Score)
+            .Take(Math.Clamp(request.MaximumResults, 1, 25)).ToList();
+        var opaque = new List<CSweet.Agent.SDK.WorkforceCandidate>(ranked.Count);
+        foreach (var candidate in ranked)
+        {
+            var snapshot = new CSweet.Domain.Core.WorkforceCandidate
+            {
+                Id = Guid.NewGuid(), OrganizationId = organizationId, Source = candidate.Source,
+                ExternalCandidateId = candidate.CandidateId, DisplayName = candidate.Name,
+                CapabilitiesJson = JsonSerializer.Serialize(candidate.Capabilities, JsonOptions),
+                Score = candidate.Score, EstimatedCost = candidate.EstimatedCost, Currency = candidate.Currency,
+                IsHuman = candidate.ResourceType.Equals("Human", StringComparison.OrdinalIgnoreCase),
+                IsAvailable = true,
+                ExplanationJson = JsonSerializer.Serialize(new
+                {
+                    candidate.ResourceType, candidate.Credentials, candidate.Rationale,
+                    candidate.RequiresSeparateApproval
+                }, JsonOptions)
+            };
+            db.WorkforceCandidates.Add(snapshot);
+            opaque.Add(candidate with { CandidateId = $"candidate:{snapshot.Id:N}" });
+        }
+        if (opaque.Count > 0) await db.SaveChangesAsync(token);
+        return new WorkforceSearchResponse(opaque, rejected, marketplaceAvailable,
+            unavailableReasons.Count == 0 ? null : string.Join(" ", unavailableReasons));
     }
 
     private static async Task<bool> SearchCatalogsAsync(

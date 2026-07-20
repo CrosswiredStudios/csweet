@@ -102,6 +102,7 @@ public sealed class ChatTurnService(CSweetDbContext db) : IChatTurnService
         turn.Status = ChatTurnStatus.Cancelled;
         turn.CompletedAt = turn.UpdatedAt = DateTimeOffset.UtcNow;
         turn.LeaseOwner = null; turn.LeaseUntil = null;
+        await CancelPendingDecisionsAsync(turnId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -168,8 +169,22 @@ public sealed class ChatTurnService(CSweetDbContext db) : IChatTurnService
         var now = DateTimeOffset.UtcNow;
         turn.UpdatedAt = now;
         turn.LastActivityAt = now;
+        if (turn.Status is ChatTurnStatus.Failed or ChatTurnStatus.Cancelled)
+            await CancelPendingDecisionsAsync(turnId, cancellationToken);
         if (turn.Status is ChatTurnStatus.Failed or ChatTurnStatus.Cancelled) turn.CompletedAt = turn.UpdatedAt;
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task CancelPendingDecisionsAsync(Guid turnId, CancellationToken cancellationToken)
+    {
+        var pending = await db.ExecutiveDecisions.Where(x => x.ChatTurnId == turnId &&
+            x.Status == ExecutiveDecisionStatus.Pending).ToListAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var decision in pending)
+        {
+            decision.Status = ExecutiveDecisionStatus.Cancelled;
+            decision.UpdatedAt = now;
+        }
     }
 
     public async Task AppendOutputAsync(Guid turnId, string delta, CancellationToken cancellationToken = default)

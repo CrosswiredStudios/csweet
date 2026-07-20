@@ -112,6 +112,34 @@ public static class CommunicationEndpoints
             }
         });
 
+        group.MapPost("/hub/chats/{chatId:guid}/decisions/{decisionId:guid}/respond", async (
+            Guid organizationId, Guid chatId, Guid decisionId, AnswerExecutiveDecisionRequest request,
+            HttpContext http, ICommunicationHubService hub, IExecutiveDecisionService decisions,
+            CancellationToken cancellationToken) =>
+        {
+            var actorId = await ResolveActorAsync(organizationId, http, hub, cancellationToken);
+            if (actorId is null) return Results.Forbid();
+            try
+            {
+                var result = await decisions.AnswerAsync(organizationId, chatId, decisionId,
+                    actorId.Value, request, cancellationToken);
+                if (result.Succeeded)
+                    return result.Turn is null ? Results.Ok(result) : Results.Accepted(
+                        $"/api/organizations/{organizationId}/communications/hub/chats/{chatId}/turns/{result.Turn.Id}", result);
+                return result.ErrorCode switch
+                {
+                    "not_authorized" => Results.Json(result, statusCode: StatusCodes.Status403Forbidden),
+                    "decision_not_found" => Results.NotFound(result),
+                    "decision_already_answered" or "decision_not_pending" => Results.Conflict(result),
+                    _ => Results.BadRequest(result)
+                };
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.Conflict(new AnswerExecutiveDecisionResponse(false, "turn_active", exception.Message));
+            }
+        });
+
         group.MapGet("/providers/{providerKey}", async (Guid organizationId, string providerKey,
             ICommunicationWorkspaceService service, CancellationToken cancellationToken) =>
             await service.GetAsync(organizationId, providerKey, cancellationToken) is { } connection

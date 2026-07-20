@@ -1,0 +1,15 @@
+using CSweet.Contracts.Core;
+
+namespace CSweet.Application.Core;
+
+public interface IHiringService
+{
+    Task<HiringRecommendationResponse> UpsertRecommendationAsync(Guid organizationId, Guid requestingInstallationId,
+        UpsertHiringRecommendationRequest request, CancellationToken cancellationToken = default);
+    Task<HiringWorkflowResponse> StageWorkflowAsync(Guid organizationId, Guid requestingInstallationId,
+        StageHiringWorkflowRequest request, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<HiringRecommendationResponse>> ListRecommendationsAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<HiringDashboardResponse> GetDashboardAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<HiringWorkflowResponse?> ConfirmWorkflowAsync(Guid organizationId, Guid workflowId, Guid applicationUserId,
+        ConfirmHiringWorkflowRequest request, CancellationToken cancellationToken = default);
+}

@@ -51,7 +51,37 @@ public sealed record CommunicationHubMessageResponse(
     string SenderEmployeeType,
     string Content,
     DateTimeOffset CreatedAt,
-    Guid? ChatTurnId = null);
+    Guid? ChatTurnId = null,
+    ExecutiveDecisionCardResponse? Decision = null);
+
+public sealed record ExecutiveDecisionOptionResponse(
+    string Id,
+    string Label,
+    string? Description,
+    bool Recommended);
+
+public sealed record ExecutiveDecisionCardResponse(
+    Guid Id,
+    string Prompt,
+    string Status,
+    IReadOnlyList<ExecutiveDecisionOptionResponse> Options,
+    string RecommendedOptionId,
+    string? SelectedOptionId,
+    string? FreeTextAnswer,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? AnsweredAt);
+
+public sealed record AnswerExecutiveDecisionRequest(
+    [property: MaxLength(80)] string? OptionId,
+    [property: MaxLength(4000)] string? SomethingElse,
+    [property: Required, MaxLength(160)] string IdempotencyKey);
+
+public sealed record AnswerExecutiveDecisionResponse(
+    bool Succeeded,
+    string? ErrorCode,
+    string Message,
+    ExecutiveDecisionCardResponse? Decision = null,
+    CSweet.Contracts.Core.ChatTurnResponse? Turn = null);
 
 public sealed record CommunicationMessageSendResponse(
     CommunicationHubMessageResponse Message,
@@ -97,9 +127,10 @@ public static class CommunicationHubCapabilities
     public const string Modify = "communication.chat.modify.v1";
     public const string Delete = "communication.chat.delete.v1";
     public const string SendMessage = "communication.message.send.v1";
+    public const string CreateExecutiveDecision = "platform.chat-decision.create.v1";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
-        Read, Create, Modify, Delete, SendMessage
+        Read, Create, Modify, Delete, SendMessage, CreateExecutiveDecision
     };
 }

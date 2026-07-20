@@ -25,6 +25,7 @@ internal static class CoreConfigurations
         modelBuilder.Entity<ConversationMessage>(ConfigureConversationMessage);
         modelBuilder.Entity<ChatTurn>(ConfigureChatTurn);
         modelBuilder.Entity<ChatTurnTraceEvent>(ConfigureChatTurnTraceEvent);
+        modelBuilder.Entity<ExecutiveDecision>(ConfigureExecutiveDecision);
         modelBuilder.Entity<MemoryCaptureOutboxItem>(ConfigureMemoryCaptureOutbox);
         modelBuilder.Entity<AgentMemoryNamespaceRegistration>(ConfigureAgentMemoryNamespace);
         modelBuilder.Entity<AgentMemoryRecallUse>(ConfigureAgentMemoryRecallUse);
@@ -184,6 +185,8 @@ internal static class CoreConfigurations
         modelBuilder.Entity<WorkforcePlan>(entity =>
         {
             entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.OrganizationId, x.Status }); entity.Property(x => x.Objective).HasMaxLength(2048).IsRequired();
+            entity.HasIndex(x => new { x.OrganizationId, x.RequestingInstallationId, x.IdempotencyKey }).IsUnique();
+            entity.Property(x => x.Title).HasMaxLength(256).IsRequired(); entity.Property(x => x.IdempotencyKey).HasMaxLength(160).IsRequired();
             entity.Property(x => x.AssignmentsJson).HasColumnType("jsonb"); entity.Property(x => x.RejectedAlternativesJson).HasColumnType("jsonb");
             entity.Property(x => x.Currency).HasMaxLength(8); entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
         });
@@ -202,6 +205,7 @@ internal static class CoreConfigurations
         modelBuilder.Entity<StaffingActionProposal>(entity =>
         {
             entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.OrganizationId, x.Status }); entity.Property(x => x.ActionType).HasMaxLength(80).IsRequired();
+            entity.HasIndex(x => new { x.OrganizationId, x.RequestingInstallationId, x.IdempotencyKey }).IsUnique(); entity.Property(x => x.IdempotencyKey).HasMaxLength(160).IsRequired();
             entity.Property(x => x.CandidateSource).HasMaxLength(80).IsRequired(); entity.Property(x => x.CandidateId).HasMaxLength(256).IsRequired();
             entity.Property(x => x.PayloadJson).HasColumnType("jsonb"); entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
         });
@@ -462,6 +466,25 @@ internal static class CoreConfigurations
         entity.Property(x => x.Sensitivity).HasMaxLength(32).IsRequired();
         entity.HasIndex(x => new { x.ChatTurnId, x.Sequence }).IsUnique();
         entity.HasOne(x => x.ChatTurn).WithMany(x => x.TraceEvents).HasForeignKey(x => x.ChatTurnId).OnDelete(DeleteBehavior.Cascade);
+    }
+
+    static void ConfigureExecutiveDecision(EntityTypeBuilder<ExecutiveDecision> entity)
+    {
+        entity.HasKey(x => x.Id);
+        entity.Property(x => x.Prompt).HasMaxLength(2048).IsRequired();
+        entity.Property(x => x.OptionsJson).HasColumnType("jsonb").IsRequired();
+        entity.Property(x => x.RecommendedOptionId).HasMaxLength(80).IsRequired();
+        entity.Property(x => x.IdempotencyKey).HasMaxLength(200).IsRequired();
+        entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
+        entity.Property(x => x.SelectedOptionId).HasMaxLength(80);
+        entity.Property(x => x.FreeTextAnswer).HasMaxLength(4000);
+        entity.Property(x => x.AnswerIdempotencyKey).HasMaxLength(200);
+        entity.HasIndex(x => new { x.RequestingInstallationId, x.IdempotencyKey }).IsUnique();
+        entity.HasIndex(x => new { x.ConversationId, x.RequestingInstallationId, x.Status })
+            .IsUnique().HasFilter("\"Status\" = 'Pending'");
+        entity.HasIndex(x => x.ChatTurnId);
+        entity.HasOne(x => x.Conversation).WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(x => x.ChatTurn).WithMany().HasForeignKey(x => x.ChatTurnId).OnDelete(DeleteBehavior.Cascade);
     }
 
     static void ConfigureMemoryCaptureOutbox(EntityTypeBuilder<MemoryCaptureOutboxItem> entity)

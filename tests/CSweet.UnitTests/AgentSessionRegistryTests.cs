@@ -8,6 +8,19 @@ namespace CSweet.UnitTests;
 public sealed class AgentSessionRegistryTests
 {
     [Fact]
+    public void McpCredential_IsDedicatedSessionBoundAndReturnedOnlyOnce()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var session = Register(registry, "agent", "business-1");
+
+        var mcpToken = session.ConsumeInitialMcpAccessToken();
+
+        Assert.Same(session, registry.FindByMcpAccessToken(mcpToken));
+        Assert.Null(registry.FindByMcpAccessToken("forged-token"));
+        Assert.Throws<InvalidOperationException>(() => session.ConsumeInitialMcpAccessToken());
+    }
+
+    [Fact]
     public async Task PublishEvent_DeliversOnlyToAuthorizedSessionsInSameBusiness()
     {
         var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);

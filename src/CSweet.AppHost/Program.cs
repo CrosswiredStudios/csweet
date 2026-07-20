@@ -44,6 +44,8 @@ var agentHost = builder.AddDockerfile(
         Path.Combine("csweet", "docker", "agenthost.Dockerfile"))
     .WithContainerName("agenthost")
     .WithHttpEndpoint(targetPort: 8080, name: "http")
+    .WithHttpEndpoint(targetPort: 8081, name: "mcp")
+    .WithEnvironment("Mcp__PublicEndpoint", "http://agenthost:8081/mcp")
     .WithBindMount(localStateDirectory, "/state")
     .WithEnvironment("CSweet__Secrets__FilePath", "/state/provider-secrets.json")
     .WithReference(postgres)

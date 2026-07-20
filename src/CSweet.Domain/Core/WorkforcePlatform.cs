@@ -176,6 +176,10 @@ public sealed class WorkforcePlan
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
     public Guid? WorkstreamId { get; set; }
+    public Guid RequestingInstallationId { get; set; }
+    public Guid RecommendedCandidateId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string IdempotencyKey { get; set; } = string.Empty;
     public string Objective { get; set; } = string.Empty;
     public string AssignmentsJson { get; set; } = "[]";
     public string RejectedAlternativesJson { get; set; } = "[]";
@@ -183,6 +187,7 @@ public sealed class WorkforcePlan
     public string? Currency { get; set; }
     public ProposalStatus Status { get; set; } = ProposalStatus.Pending;
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? DecidedAt { get; set; }
 }
 
@@ -226,8 +231,13 @@ public sealed class StaffingActionProposal
     public string CandidateSource { get; set; } = string.Empty;
     public string CandidateId { get; set; } = string.Empty;
     public string PayloadJson { get; set; } = "{}";
+    public Guid RequestingInstallationId { get; set; }
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public Guid? ApprovedByOrganizationUserId { get; set; }
+    public Guid? ResultOrganizationUserId { get; set; }
     public ProposalStatus Status { get; set; } = ProposalStatus.Pending;
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? DecidedAt { get; set; }
 }
 
 public sealed class Responsibility

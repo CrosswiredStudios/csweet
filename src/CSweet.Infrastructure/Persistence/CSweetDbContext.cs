@@ -83,6 +83,7 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
     public DbSet<ConversationMessage> CoreConversationMessages => Set<ConversationMessage>();
     public DbSet<ChatTurn> ChatTurns => Set<ChatTurn>();
     public DbSet<ChatTurnTraceEvent> ChatTurnTraceEvents => Set<ChatTurnTraceEvent>();
+    public DbSet<ExecutiveDecision> ExecutiveDecisions => Set<ExecutiveDecision>();
     public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
     public DbSet<CommunicationConnection> CommunicationConnections => Set<CommunicationConnection>();
     public DbSet<ManagedExternalResource> ManagedExternalResources => Set<ManagedExternalResource>();

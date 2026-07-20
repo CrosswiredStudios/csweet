@@ -165,8 +165,10 @@ public static class DependencyInjection
         builder.Services.AddScoped<IExecutiveBriefingService, ExecutiveBriefingService>();
         builder.Services.AddScoped<IConversationService, ConversationService>();
         builder.Services.AddScoped<IChatTurnService, ChatTurnService>();
+        builder.Services.AddScoped<IHiringService, HiringService>();
         builder.Services.AddScoped<ICommunicationWorkspaceService, CommunicationWorkspaceService>();
         builder.Services.AddScoped<ICommunicationHubService, CommunicationHubService>();
+        builder.Services.AddScoped<IExecutiveDecisionService, ExecutiveDecisionService>();
         builder.Services.AddScoped<IAgentCommunicationOnboardingService, AgentCommunicationOnboardingService>();
         builder.Services.AddScoped<IApplicationRealtimeOutboxDispatcher, ApplicationRealtimeOutboxDispatcher>();
         builder.Services.AddScoped<ICommunicationEventOutboxDispatcher, CommunicationEventOutboxDispatcher>();

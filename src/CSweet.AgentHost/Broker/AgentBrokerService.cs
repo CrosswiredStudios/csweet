@@ -5,6 +5,9 @@ using CSweet.Application.Setup;
 using CSweet.Application.Core;
 using CSweet.Agent.SDK;
 using System.Text.Json;
+using CSweet.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Google.Protobuf.WellKnownTypes;
 
 namespace CSweet.AgentHost.Broker;
 
@@ -16,7 +19,10 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
     private readonly IAgentRuntimeSignalService _runtimeSignals;
     private readonly IExecutiveBriefingService _executiveBriefings;
     private readonly IReadOnlyList<IPlatformCapabilityHandler> _platformCapabilities;
+    private readonly IPlatformCapabilityDispatcher _platformDispatcher;
     private readonly IReadOnlyList<IPlatformEventObserver> _platformEventObservers;
+    private readonly CSweetDbContext _db;
+    private readonly IConfiguration _configuration;
 
     public AgentBrokerService(
         IAgentAuthorizationPolicy authorizationPolicy,
@@ -24,7 +30,10 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         IAgentRuntimeSignalService runtimeSignals,
         IExecutiveBriefingService executiveBriefings,
         IEnumerable<IPlatformCapabilityHandler> platformCapabilities,
+        IPlatformCapabilityDispatcher platformDispatcher,
         IEnumerable<IPlatformEventObserver> platformEventObservers,
+        CSweetDbContext db,
+        IConfiguration configuration,
         ILogger<AgentBrokerService> logger)
     {
         _authorizationPolicy = authorizationPolicy;
@@ -32,7 +41,10 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         _runtimeSignals = runtimeSignals;
         _executiveBriefings = executiveBriefings;
         _platformCapabilities = platformCapabilities.ToList();
+        _platformDispatcher = platformDispatcher;
         _platformEventObservers = platformEventObservers.ToList();
+        _db = db;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -108,6 +120,15 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         registration.GrantedSubscriptions.AddRange(grant.Subscriptions);
         registration.GrantedPublications.AddRange(grant.Publications);
         registration.GrantedPermissions.AddRange(grant.Permissions);
+        registration.GrantedRequestedCapabilities.AddRange(grant.RequestedCapabilities);
+        registration.McpEndpoint = _configuration["Mcp:PublicEndpoint"] ?? DefaultMcpEndpoint(context.Host);
+        registration.McpAccessToken = session.ConsumeInitialMcpAccessToken();
+        registration.McpTokenExpiresAt = Timestamp.FromDateTimeOffset(session.McpTokenExpiresAt);
+        if (Guid.TryParse(firstMessage.Register.InstallationId, out var registeredInstallationId))
+            registration.GrantRevision = await _db.AgentInstallations.AsNoTracking()
+                .Where(x => x.Id == registeredInstallationId)
+                .Select(x => (long)x.RevisionNumber)
+                .SingleOrDefaultAsync(context.CancellationToken);
 
         await responseStream.WriteAsync(new BrokerToAgentMessage
         {
@@ -185,7 +206,7 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                     var platformHandler = _platformCapabilities.FirstOrDefault(x => x.CanHandle(message.CapabilityRequest.Capability));
                     if (platformHandler is not null)
                     {
-                        await foreach (var result in platformHandler.HandleAsync(
+                        await foreach (var result in _platformDispatcher.InvokeAsync(
                             session,
                             message.CapabilityRequest,
                             cancellationToken))
@@ -278,4 +299,10 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                 RejectionReason = reason
             }
         };
+
+    private static string DefaultMcpEndpoint(string grpcHost)
+    {
+        var grpc = new Uri($"http://{grpcHost}");
+        return new UriBuilder(grpc) { Port = grpc.Port + 1, Path = "/mcp" }.Uri.ToString();
+    }
 }

@@ -80,7 +80,8 @@ public sealed class WorkforcePlatformCapabilityHandlerTests
         var response = JsonSerializer.Deserialize<WorkforceSearchResponse>(result.Payload.Span, JsonOptions);
 
         Assert.True(result.Succeeded);
-        Assert.Contains(response!.Candidates, x => x.CandidateId == "digital-1");
+        Assert.Contains(response!.Candidates, x => x.CandidateId.StartsWith("candidate:", StringComparison.Ordinal));
+        Assert.Contains(await db.WorkforceCandidates.ToListAsync(), x => x.ExternalCandidateId == "digital-1");
         Assert.Equal(1, digital.SearchCount);
         Assert.Equal(0, human.SearchCount);
     }

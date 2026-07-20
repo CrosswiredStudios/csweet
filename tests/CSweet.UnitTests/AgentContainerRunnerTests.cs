@@ -36,6 +36,8 @@ public sealed class AgentContainerRunnerTests
         Assert.Equal(16, args.Count(value => value == "--env"));
         Assert.Contains("CSweet__Plugin__InstallationId=22222222-2222-2222-2222-222222222222", args);
         Assert.Contains(args, value => value.StartsWith("CSweet__Plugin__BrokerEndpoint=", StringComparison.Ordinal));
+        Assert.DoesNotContain(args, value => value.StartsWith("CSWEET_MCP_ENDPOINT=", StringComparison.Ordinal));
+        Assert.DoesNotContain(args, value => value.StartsWith("CSWEET_MCP_TOKEN=", StringComparison.Ordinal));
         Assert.Contains("com.csweet.agent-runtime=true", args);
         Assert.Contains("com.csweet.runtime-instance-id=11111111111111111111111111111111", args);
         Assert.Contains("/bin/bash", args);

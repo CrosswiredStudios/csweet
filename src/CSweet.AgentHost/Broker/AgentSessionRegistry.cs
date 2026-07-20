@@ -28,6 +28,7 @@ public sealed class AgentSessionRegistry
             registration.BusinessId,
             registration.RuntimeInstanceId,
             registration.TickId,
+            registration.WorkloadToken,
             grant);
 
         if (!_sessions.TryAdd(session.SessionId, session))
@@ -166,6 +167,18 @@ public sealed class AgentSessionRegistry
             deliveredCount,
             string.Join(", ", deliveredTargets),
             correlationId);
+    }
+
+    public AgentSession? FindByWorkloadToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        return _sessions.Values.FirstOrDefault(session => session.MatchesWorkloadToken(token));
+    }
+
+    public AgentSession? FindByMcpAccessToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        return _sessions.Values.FirstOrDefault(session => session.MatchesMcpAccessToken(token));
     }
 
     /// <summary>Publishes a trusted, durable application event without impersonating an agent.</summary>
