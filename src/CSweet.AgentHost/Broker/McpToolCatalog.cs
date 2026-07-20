@@ -70,8 +70,10 @@ public sealed class McpToolCatalog
             "Read management cadence, executive briefing schedule, and quiet hours."),
         GlobalWrite(CommunicationHubCapabilities.AskUser, "ask_user",
             "Ask the user one structured multiple-choice question with two to four mutually exclusive options. Put the recommended option first. The UI automatically adds Something else with a free-text response."),
+        Read(HiringCapabilities.ListRecommendations, "list_hiring_recommendations",
+            "Read this agent installation's role backlog in priority order."),
         Write(HiringCapabilities.UpsertRecommendation, "upsert_hiring_recommendation",
-            "Maintain the ranked HR hiring backlog using opaque candidate references returned by search_workforce."),
+            "Create or update a prioritized role in this agent installation's hiring backlog. Candidate references may be omitted until sourcing begins."),
         Approval(HiringCapabilities.StageWorkflow, "stage_hiring_workflow",
             "Stage a combined install-and-hire proposal for explicit organization-owner approval. This does not install or hire directly.")
     ];
@@ -112,7 +114,8 @@ public sealed class McpToolCatalog
         PlatformCapabilities.BusinessProfileRead or
         PlatformCapabilities.OrganizationSnapshotRead or
         PlatformCapabilities.FinanceProfileRead or
-        PlatformCapabilities.ManagementCycleRead => EmptyInput,
+        PlatformCapabilities.ManagementCycleRead or
+        HiringCapabilities.ListRecommendations => EmptyInput,
         PlatformCapabilities.BusinessPatternSearch => Schema("""
             {"type":"object","properties":{"businessType":{"type":["string","null"]},"lifecycleStage":{"type":["string","null"]},"jurisdictions":{"type":["array","null"],"items":{"type":"string"}},"maximumResults":{"type":"integer","minimum":1,"maximum":10}},"additionalProperties":false}
             """),
@@ -129,7 +132,7 @@ public sealed class McpToolCatalog
             {"type":"object","required":["conversationId","chatTurnId","prompt","options","recommendedOptionId","idempotencyKey"],"properties":{"conversationId":{"type":"string","format":"uuid"},"chatTurnId":{"type":"string","format":"uuid"},"prompt":{"type":"string","minLength":1,"maxLength":2048},"options":{"type":"array","minItems":2,"maxItems":4,"items":{"type":"object","required":["id","label"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"label":{"type":"string","minLength":1,"maxLength":160},"description":{"type":["string","null"],"maxLength":500}},"additionalProperties":false}},"recommendedOptionId":{"type":"string","minLength":1,"maxLength":80},"idempotencyKey":{"type":"string","minLength":1,"maxLength":160}},"additionalProperties":false}
             """),
         HiringCapabilities.UpsertRecommendation => Schema("""
-            {"type":"object","required":["title","objective","candidateReferences","recommendedCandidateReference","idempotencyKey"],"properties":{"title":{"type":"string","minLength":1,"maxLength":256},"objective":{"type":"string","minLength":1,"maxLength":2048},"workstreamId":{"type":["string","null"],"format":"uuid"},"candidateReferences":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"string"}},"recommendedCandidateReference":{"type":"string"},"idempotencyKey":{"type":"string","minLength":1,"maxLength":160}},"additionalProperties":false}
+            {"type":"object","required":["title","objective","priority","candidateReferences","idempotencyKey"],"properties":{"title":{"type":"string","minLength":1,"maxLength":256},"objective":{"type":"string","minLength":1,"maxLength":2048},"priority":{"type":"integer","minimum":1,"maximum":100,"description":"1 is the highest priority"},"workstreamId":{"type":["string","null"],"format":"uuid"},"candidateReferences":{"type":"array","maxItems":3,"items":{"type":"string"}},"recommendedCandidateReference":{"type":["string","null"]},"idempotencyKey":{"type":"string","minLength":1,"maxLength":160}},"additionalProperties":false}
             """),
         HiringCapabilities.StageWorkflow => Schema("""
             {"type":"object","required":["recommendationId","candidateReference","roleTitle","idempotencyKey"],"properties":{"recommendationId":{"type":"string","format":"uuid"},"candidateReference":{"type":"string"},"roleTitle":{"type":"string","minLength":1,"maxLength":160},"reportsToOrganizationUserId":{"type":["string","null"],"format":"uuid"},"requiredGrants":{"type":["array","null"],"items":{"type":"string"}},"idempotencyKey":{"type":"string","minLength":1,"maxLength":160}},"additionalProperties":false}

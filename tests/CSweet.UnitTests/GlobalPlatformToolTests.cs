@@ -1,6 +1,7 @@
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.AgentHost.Broker;
 using CSweet.Contracts.Communications;
+using CSweet.Contracts.Core;
 using Google.Protobuf;
 
 namespace CSweet.UnitTests;
@@ -16,6 +17,20 @@ public sealed class GlobalPlatformToolTests
         Assert.Equal("ask_user", tool.Name);
         Assert.Equal(CommunicationHubCapabilities.AskUser, tool.Capability);
         Assert.Equal(McpToolAvailability.Global, tool.Availability);
+    }
+
+    [Fact]
+    public void Catalog_ExposesInstallationScopedHiringBacklogAsReadOnly()
+    {
+        var tools = new McpToolCatalog().List(new HashSet<string>(StringComparer.Ordinal)
+        {
+            HiringCapabilities.ListRecommendations
+        });
+
+        var tool = Assert.Single(tools, x => x.Name == "list_hiring_recommendations");
+        Assert.Equal(HiringCapabilities.ListRecommendations, tool.Capability);
+        Assert.Equal(McpToolExecutionPolicy.ReadOnly, tool.ExecutionPolicy);
+        Assert.Equal(McpToolAvailability.GrantRequired, tool.Availability);
     }
 
     [Fact]

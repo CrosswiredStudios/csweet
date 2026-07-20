@@ -13,6 +13,7 @@ public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
 
     public async Task<AgentBuildWorkspace> CloneAsync(
         AgentBuildExecutionRequest request,
+        IAgentBuildProgressReporter progress,
         CancellationToken cancellationToken = default)
     {
         ValidateRequest(request);
@@ -53,6 +54,7 @@ public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
     public async Task<AgentBuildExecutionResult> BuildAsync(
         AgentBuildExecutionRequest request,
         AgentBuildWorkspace workspace,
+        IAgentBuildProgressReporter progress,
         CancellationToken cancellationToken = default)
     {
         var log = new CappedBuildLog(workspace.LogPath, MegabytesToBytes(request.MaximumBuildLogMb));
@@ -88,46 +90,83 @@ public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
             "--env", "DOTNET_NOLOGO=1",
             request.BuilderImage,
             "/bin/sh", "-c",
-            "set -eu; mkdir -p /work/source; cp -a /source/. /work/source/; " +
+            "set -eu; echo '__CSWEET_BUILD_STEP__:isolate:started'; " +
+            "mkdir -p /work/source; cp -a /source/. /work/source/; " +
+            "echo '__CSWEET_BUILD_STEP__:isolate:succeeded'; " +
+            "echo '__CSWEET_BUILD_STEP__:restore:started'; " +
             "dotnet restore \"/work/source/$PROJECT_PATH\" --nologo --source https://api.nuget.org/v3/index.json; " +
+            "echo '__CSWEET_BUILD_STEP__:restore:succeeded'; " +
+            "echo '__CSWEET_BUILD_STEP__:publish:started'; " +
             "dotnet publish \"/work/source/$PROJECT_PATH\" --configuration Release --no-restore --nologo --output /output; " +
-            "cp /source/csweet-plugin.json /output/csweet-plugin.json"
+            "cp /source/csweet-plugin.json /output/csweet-plugin.json; " +
+            "echo '__CSWEET_BUILD_STEP__:publish:succeeded'"
         };
 
+        var tracker = new BuildStepTracker(progress);
         try
         {
-            await RunRequiredAsync("docker", arguments, null, log, cancellationToken);
+            await RunRequiredAsync("docker", arguments, null, log, cancellationToken, progress, tracker);
         }
         catch
         {
             await RemoveBuilderContainerAsync(containerName, log);
             throw;
         }
-        var packageFiles = EnumerateRegularFiles(workspace.StagingPackagePath, "build package");
-        if (packageFiles.Count == 0)
-        {
-            throw new AgentBuildException("The isolated builder completed without producing package files.");
-        }
-        EnsureTotalSize(packageFiles, request.MaximumRepositorySizeMb, "The build package");
-
-        var digest = await ComputePackageDigestAsync(
-            workspace.StagingPackagePath,
-            packageFiles,
+        await progress.ReportAsync(
+            new AgentBuildProgressUpdate(
+                AgentBuildStepKeys.Package,
+                AgentBuildStepStatuses.InProgress,
+                "Validating package contents and computing its digest."),
             cancellationToken);
-        var packageRoot = ResolveStorageRoot(request.PackageCachePath, "packages");
-        var finalPath = Path.Combine(packageRoot, request.PackageVersionId.ToString("N"), digest);
-        Directory.CreateDirectory(Path.GetDirectoryName(finalPath)!);
-        if (Directory.Exists(finalPath))
+        try
         {
-            Directory.Delete(workspace.StagingPackagePath, recursive: true);
-        }
-        else
-        {
-            Directory.Move(workspace.StagingPackagePath, finalPath);
-        }
+            var packageFiles = EnumerateRegularFiles(workspace.StagingPackagePath, "build package");
+            if (packageFiles.Count == 0)
+            {
+                throw new AgentBuildException("The isolated builder completed without producing package files.");
+            }
+            EnsureTotalSize(packageFiles, request.MaximumRepositorySizeMb, "The build package");
 
-        await log.AppendAsync($"Package digest: sha256:{digest}{Environment.NewLine}", cancellationToken);
-        return new AgentBuildExecutionResult(finalPath, digest, workspace.LogPath);
+            var digest = await ComputePackageDigestAsync(
+                workspace.StagingPackagePath,
+                packageFiles,
+                cancellationToken);
+            var packageRoot = ResolveStorageRoot(request.PackageCachePath, "packages");
+            var finalPath = Path.Combine(packageRoot, request.PackageVersionId.ToString("N"), digest);
+            Directory.CreateDirectory(Path.GetDirectoryName(finalPath)!);
+            if (Directory.Exists(finalPath))
+            {
+                Directory.Delete(workspace.StagingPackagePath, recursive: true);
+            }
+            else
+            {
+                Directory.Move(workspace.StagingPackagePath, finalPath);
+            }
+
+            await log.AppendAsync($"Package digest: sha256:{digest}{Environment.NewLine}", cancellationToken);
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(
+                    AgentBuildStepKeys.Package,
+                    AgentBuildStepStatuses.Succeeded,
+                    $"Package verified (sha256:{digest[..12]}…)."),
+                cancellationToken);
+            return new AgentBuildExecutionResult(finalPath, digest, workspace.LogPath);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            var message = $"Package verification failed. {exception.Message}";
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(
+                    AgentBuildStepKeys.Package,
+                    AgentBuildStepStatuses.Failed,
+                    Error: message),
+                CancellationToken.None);
+            throw new AgentBuildException(message, AgentBuildStepKeys.Package, exception);
+        }
     }
 
     public Task CleanupWorkspaceAsync(
@@ -151,7 +190,9 @@ public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         CappedBuildLog log,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IAgentBuildProgressReporter? progress = null,
+        BuildStepTracker? stepTracker = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -183,8 +224,19 @@ public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
                 exception);
         }
 
-        var standardOutput = log.CopyFromAsync(process.StandardOutput, cancellationToken);
-        var standardError = log.CopyFromAsync(process.StandardError, cancellationToken);
+        var diagnosticTail = new DiagnosticTailBuffer(16 * 1024);
+        var standardOutput = CopyProcessOutputAsync(
+            process.StandardOutput,
+            log,
+            diagnosticTail,
+            stepTracker,
+            cancellationToken);
+        var standardError = CopyProcessOutputAsync(
+            process.StandardError,
+            log,
+            diagnosticTail,
+            null,
+            cancellationToken);
         try
         {
             await process.WaitForExitAsync(cancellationToken);
@@ -198,9 +250,67 @@ public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
 
         if (process.ExitCode != 0)
         {
-            throw new AgentBuildException(
-                $"Required command '{fileName}' exited with code {process.ExitCode}. See the retained build log for details.");
+            var message = CreateFailureMessage(fileName, process.ExitCode, stepTracker, diagnosticTail);
+            if (progress is not null && stepTracker?.CurrentStepKey is not null)
+            {
+                await progress.ReportAsync(
+                    new AgentBuildProgressUpdate(
+                        stepTracker.CurrentStepKey,
+                        AgentBuildStepStatuses.Failed,
+                        Error: message),
+                    CancellationToken.None);
+            }
+            throw stepTracker?.CurrentStepKey is { } stepKey
+                ? new AgentBuildException(message, stepKey)
+                : new AgentBuildException(message);
         }
+    }
+
+    private static async Task CopyProcessOutputAsync(
+        StreamReader reader,
+        CappedBuildLog log,
+        DiagnosticTailBuffer diagnosticTail,
+        BuildStepTracker? stepTracker,
+        CancellationToken cancellationToken)
+    {
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            if (stepTracker is not null && await stepTracker.TryHandleMarkerAsync(line, cancellationToken))
+            {
+                continue;
+            }
+            diagnosticTail.Append(line);
+            await log.AppendAsync(line + Environment.NewLine, cancellationToken);
+        }
+    }
+
+    private static string CreateFailureMessage(
+        string fileName,
+        int exitCode,
+        BuildStepTracker? stepTracker,
+        DiagnosticTailBuffer diagnosticTail)
+    {
+        var lines = diagnosticTail.Lines;
+        var errorLines = lines
+            .Where(line => line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                           line.Contains("failed", StringComparison.OrdinalIgnoreCase))
+            .TakeLast(4)
+            .ToList();
+        var selected = errorLines.Count > 0 ? errorLines : lines.TakeLast(3).ToList();
+        var phase = stepTracker?.CurrentStepKey switch
+        {
+            AgentBuildStepKeys.Isolate => "Isolated build environment preparation",
+            AgentBuildStepKeys.Restore => "Dependency restore",
+            AgentBuildStepKeys.Publish => "Compilation and publish",
+            _ => $"Required command '{fileName}'"
+        };
+        var header = $"{phase} failed (exit code {exitCode}).";
+        if (selected.Count == 0)
+        {
+            return header;
+        }
+        var message = header + Environment.NewLine + string.Join(Environment.NewLine, selected);
+        return message.Length <= 1900 ? message : message[..1900];
     }
 
     private static async Task RemoveBuilderContainerAsync(string containerName, CappedBuildLog log)
@@ -434,6 +544,100 @@ public sealed class DockerAgentBuildExecutor : IPluginBuildExecutor
         }
         catch (InvalidOperationException)
         {
+        }
+    }
+
+    private sealed class BuildStepTracker(IAgentBuildProgressReporter progress)
+    {
+        private const string MarkerPrefix = "__CSWEET_BUILD_STEP__:";
+
+        public string? CurrentStepKey { get; private set; }
+
+        public async Task<bool> TryHandleMarkerAsync(string line, CancellationToken cancellationToken)
+        {
+            if (!line.StartsWith(MarkerPrefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var marker = line[MarkerPrefix.Length..].Split(':', 2, StringSplitOptions.TrimEntries);
+            if (marker.Length != 2 || marker[0] is not (
+                    AgentBuildStepKeys.Isolate or
+                    AgentBuildStepKeys.Restore or
+                    AgentBuildStepKeys.Publish))
+            {
+                return true;
+            }
+
+            var stepKey = marker[0];
+            if (string.Equals(marker[1], "started", StringComparison.Ordinal))
+            {
+                CurrentStepKey = stepKey;
+                var detail = stepKey switch
+                {
+                    AgentBuildStepKeys.Isolate => "Copying approved source into the restricted build container.",
+                    AgentBuildStepKeys.Restore => "Resolving packages from the approved package feed.",
+                    _ => "Compiling the agent and producing release output."
+                };
+                await progress.ReportAsync(
+                    new AgentBuildProgressUpdate(
+                        stepKey,
+                        AgentBuildStepStatuses.InProgress,
+                        detail),
+                    cancellationToken);
+            }
+            else if (string.Equals(marker[1], "succeeded", StringComparison.Ordinal))
+            {
+                var detail = stepKey switch
+                {
+                    AgentBuildStepKeys.Isolate => "The isolated build environment is ready.",
+                    AgentBuildStepKeys.Restore => "All dependencies were restored.",
+                    _ => "The agent compiled and publish output was created."
+                };
+                await progress.ReportAsync(
+                    new AgentBuildProgressUpdate(
+                        stepKey,
+                        AgentBuildStepStatuses.Succeeded,
+                        detail),
+                    cancellationToken);
+                CurrentStepKey = null;
+            }
+            return true;
+        }
+    }
+
+    private sealed class DiagnosticTailBuffer(int maximumCharacters)
+    {
+        private readonly Queue<string> _lines = new();
+        private readonly object _lock = new();
+        private int _characterCount;
+
+        public IReadOnlyList<string> Lines
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _lines.ToList();
+                }
+            }
+        }
+
+        public void Append(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return;
+            }
+            lock (_lock)
+            {
+                _lines.Enqueue(line);
+                _characterCount += line.Length;
+                while (_characterCount > maximumCharacters && _lines.Count > 1)
+                {
+                    _characterCount -= _lines.Dequeue().Length;
+                }
+            }
         }
     }
 

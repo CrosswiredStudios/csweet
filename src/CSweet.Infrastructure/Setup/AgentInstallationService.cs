@@ -164,13 +164,15 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
         }
         if (shouldQueueBuild)
         {
-            _dbContext.AgentBuildJobs.Add(new AgentBuildJob
+            var buildJob = new AgentBuildJob
             {
                 Id = Guid.NewGuid(),
                 PackageVersionId = packageVersion.Id,
                 Attempt = 1,
                 QueuedAt = now
-            });
+            };
+            buildJob.StepsJson = AgentBuildStepStore.CreateInitialJson(buildJob.QueuedAt);
+            _dbContext.AgentBuildJobs.Add(buildJob);
         }
         installation.PackageVersion = packageVersion;
         installation.Grant = grant;
@@ -317,13 +319,15 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
         }
         if (shouldQueueBuild)
         {
-            _dbContext.AgentBuildJobs.Add(new AgentBuildJob
+            var buildJob = new AgentBuildJob
             {
                 Id = Guid.NewGuid(),
                 PackageVersionId = nextPackage.Id,
                 Attempt = (latestBuild?.Attempt ?? 0) + 1,
                 QueuedAt = now
-            });
+            };
+            buildJob.StepsJson = AgentBuildStepStore.CreateInitialJson(buildJob.QueuedAt);
+            _dbContext.AgentBuildJobs.Add(buildJob);
         }
 
         var installationKey = installation.InstallationKey == Guid.Empty ? installation.Id : installation.InstallationKey;
@@ -994,7 +998,8 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
             installation.UpdatedAt,
             build is null ? null : new AgentBuildSummaryResponse(
                 build.Id, build.Status.ToString(), build.Attempt, build.QueuedAt, build.StartedAt,
-                build.CompletedAt, !string.IsNullOrWhiteSpace(build.LogPath), build.FailureMessage),
+                build.CompletedAt, !string.IsNullOrWhiteSpace(build.LogPath), build.FailureMessage,
+                AgentBuildStepStore.Read(build)),
             runtime is null ? null : ToRunResponse(runtime))
         {
             PluginKind = package.PluginKind.ToString(),

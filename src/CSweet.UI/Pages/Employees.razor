@@ -68,7 +68,7 @@
                         <MudPaper Class="@($"pa-5 hiring-recommendation {(Recommendation == recommendation.Id ? "highlighted" : string.Empty)}")" Elevation="0" Outlined="true">
                             <MudStack Spacing="2">
                                 <div class="hiring-heading">
-                                    <div><MudText Typo="Typo.overline">@recommendation.Status</MudText><MudText Typo="Typo.h5">@recommendation.Title</MudText><MudText Color="Color.Secondary">@recommendation.Objective</MudText></div>
+                                    <div><MudText Typo="Typo.overline">Priority @recommendation.Priority · @recommendation.Status</MudText><MudText Typo="Typo.h5">@recommendation.Title</MudText><MudText Color="Color.Secondary">@recommendation.Objective</MudText></div>
                                     @if (workflow?.Status == "Pending")
                                     {
                                         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_confirmingHire"
@@ -88,7 +88,11 @@
                                         @if (candidate.RequiredGrants.Count > 0) { <small>Required grants: @string.Join(", ", candidate.RequiredGrants)</small> }
                                     </div>
                                 }
-                                @if (workflow is null)
+                                @if (recommendation.Candidates.Count == 0)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Candidate sourcing has not started. This role remains on the staffing backlog.</MudText>
+                                }
+                                else if (workflow is null)
                                 {
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">The agent has not staged an approval workflow yet.</MudText>
                                 }

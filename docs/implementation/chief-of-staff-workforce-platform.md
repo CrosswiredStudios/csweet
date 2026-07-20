@@ -5,11 +5,16 @@ The Chief of Staff is a required leadership position, not a privileged agent imp
 ## Authority boundaries
 
 - C-Sweet owns profiles, organization state, proposals, budgets, reservations, management cycles, and audit records.
+- C-Sweet may supply transport metadata and universal interaction contracts, but it does not inject a Chief-of-Staff persona, response policy, or operating prompt. Those behaviors belong to the installed agent package so competing agents can differentiate themselves.
 - Agents receive only explicitly granted, organization-scoped broker capabilities.
 - Explicit low-risk owner facts require verified conversation/message provenance and an expected revision.
 - Inferred or sensitive business changes, finance changes, workstreams, workforce plans, and staffing actions become proposals.
 - Workforce-plan approval does not install an agent, expand grants, reserve/spend money, contact a human, or accept an engagement.
 - Paid execution requires a same-currency budget reservation; the most restrictive applicable budget wins.
+
+## Ranked hiring backlog
+
+The platform exposes an optional, installation-scoped hiring backlog rather than prescribing how an agent must use it. An authorized agent can read its own role recommendations, create candidate-free role to-dos, assign explicit priorities, attach ranked candidates later, and stage a selected candidate for owner approval. The platform persists and enforces the records; the plugin decides how to assess the organization, rank roles, and conduct the hiring conversation.
 
 ## Extension points
 

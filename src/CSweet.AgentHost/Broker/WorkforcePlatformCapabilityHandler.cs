@@ -28,7 +28,7 @@ public sealed class WorkforcePlatformCapabilityHandler(
     };
 
     public bool CanHandle(string capability) => PlatformCapabilities.All.Contains(capability) ||
-        capability is HiringCapabilities.UpsertRecommendation or HiringCapabilities.StageWorkflow;
+        capability is HiringCapabilities.ListRecommendations or HiringCapabilities.UpsertRecommendation or HiringCapabilities.StageWorkflow;
 
     public async IAsyncEnumerable<CapabilityResult> HandleAsync(
         AgentSession session,
@@ -65,6 +65,9 @@ public sealed class WorkforcePlatformCapabilityHandler(
                 PlatformCapabilities.BudgetEvaluate => await EvaluateBudgetAsync(request, organizationId, token),
                 PlatformCapabilities.ApprovalPropose => await PersistApprovalAsync(request, organizationId, installationId, token),
                 PlatformCapabilities.ManagementCycleRead => Success(request.RequestId, await ReadManagementCycleAsync(organizationId, token)),
+                HiringCapabilities.ListRecommendations => Success(request.RequestId,
+                    new CSweet.Contracts.Core.HiringBacklogResponse(await (hiring ?? throw new InvalidOperationException("The hiring service is unavailable."))
+                        .ListRecommendationsForInstallationAsync(organizationId, installationId, token))),
                 HiringCapabilities.UpsertRecommendation => Success(request.RequestId,
                     await (hiring ?? throw new InvalidOperationException("The hiring service is unavailable.")).UpsertRecommendationAsync(organizationId, installationId,
                         Read<CSweet.Contracts.Core.UpsertHiringRecommendationRequest>(request), token)),

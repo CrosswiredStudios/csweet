@@ -25,8 +25,12 @@ public sealed class HiringService(
         var objective = Required(request.Objective, 2048, nameof(request.Objective));
         var key = Required(request.IdempotencyKey, 160, nameof(request.IdempotencyKey));
         var references = request.CandidateReferences.Distinct(StringComparer.Ordinal).ToList();
-        if (references.Count is < 1 or > 3) throw new ArgumentException("A recommendation must contain one to three ranked candidates.");
-        if (!references.Contains(request.RecommendedCandidateReference, StringComparer.Ordinal))
+        if (references.Count > 3) throw new ArgumentException("A recommendation may contain up to three ranked candidates.");
+        if (request.Priority is < 1 or > 100) throw new ArgumentException("Priority must be between 1 and 100, where 1 is highest.");
+        if (references.Count == 0 && !string.IsNullOrWhiteSpace(request.RecommendedCandidateReference))
+            throw new ArgumentException("A recommendation without candidates cannot select a recommended candidate.");
+        if (references.Count > 0 && (string.IsNullOrWhiteSpace(request.RecommendedCandidateReference) ||
+            !references.Contains(request.RecommendedCandidateReference, StringComparer.Ordinal)))
             throw new ArgumentException("The recommended candidate must be in the ranked candidate list.");
         var candidates = await ResolveCandidatesAsync(organizationId, references, cancellationToken);
         if (candidates.Count != references.Count) throw new ArgumentException("One or more candidate references are invalid or expired.");
@@ -38,7 +42,9 @@ public sealed class HiringService(
             x.RequestingInstallationId == requestingInstallationId && x.IdempotencyKey == key, cancellationToken);
         var now = DateTimeOffset.UtcNow;
         var orderedIds = references.Select(reference => ParseCandidateReference(reference)).ToList();
-        var recommendedId = ParseCandidateReference(request.RecommendedCandidateReference);
+        var recommendedId = string.IsNullOrWhiteSpace(request.RecommendedCandidateReference)
+            ? (Guid?)null
+            : ParseCandidateReference(request.RecommendedCandidateReference);
         var plan = existing ?? new WorkforcePlan
         {
             Id = Guid.NewGuid(), OrganizationId = organizationId, RequestingInstallationId = requestingInstallationId,
@@ -47,10 +53,12 @@ public sealed class HiringService(
         plan.WorkstreamId = request.WorkstreamId;
         plan.Title = title;
         plan.Objective = objective;
+        plan.Priority = request.Priority;
         plan.RecommendedCandidateId = recommendedId;
         plan.AssignmentsJson = JsonSerializer.Serialize(orderedIds, JsonOptions);
-        plan.EstimatedMonthlyCost = candidates.First(x => x.Id == recommendedId).EstimatedCost;
-        plan.Currency = candidates.First(x => x.Id == recommendedId).Currency;
+        var recommendedCandidate = recommendedId.HasValue ? candidates.First(x => x.Id == recommendedId.Value) : null;
+        plan.EstimatedMonthlyCost = recommendedCandidate?.EstimatedCost;
+        plan.Currency = recommendedCandidate?.Currency;
         plan.UpdatedAt = now;
         foreach (var candidate in candidates) candidate.WorkforcePlanId = plan.Id;
         if (existing is null) db.WorkforcePlans.Add(plan);
@@ -110,7 +118,22 @@ public sealed class HiringService(
         CancellationToken cancellationToken = default)
     {
         var plans = await db.WorkforcePlans.AsNoTracking().Where(x => x.OrganizationId == organizationId)
-            .OrderByDescending(x => x.UpdatedAt).ToListAsync(cancellationToken);
+            .OrderBy(x => x.Priority).ThenBy(x => x.CreatedAt).ToListAsync(cancellationToken);
+        var candidateIds = plans.SelectMany(x => ReadIds(x.AssignmentsJson)).Distinct().ToList();
+        var candidates = await db.WorkforceCandidates.AsNoTracking().Where(x => candidateIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+        return plans.Select(plan => ToRecommendation(plan, ReadIds(plan.AssignmentsJson)
+            .Where(candidates.ContainsKey).Select(id => candidates[id]).ToList())).ToList();
+    }
+
+    public async Task<IReadOnlyList<HiringRecommendationResponse>> ListRecommendationsForInstallationAsync(
+        Guid organizationId,
+        Guid requestingInstallationId,
+        CancellationToken cancellationToken = default)
+    {
+        var plans = await db.WorkforcePlans.AsNoTracking().Where(x =>
+                x.OrganizationId == organizationId && x.RequestingInstallationId == requestingInstallationId)
+            .OrderBy(x => x.Priority).ThenBy(x => x.CreatedAt).ToListAsync(cancellationToken);
         var candidateIds = plans.SelectMany(x => ReadIds(x.AssignmentsJson)).Distinct().ToList();
         var candidates = await db.WorkforceCandidates.AsNoTracking().Where(x => candidateIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
@@ -300,8 +323,10 @@ public sealed class HiringService(
         var byId = candidates.ToDictionary(x => x.Id);
         var ordered = ReadIds(plan.AssignmentsJson).Where(byId.ContainsKey).Select(id => ToCandidate(byId[id])).ToList();
         return new(plan.Id, plan.WorkstreamId, plan.Title, plan.Objective, plan.Status.ToString(),
-            CandidateReference(plan.RecommendedCandidateId), ordered, plan.CreatedAt, plan.UpdatedAt)
+            plan.RecommendedCandidateId.HasValue ? CandidateReference(plan.RecommendedCandidateId.Value) : null,
+            ordered, plan.CreatedAt, plan.UpdatedAt)
         {
+            Priority = plan.Priority,
             HiringUrl = $"/organizations/{plan.OrganizationId:D}/employees?tab=hiring&recommendation={plan.Id:D}"
         };
     }

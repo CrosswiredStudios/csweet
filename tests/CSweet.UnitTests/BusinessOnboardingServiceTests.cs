@@ -1,4 +1,5 @@
 using CSweet.Application.Core;
+using CSweet.Application.Setup;
 using CSweet.Contracts.BusinessOnboarding;
 using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
@@ -18,6 +19,7 @@ public class BusinessOnboardingServiceTests
     {
         await using var dbContext = CreateDbContext();
         var auditWriter = new TestAuditEventWriter();
+        var runtimeManager = new RecordingAgentRuntimeManager();
         var roleService = new RoleService(dbContext, auditWriter);
         var service = new BusinessOnboardingService(
             new CoreOrganizationService(dbContext, auditWriter, roleService),
@@ -27,7 +29,8 @@ public class BusinessOnboardingServiceTests
             new WorkerService(dbContext, auditWriter),
             auditWriter,
             new ExecutiveBriefingService(dbContext, auditWriter, TimeProvider.System),
-            dbContext);
+            dbContext,
+            agentRuntimeManager: runtimeManager);
         var applicationUser = new ApplicationUser
         {
             Id = Guid.NewGuid(),
@@ -86,6 +89,8 @@ public class BusinessOnboardingServiceTests
         Assert.Equal(applicationUser.Id, ceo.ApplicationUserId);
         Assert.Equal("chief-of-staff", leadership.PositionKey);
         Assert.Equal(organization.Id.ToString("D"), installation.BusinessId);
+        Assert.Equal(installation.Id, runtimeManager.QueuedInstallationId);
+        Assert.True(runtimeManager.Interactive);
     }
 
     [Fact]
@@ -147,7 +152,12 @@ public class BusinessOnboardingServiceTests
         Assert.Equal(6, result.Onboarding.CreatedRoleCount);
         Assert.Equal(5, result.Onboarding.CreatedTaskCount);
         Assert.True(result.Onboarding.OrganizationActivated);
-        Assert.Contains("command-center", result.Onboarding.NextRoute);
+        var chiefConversation = await dbContext.CoreConversations.SingleAsync(x =>
+            x.OrganizationId == result.Onboarding.OrganizationId &&
+            x.AgentOrganizationUserId == result.Onboarding.ChiefOrganizationUserId);
+        Assert.Equal(
+            $"/organizations/{result.Onboarding.OrganizationId}/communications/{chiefConversation.Id:D}",
+            result.Onboarding.NextRoute);
 
         var organizationId = result.Onboarding.OrganizationId;
         var organization = await dbContext.CoreOrganizations.SingleAsync(x => x.Id == organizationId);
@@ -237,5 +247,31 @@ public class BusinessOnboardingServiceTests
             .Options;
 
         return new CSweetDbContext(options);
+    }
+
+    private sealed class RecordingAgentRuntimeManager : IAgentRuntimeManager
+    {
+        public Guid? QueuedInstallationId { get; private set; }
+        public bool Interactive { get; private set; }
+
+        public Task<bool> EnsureRuntimeQueuedAsync(
+            Guid installationId,
+            string reason,
+            bool interactive = false,
+            CancellationToken cancellationToken = default)
+        {
+            QueuedInstallationId = installationId;
+            Interactive = interactive;
+            return Task.FromResult(true);
+        }
+
+        public Task<int> EnsureAlwaysOnRuntimesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<int> ProcessDueSchedulesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<int> ReconcileAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
     }
 }

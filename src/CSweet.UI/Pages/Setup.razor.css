@@ -140,6 +140,26 @@
     padding: clamp(1.5rem, 4vw, 3rem);
 }
 
+.email-step-actions,
+.email-step-primary-actions {
+    display: flex;
+    align-items: center;
+}
+
+.email-step-actions {
+    justify-content: space-between;
+    gap: 1rem;
+    padding-top: 1.35rem;
+    margin-top: 2rem;
+    border-top: 1px solid var(--cs-border);
+}
+
+.email-step-primary-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: .75rem;
+}
+
 @media (prefers-reduced-motion: no-preference) {
     .setup-stage {
         animation: setup-stage-in .28s cubic-bezier(.22, .75, .2, 1) both;
@@ -185,6 +205,17 @@
 
     .setup-shell ::deep .setup-card {
         border-radius: 16px;
+    }
+
+    .email-step-actions,
+    .email-step-primary-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .email-step-actions > ::deep .mud-button-root,
+    .email-step-primary-actions ::deep .mud-button-root {
+        width: 100%;
     }
 }
 

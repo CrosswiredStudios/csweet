@@ -1001,6 +1001,49 @@ code {
     font: 0.8rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
+.agent-build-steps {
+    display: grid;
+    gap: 0.65rem;
+    margin: 0 0 1rem;
+    padding: 0.85rem;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, var(--mud-palette-surface) 94%, var(--mud-palette-primary) 6%);
+}
+
+.agent-build-step {
+    display: grid;
+    grid-template-columns: 1.75rem minmax(0, 1fr);
+    gap: 0.55rem;
+    align-items: start;
+}
+
+.agent-build-step-indicator {
+    min-height: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.agent-build-step-content {
+    min-width: 0;
+}
+
+.agent-build-step-error {
+    margin: 0.4rem 0 0;
+    padding: 0.65rem 0.75rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border-left: 3px solid var(--mud-palette-error);
+    border-radius: 0.25rem;
+    background: color-mix(in srgb, var(--mud-palette-error) 10%, var(--mud-palette-surface));
+    color: var(--mud-palette-error-darken);
+    font-family: var(--mud-typography-default-family);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
 .agent-import-approval-list {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));

@@ -9,6 +9,8 @@ public interface IHiringService
     Task<HiringWorkflowResponse> StageWorkflowAsync(Guid organizationId, Guid requestingInstallationId,
         StageHiringWorkflowRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<HiringRecommendationResponse>> ListRecommendationsAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<HiringRecommendationResponse>> ListRecommendationsForInstallationAsync(Guid organizationId,
+        Guid requestingInstallationId, CancellationToken cancellationToken = default);
     Task<HiringDashboardResponse> GetDashboardAsync(Guid organizationId, CancellationToken cancellationToken = default);
     Task<HiringWorkflowResponse?> ConfirmWorkflowAsync(Guid organizationId, Guid workflowId, Guid applicationUserId,
         ConfirmHiringWorkflowRequest request, CancellationToken cancellationToken = default);

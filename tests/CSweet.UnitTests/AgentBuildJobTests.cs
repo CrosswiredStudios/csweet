@@ -52,6 +52,9 @@ public sealed class AgentBuildJobTests
         Assert.Equal(FakeBuildExecutor.PackagePath, package.PackagePath);
         Assert.NotNull(package.BuiltAt);
         Assert.True(executor.CleanupCalled);
+        var steps = AgentBuildStepStoreForTest.Read(job.StepsJson);
+        Assert.Equal(6, steps.Count);
+        Assert.All(steps, step => Assert.Equal(AgentBuildStepStatuses.Succeeded, step.Status));
     }
 
     [Fact]
@@ -69,6 +72,11 @@ public sealed class AgentBuildJobTests
         Assert.Equal(AgentPackageVersionStatus.Failed, package.Status);
         Assert.Equal("publish failed", job.FailureMessage);
         Assert.False(executor.CleanupCalled);
+        Assert.Contains(
+            AgentBuildStepStoreForTest.Read(job.StepsJson),
+            step => step.Key == AgentBuildStepKeys.Publish &&
+                    step.Status == AgentBuildStepStatuses.Failed &&
+                    step.Error == "publish failed");
     }
 
     [Fact]
@@ -193,19 +201,45 @@ public sealed class AgentBuildJobTests
 
         public Task<AgentBuildWorkspace> CloneAsync(
             AgentBuildExecutionRequest request,
+            IAgentBuildProgressReporter progress,
             CancellationToken cancellationToken = default)
         {
             CloneCalled = true;
             return Task.FromResult(new AgentBuildWorkspace("/sources/job", "/packages/.staging/job", "/logs/job.log"));
         }
 
-        public Task<AgentBuildExecutionResult> BuildAsync(
+        public async Task<AgentBuildExecutionResult> BuildAsync(
             AgentBuildExecutionRequest request,
             AgentBuildWorkspace workspace,
-            CancellationToken cancellationToken = default) =>
-            BuildFailure is null
-                ? Task.FromResult(new AgentBuildExecutionResult(PackagePath, Digest, workspace.LogPath))
-                : Task.FromException<AgentBuildExecutionResult>(BuildFailure);
+            IAgentBuildProgressReporter progress,
+            CancellationToken cancellationToken = default)
+        {
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(
+                    AgentBuildStepKeys.Restore,
+                    AgentBuildStepStatuses.InProgress),
+                cancellationToken);
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(
+                    AgentBuildStepKeys.Restore,
+                    AgentBuildStepStatuses.Succeeded),
+                cancellationToken);
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(
+                    AgentBuildStepKeys.Publish,
+                    AgentBuildStepStatuses.InProgress),
+                cancellationToken);
+            if (BuildFailure is not null)
+            {
+                throw BuildFailure;
+            }
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(
+                    AgentBuildStepKeys.Publish,
+                    AgentBuildStepStatuses.Succeeded),
+                cancellationToken);
+            return new AgentBuildExecutionResult(PackagePath, Digest, workspace.LogPath);
+        }
 
         public Task CleanupWorkspaceAsync(
             AgentBuildWorkspace workspace,
@@ -214,5 +248,13 @@ public sealed class AgentBuildJobTests
             CleanupCalled = true;
             return Task.CompletedTask;
         }
+    }
+
+    private static class AgentBuildStepStoreForTest
+    {
+        public static IReadOnlyList<CSweet.Contracts.Agents.AgentBuildStepResponse> Read(string json) =>
+            System.Text.Json.JsonSerializer.Deserialize<IReadOnlyList<CSweet.Contracts.Agents.AgentBuildStepResponse>>(
+                json,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)) ?? [];
     }
 }

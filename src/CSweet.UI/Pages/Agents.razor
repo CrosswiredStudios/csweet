@@ -177,6 +177,47 @@
                                     </MudStack>
                                 </MudAlert>
                             }
+                            @if (installation.Build?.Steps is { Count: > 0 } buildSteps)
+                            {
+                                <div class="agent-build-steps" aria-label="Build progress">
+                                    @foreach (var step in buildSteps)
+                                    {
+                                        <div class="agent-build-step agent-build-step-@step.Status.ToLowerInvariant()">
+                                            <div class="agent-build-step-indicator">
+                                                @if (step.Status == "InProgress")
+                                                {
+                                                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                                                }
+                                                else
+                                                {
+                                                    <MudIcon Icon="@BuildStepIcon(step.Status)" Color="@BuildStepColor(step.Status)" Size="Size.Small" />
+                                                }
+                                            </div>
+                                            <div class="agent-build-step-content">
+                                                <MudText Typo="Typo.subtitle2">@step.Label</MudText>
+                                                @if (!string.IsNullOrWhiteSpace(step.Detail))
+                                                {
+                                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@step.Detail</MudText>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(step.Error))
+                                                {
+                                                    <pre class="agent-build-step-error">@step.Error</pre>
+                                                    @if (installation.Build.HasLog)
+                                                    {
+                                                        <MudButton Variant="Variant.Text"
+                                                                   Color="Color.Error"
+                                                                   Size="Size.Small"
+                                                                   StartIcon="@Icons.Material.Filled.Description"
+                                                                   OnClick="@(() => OpenBuildLogDialogAsync(installation))">
+                                                            View full build log
+                                                        </MudButton>
+                                                    }
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
                             <MudStack Row="true" Class="setup-actions">
                                 @if (IsChiefSetup && CanAssignToChiefSetup(installation))
                                 {
@@ -1224,7 +1265,10 @@
 
             if (build.Status is "Failed" or "Cancelled")
             {
-                var failureDetail = build.FailureMessage ?? $"The build ended with status {build.Status}.";
+                var failedStep = build.Steps?.FirstOrDefault(step => !string.IsNullOrWhiteSpace(step.Error));
+                var failureDetail = failedStep is null
+                    ? build.FailureMessage ?? $"The build ended with status {build.Status}."
+                    : $"The build stopped at “{failedStep.Label}.” Review that step below for the exact error.";
                 SetBuildProgress(installation.Id, "Agent build failed", failureDetail, true, Severity.Error);
                 SetInstallationMessage(
                     isUpdate
@@ -1649,6 +1693,23 @@
         "Succeeded" => Color.Success,
         "Failed" or "Cancelled" => Color.Error,
         _ => Color.Warning
+    };
+
+    private static string BuildStepIcon(string status) => status switch
+    {
+        "Succeeded" => Icons.Material.Filled.CheckBox,
+        "Failed" => Icons.Material.Filled.IndeterminateCheckBox,
+        "Cancelled" => Icons.Material.Filled.DisabledByDefault,
+        _ => Icons.Material.Filled.CheckBoxOutlineBlank
+    };
+
+    private static Color BuildStepColor(string status) => status switch
+    {
+        "Succeeded" => Color.Success,
+        "Failed" => Color.Error,
+        "Cancelled" => Color.Warning,
+        "InProgress" => Color.Primary,
+        _ => Color.Default
     };
 
     private static string BuildStatusLabel(string status) => status switch

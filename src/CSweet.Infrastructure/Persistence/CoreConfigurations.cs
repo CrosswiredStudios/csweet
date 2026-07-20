@@ -187,6 +187,7 @@ internal static class CoreConfigurations
             entity.HasKey(x => x.Id); entity.HasIndex(x => new { x.OrganizationId, x.Status }); entity.Property(x => x.Objective).HasMaxLength(2048).IsRequired();
             entity.HasIndex(x => new { x.OrganizationId, x.RequestingInstallationId, x.IdempotencyKey }).IsUnique();
             entity.Property(x => x.Title).HasMaxLength(256).IsRequired(); entity.Property(x => x.IdempotencyKey).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.Priority).HasDefaultValue(50).IsRequired();
             entity.Property(x => x.AssignmentsJson).HasColumnType("jsonb"); entity.Property(x => x.RejectedAlternativesJson).HasColumnType("jsonb");
             entity.Property(x => x.Currency).HasMaxLength(8); entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
         });

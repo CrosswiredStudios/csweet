@@ -27,6 +27,7 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
     private readonly IExecutiveBriefingService _executiveBriefings;
     private readonly CSweetDbContext _dbContext;
     private readonly IAgentCommunicationOnboardingService _agentOnboarding;
+    private readonly IAgentRuntimeManager? _agentRuntimeManager;
 
     public BusinessOnboardingService(
         ICoreOrganizationService organizationService,
@@ -37,7 +38,8 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         IAuditEventWriter auditEventWriter,
         IExecutiveBriefingService executiveBriefings,
         CSweetDbContext dbContext,
-        IAgentCommunicationOnboardingService? agentOnboarding = null)
+        IAgentCommunicationOnboardingService? agentOnboarding = null,
+        IAgentRuntimeManager? agentRuntimeManager = null)
     {
         _organizationService = organizationService;
         _roleService = roleService;
@@ -48,6 +50,7 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         _executiveBriefings = executiveBriefings;
         _dbContext = dbContext;
         _agentOnboarding = agentOnboarding ?? new AgentCommunicationOnboardingService(dbContext);
+        _agentRuntimeManager = agentRuntimeManager;
     }
 
     public async Task<BusinessOnboardingActionResponse> CompleteAsync(
@@ -195,7 +198,7 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         }
 
         var chiefOrganizationUserId = assignment.OrganizationUserId!.Value;
-        var chiefReadinessWarnings = assignment.Warnings;
+        var chiefReadinessWarnings = assignment.Warnings.ToList();
         organization.Status = OrganizationStatus.Active;
         await _dbContext.SaveChangesAsync(cancellationToken);
         await _executiveBriefings.QueueActivationAsync(organizationId, chiefOrganizationUserId, cancellationToken);
@@ -208,20 +211,26 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
             $"Business onboarding completed for '{organizationResult.Organization.Name}'.",
             cancellationToken: cancellationToken);
 
+        if (transaction is not null)
+            await transaction.CommitAsync(cancellationToken);
+
+        var runtimeWarning = await QueueChiefRuntimeAsync(
+            request.ChiefAgentInstallationId,
+            cancellationToken);
+        if (runtimeWarning is not null)
+            chiefReadinessWarnings.Add(runtimeWarning);
+
         var response = new CompleteBusinessOnboardingResponse(
             organizationId,
             roles.Count,
             taskCount,
             workerResult.Worker.Id,
-            $"/organizations/{organizationId}/command-center")
+            $"/organizations/{organizationId}/communications/{assignment.ConversationId:D}")
         {
             OrganizationActivated = true,
             ChiefOrganizationUserId = chiefOrganizationUserId,
             ChiefReadinessWarnings = chiefReadinessWarnings
         };
-
-        if (transaction is not null)
-            await transaction.CommitAsync(cancellationToken);
 
         return new BusinessOnboardingActionResponse(true, null, "Business onboarding completed.", response);
     }
@@ -247,11 +256,15 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         organization.UpdatedAt = DateTimeOffset.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
         await _executiveBriefings.QueueActivationAsync(organizationId, assignment.OrganizationUserId!.Value, cancellationToken);
+        var warnings = assignment.Warnings.ToList();
+        var runtimeWarning = await QueueChiefRuntimeAsync(request.AgentInstallationId, cancellationToken);
+        if (runtimeWarning is not null)
+            warnings.Add(runtimeWarning);
         var response = new CompleteChiefSetupResponse(
             organizationId,
             assignment.OrganizationUserId!.Value,
-            assignment.Warnings,
-            $"/organizations/{organizationId}/command-center");
+            warnings,
+            $"/organizations/{organizationId}/communications/{assignment.ConversationId:D}");
         return new(true, null, "Chief of Staff setup completed.", response);
     }
 
@@ -342,7 +355,7 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
             return ChiefAssignmentResult.Failure("chief_agent_unavailable", "The selected installation is not an enabled active agent.");
         if (!string.Equals(installation.BusinessId, "default", StringComparison.OrdinalIgnoreCase))
             return ChiefAssignmentResult.Failure("chief_agent_wrong_organization", "The selected installation is already assigned to another business.");
-        return ChiefAssignmentResult.Success(Guid.Empty, []);
+        return ChiefAssignmentResult.ValidationSuccess();
     }
 
     private async Task<ChiefAssignmentResult> CreateChiefAssignmentAsync(Guid organizationId, Guid installationId, CancellationToken cancellationToken)
@@ -439,7 +452,36 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
             $"Assigned '{installation.PackageVersion.AgentName}' as Chief of Staff.",
             cancellationToken: cancellationToken);
 
-        return ChiefAssignmentResult.Success(chief.Id, GetReadinessWarnings(installation.PackageVersion.ManifestJson));
+        return ChiefAssignmentResult.Success(
+            chief.Id,
+            onboarding.ConversationId!.Value,
+            GetReadinessWarnings(installation.PackageVersion.ManifestJson));
+    }
+
+    private async Task<string?> QueueChiefRuntimeAsync(
+        Guid installationId,
+        CancellationToken cancellationToken)
+    {
+        if (_agentRuntimeManager is null)
+            return null;
+
+        try
+        {
+            await _agentRuntimeManager.EnsureRuntimeQueuedAsync(
+                installationId,
+                "Prioritized for the Chief of Staff's initial onboarding conversation.",
+                interactive: true,
+                cancellationToken);
+            return null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return $"The Chief of Staff was assigned, but its runtime could not be prioritized: {exception.Message}";
+        }
     }
 
     private static IReadOnlyList<string> GetReadinessWarnings(string manifestJson)
@@ -490,13 +532,25 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         return next;
     }
 
-    private sealed record ChiefAssignmentResult(bool Succeeded, string? ErrorCode, string? Message, Guid? OrganizationUserId, IReadOnlyList<string> Warnings)
+    private sealed record ChiefAssignmentResult(
+        bool Succeeded,
+        string? ErrorCode,
+        string? Message,
+        Guid? OrganizationUserId,
+        Guid? ConversationId,
+        IReadOnlyList<string> Warnings)
     {
-        public static ChiefAssignmentResult Success(Guid organizationUserId, IReadOnlyList<string> warnings) =>
-            new(true, null, null, organizationUserId, warnings);
+        public static ChiefAssignmentResult ValidationSuccess() =>
+            new(true, null, null, null, null, []);
+
+        public static ChiefAssignmentResult Success(
+            Guid organizationUserId,
+            Guid conversationId,
+            IReadOnlyList<string> warnings) =>
+            new(true, null, null, organizationUserId, conversationId, warnings);
 
         public static ChiefAssignmentResult Failure(string errorCode, string message) =>
-            new(false, errorCode, message, null, []);
+            new(false, errorCode, message, null, null, []);
     }
 
     private static BusinessOnboardingActionResponse Failure(string errorCode, string message) =>

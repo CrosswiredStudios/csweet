@@ -54,6 +54,7 @@ public sealed class AgentBuildService : IAgentBuildService
             Attempt = (activeJob?.Attempt ?? 0) + 1,
             QueuedAt = DateTimeOffset.UtcNow
         };
+        job.StepsJson = AgentBuildStepStore.CreateInitialJson(job.QueuedAt);
         packageVersion.Status = AgentPackageVersionStatus.Approved;
         _dbContext.AgentBuildJobs.Add(job);
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -81,9 +82,21 @@ public sealed class AgentBuildService : IAgentBuildService
             ?? throw new AgentBuildException("The build job package version was not loaded.");
         var source = package.PackageSource
             ?? throw new AgentBuildException("The build job package source was not loaded.");
+        if (string.IsNullOrWhiteSpace(job.StepsJson) || job.StepsJson == "[]")
+        {
+            job.StepsJson = AgentBuildStepStore.CreateInitialJson(job.QueuedAt);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        var progress = new PersistedAgentBuildProgressReporter(_dbContext, job);
         if (package.Status != AgentPackageVersionStatus.Approved)
         {
             job.FailureMessage = $"Build cancelled because the package version is {package.Status}.";
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(
+                    AgentBuildStepKeys.Queued,
+                    AgentBuildStepStatuses.Cancelled,
+                    Error: job.FailureMessage),
+                cancellationToken);
             job.TransitionTo(AgentBuildStatus.Cancelled, DateTimeOffset.UtcNow);
             await _dbContext.SaveChangesAsync(cancellationToken);
             await WriteAuditAsync(
@@ -95,6 +108,15 @@ public sealed class AgentBuildService : IAgentBuildService
         }
         if (string.IsNullOrWhiteSpace(package.ProjectPath))
         {
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(AgentBuildStepKeys.Queued, AgentBuildStepStatuses.Succeeded),
+                cancellationToken);
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(
+                    AgentBuildStepKeys.Source,
+                    AgentBuildStepStatuses.Failed,
+                    Error: "The approved manifest does not define a .NET project path."),
+                cancellationToken);
             await FailAsync(job, package, "The approved manifest does not define a .NET project path.");
             return true;
         }
@@ -125,17 +147,33 @@ public sealed class AgentBuildService : IAgentBuildService
 
         try
         {
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(AgentBuildStepKeys.Queued, AgentBuildStepStatuses.Succeeded),
+                timeout.Token);
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(
+                    AgentBuildStepKeys.Source,
+                    AgentBuildStepStatuses.InProgress,
+                    "Fetching and validating the approved commit."),
+                timeout.Token);
             job.TransitionTo(AgentBuildStatus.Cloning, DateTimeOffset.UtcNow);
             await _dbContext.SaveChangesAsync(cancellationToken);
             await WriteAuditAsync(job, "agent-build.started", "Started cloning the approved commit.", cancellationToken);
 
-            workspace = await _executor.CloneAsync(request, timeout.Token);
+            workspace = await _executor.CloneAsync(request, progress, timeout.Token);
             job.SourceWorkspacePath = workspace.SourcePath;
             job.LogPath = workspace.LogPath;
+            await progress.ReportAsync(
+                new AgentBuildProgressUpdate(
+                    AgentBuildStepKeys.Source,
+                    AgentBuildStepStatuses.Succeeded,
+                    "Approved source is ready."),
+                timeout.Token);
             job.TransitionTo(AgentBuildStatus.Building, DateTimeOffset.UtcNow);
             await _dbContext.SaveChangesAsync(cancellationToken);
 
-            var result = await _executor.BuildAsync(request, workspace, timeout.Token);
+            var result = await _executor.BuildAsync(request, workspace, progress, timeout.Token);
+            await AgentBuildStepStore.CompleteRemainingAsync(_dbContext, job, timeout.Token);
             job.PackagePath = result.PackagePath;
             job.PackageDigest = result.PackageDigest;
             job.LogPath = result.LogPath;
@@ -154,16 +192,24 @@ public sealed class AgentBuildService : IAgentBuildService
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            await AgentBuildStepStore.FailCurrentAsync(_dbContext, job, "The build worker was stopped.");
             await CancelAsync(job, package, "The build worker was stopped.");
             throw;
         }
         catch (OperationCanceledException)
         {
-            await FailAsync(job, package, $"The build exceeded the {settings.BuildTimeoutSeconds}-second timeout.");
+            var message = $"The build exceeded the {settings.BuildTimeoutSeconds}-second timeout.";
+            await AgentBuildStepStore.FailCurrentAsync(_dbContext, job, message);
+            await FailAsync(job, package, message);
         }
         catch (Exception exception)
         {
             _logger.LogError(exception, "Agent build {BuildJobId} failed.", job.Id);
+            await AgentBuildStepStore.FailCurrentAsync(
+                _dbContext,
+                job,
+                exception.Message,
+                (exception as AgentBuildException)?.StepKey);
             await FailAsync(job, package, exception.Message);
         }
         finally

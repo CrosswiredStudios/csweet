@@ -176,6 +176,14 @@
     font-size: .7rem;
 }
 
+.provider-mark img,
+.provider-choice-mark img {
+    display: block;
+    width: 1.45rem;
+    height: 1.45rem;
+    object-fit: contain;
+}
+
 .provider-list-copy {
     min-width: 0;
 }

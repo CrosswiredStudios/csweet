@@ -42,7 +42,16 @@
                     @foreach (var profile in _profiles)
                     {
                         <article class="provider-list-item">
-                            <span class="provider-mark">@ProviderMark(profile.ProviderType)</span>
+                            <span class="provider-mark">
+                                @if (ProviderIconPath(profile.ProviderType) is { } iconPath)
+                                {
+                                    <img src="@iconPath" alt="" aria-hidden="true" />
+                                }
+                                else
+                                {
+                                    @ProviderMark(profile.ProviderType)
+                                }
+                            </span>
                             <div class="provider-list-copy">
                                 <strong>@profile.Name</strong>
                                 <span>@ProviderTypeLabel(profile.ProviderType) · @ProviderConnectionLabel(profile)</span>
@@ -108,7 +117,16 @@
                             class="provider-choice @(IsActivePreset(preset) ? "selected" : null)"
                             aria-pressed="@IsActivePreset(preset)"
                             @onclick="() => SelectPresetAsync(preset)">
-                        <span class="provider-choice-mark">@preset.Mark</span>
+                        <span class="provider-choice-mark">
+                            @if (ProviderIconPath(preset.ProviderType) is { } iconPath)
+                            {
+                                <img src="@iconPath" alt="" aria-hidden="true" />
+                            }
+                            else
+                            {
+                                @preset.Mark
+                            }
+                        </span>
                         <span>
                             <strong>@preset.DisplayName</strong>
                             <small>@preset.Description</small>
@@ -139,7 +157,16 @@
         <section class="provider-editor" aria-labelledby="provider-editor-title">
             <header class="provider-editor-header">
                 <div class="provider-editor-title">
-                    <span class="provider-choice-mark">@(_activePreset?.Mark ?? "API")</span>
+                    <span class="provider-choice-mark">
+                        @if (_activePreset is not null && ProviderIconPath(_activePreset.ProviderType) is { } iconPath)
+                        {
+                            <img src="@iconPath" alt="" aria-hidden="true" />
+                        }
+                        else
+                        {
+                            @(_activePreset?.Mark ?? "API")
+                        }
+                    </span>
                     <div>
                         <span class="provider-section-kicker">@(_editingProviderId is null ? "New connection" : "Edit connection")</span>
                         <h2 id="provider-editor-title">@(_activePreset?.DisplayName ?? "Provider")</h2>
@@ -726,6 +753,21 @@
             LlmProviderType.Groq => "GQ",
             LlmProviderType.TogetherAi => "TA",
             _ => "API"
+        };
+    }
+
+    private static string? ProviderIconPath(LlmProviderType providerType)
+    {
+        return providerType switch
+        {
+            LlmProviderType.LmStudio => "images/lmstudio-color.svg",
+            LlmProviderType.UnslothStudio => "images/unsloth-color.svg",
+            LlmProviderType.Ollama => "images/ollama.svg",
+            LlmProviderType.Vllm => "images/vllm-color.svg",
+            LlmProviderType.OpenAi => "images/openai.svg",
+            LlmProviderType.GoogleGemini => "images/google-color.svg",
+            LlmProviderType.OpenRouter => "images/openrouter-color.svg",
+            _ => null
         };
     }
 

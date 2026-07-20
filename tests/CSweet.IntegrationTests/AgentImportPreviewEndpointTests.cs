@@ -121,6 +121,8 @@ public class AgentImportPreviewEndpointTests
             "/api/agents/installations");
         Assert.Single(listed!);
         Assert.Equal("Queued", listed![0].Build?.Status);
+        Assert.Equal(6, listed[0].Build?.Steps?.Count);
+        Assert.Equal("InProgress", listed[0].Build?.Steps?[0].Status);
 
         var scheduleResponse = await client.PutAsJsonAsync(
             $"/api/agents/installations/{installation.Id}/schedule",

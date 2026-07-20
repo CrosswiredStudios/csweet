@@ -38,7 +38,17 @@ public sealed record AgentBuildSummaryResponse(
     DateTimeOffset? StartedAt,
     DateTimeOffset? CompletedAt,
     bool HasLog,
-    string? FailureMessage);
+    string? FailureMessage,
+    IReadOnlyList<AgentBuildStepResponse>? Steps = null);
+
+public sealed record AgentBuildStepResponse(
+    string Key,
+    string Label,
+    string Status,
+    string? Detail,
+    string? Error,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt);
 
 public sealed record AgentRuntimeRunResponse(
     Guid Id,

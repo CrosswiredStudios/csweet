@@ -119,7 +119,17 @@
                         <article class="hub-message @(message.SenderOrganizationUserId == _hub.CurrentOrganizationUserId ? "mine" : null)">
                             <div class="hub-avatar @AvatarClass(message.SenderEmployeeType)">@Initials(message.SenderDisplayName)</div>
                             <div class="hub-message-body">
-                                <div class="hub-message-meta"><strong>@message.SenderDisplayName</strong>@if (message.SenderEmployeeType == "Agent") { <span>AGENT</span> }<time>@message.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</time></div>
+                                <div class="hub-message-meta">
+                                    <strong>@message.SenderDisplayName</strong>
+                                    @if (message.SenderEmployeeType == "Agent") { <span>AGENT</span> }
+                                    <time>@message.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</time>
+                                    @if (message.ChatTurnId is Guid messageTurnId &&
+                                        _turns.TryGetValue(messageTurnId, out var messageTurn) &&
+                                        messageTurn.Turn.AssistantMessageId == message.Id)
+                                    {
+                                        @ThinkingButton(messageTurn)
+                                    }
+                                </div>
                                  <ChatMarkdown Content="@message.Content" />
                                 @if (message.Decision is { } decision)
                                 {
@@ -175,12 +185,6 @@
                                         }
                                     </section>
                                 }
-                                @if (message.ChatTurnId is Guid messageTurnId &&
-                                    _turns.TryGetValue(messageTurnId, out var messageTurn) &&
-                                    messageTurn.Turn.AssistantMessageId == message.Id)
-                                {
-                                    @TracePanel(messageTurn)
-                                }
                             </div>
                         </article>
                     }
@@ -189,7 +193,11 @@
                         <article class="hub-message hub-message-pending">
                             <div class="hub-avatar agent">AI</div>
                             <div class="hub-message-body">
-                                <div class="hub-message-meta"><strong>@_selected.Title</strong><span>AGENT</span></div>
+                                <div class="hub-message-meta">
+                                    <strong>@_selected.Title</strong><span>AGENT</span>
+                                    <time>@pending.Turn.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</time>
+                                    @ThinkingButton(pending)
+                                </div>
                                 @if (string.IsNullOrWhiteSpace(pending.StreamingText))
                                 {
                                     <div class="hub-turn-running"><MudProgressLinear Indeterminate="true" Color="Color.Primary" /><span>The agent turn is running.</span></div>
@@ -198,7 +206,6 @@
                                 {
                                     <ChatMarkdown Content="@pending.StreamingText" />
                                 }
-                                @TracePanel(pending)
                             </div>
                         </article>
                     }
@@ -275,6 +282,67 @@
     }
 </div>
 
+<MudDialog @bind-Visible="_thinkingDialogOpen" Options="_thinkingDialogOptions">
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudIcon Icon="@Icons.Material.Filled.Psychology" Color="Color.Primary" />
+            <div>
+                <MudText Typo="Typo.h6">Memory &amp; thinking</MudText>
+                @if (_thinkingDialogTurn is not null)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@TraceSummary(_thinkingDialogTurn)</MudText>
+                }
+            </div>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        @if (_thinkingDialogLoading)
+        {
+            <div class="thinking-dialog-loading" role="status">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Small" />
+                <span>Loading memory and thinking output...</span>
+            </div>
+        }
+        else if (!string.IsNullOrWhiteSpace(_thinkingDialogError))
+        {
+            <MudAlert Severity="Severity.Error">@_thinkingDialogError</MudAlert>
+        }
+        else if (_thinkingDialogTurn is { } dialogTurn)
+        {
+            <div class="thinking-dialog @TraceClass(dialogTurn.Turn.Status)">
+                <div class="chat-trace-events" role="list" aria-label="Memory and thinking output" tabindex="0">
+                    @foreach (var traceEvent in dialogTurn.Events.OrderBy(x => x.Sequence))
+                    {
+                        <div class="chat-trace-event" role="listitem">
+                            <div><strong>@traceEvent.Title</strong><small>@traceEvent.OccurredAt.ToLocalTime().ToString("T") @if (traceEvent.DurationMs.HasValue) { <span>· @traceEvent.DurationMs ms</span> }</small></div>
+                            @if (!string.IsNullOrWhiteSpace(traceEvent.Summary)) { <pre>@traceEvent.Summary</pre> }
+                            @if (traceEvent.Details.HasValue) { <details><summary>Structured details</summary><pre>@traceEvent.Details.Value.ToString()</pre></details> }
+                        </div>
+                    }
+                    @if (dialogTurn.Events.Count == 0)
+                    {
+                        <div class="thinking-dialog-empty">No memory or thinking output has been recorded yet.</div>
+                    }
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_thinkingDialogTurn is { } actionTurn)
+        {
+            @if (!IsTerminal(actionTurn.Turn.Status))
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => CancelTurnAsync(actionTurn))">Cancel turn</MudButton>
+            }
+            else if (actionTurn.Turn.Status is "Failed" or "CompletedWithWarnings" or "Cancelled")
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@HasActiveTurnFor(actionTurn)" OnClick="@(() => RetryTurnAsync(actionTurn))">Retry</MudButton>
+            }
+        }
+        <MudButton Variant="Variant.Text" OnClick="CloseThinkingDialog">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     [Parameter] public Guid OrganizationId { get; set; }
     [Parameter] public Guid? ChatId { get; set; }
@@ -298,6 +366,10 @@
     private bool _loading = true, _sending, _showMembers, _showEditor, _editorBusy, _editorPrivate, _confirmArchive;
     private string _search = string.Empty, _draft = string.Empty, _editorTitle = string.Empty, _editorDescription = string.Empty;
     private string? _error, _notice, _editorError;
+    private readonly DialogOptions _thinkingDialogOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
+    private TurnView? _thinkingDialogTurn;
+    private bool _thinkingDialogOpen, _thinkingDialogLoading;
+    private string? _thinkingDialogError;
     private bool _realtimeRefreshing;
     private bool _scrollToBottomPending;
     private Guid? _observedChatId;
@@ -352,6 +424,7 @@
     private Task SelectChatAsync(CommunicationChatResponse chat)
     {
         _showMembers = false;
+        _thinkingDialogOpen = false;
         _notice = null;
         Navigation.NavigateTo(ChatHref(chat.Id));
         return Task.CompletedTask;
@@ -607,7 +680,6 @@
                 if (latest is null) return;
                 view.Turn = latest;
                 if (!IsTerminal(latest.Status)) continue;
-                view.Expanded = false;
                 var visible = await IsDocumentVisibleAsync();
                 await RefreshHubAsync(chatId, visible);
                 await InvokeAsync(StateHasChanged);
@@ -620,15 +692,44 @@
         }
     }
 
-    private async Task ToggleTraceAsync(TurnView view)
+    private RenderFragment ThinkingButton(TurnView view) => @<button type="button"
+        class="hub-thinking-button"
+        title="View memory and thinking"
+        aria-label="View memory and thinking for this message"
+        @onclick="@(() => OpenThinkingDialogAsync(view))">
+        <MudIcon Icon="@Icons.Material.Outlined.Psychology" Size="Size.Small" />
+    </button>;
+
+    private async Task OpenThinkingDialogAsync(TurnView view)
     {
-        view.Expanded = !view.Expanded;
-        if (!view.Expanded || _selected is null) return;
-        var latest = await ChatTurns.GetTurnTraceAsync(OrganizationId, _selected.Id, view.Turn.Id, _disposeCts.Token);
-        view.Events.Clear();
-        view.Events.AddRange(latest);
-        view.Turn = await ChatTurns.GetTurnAsync(OrganizationId, _selected.Id, view.Turn.Id, _disposeCts.Token) ?? view.Turn;
+        if (_selected is null) return;
+
+        var chatId = _selected.Id;
+        _thinkingDialogTurn = view;
+        _thinkingDialogError = null;
+        _thinkingDialogLoading = true;
+        _thinkingDialogOpen = true;
+
+        try
+        {
+            var latest = await ChatTurns.GetTurnTraceAsync(OrganizationId, chatId, view.Turn.Id, _disposeCts.Token);
+            foreach (var traceEvent in latest)
+            {
+                if (view.Events.All(x => x.Sequence != traceEvent.Sequence)) view.Events.Add(traceEvent);
+            }
+            view.Turn = await ChatTurns.GetTurnAsync(OrganizationId, chatId, view.Turn.Id, _disposeCts.Token) ?? view.Turn;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _thinkingDialogError = exception.Message;
+        }
+        finally
+        {
+            _thinkingDialogLoading = false;
+        }
     }
+
+    private void CloseThinkingDialog() => _thinkingDialogOpen = false;
 
     private async Task RetryTurnAsync(TurnView failed)
     {
@@ -640,6 +741,7 @@
             var view = new TurnView(started.Turn);
             _turns[started.Turn.Id] = view;
             await RefreshHubAsync(_selected.Id, markRead: false);
+            _thinkingDialogOpen = false;
             _ = ObserveTurnAsync(_selected.Id, view, _chatCts?.Token ?? _disposeCts.Token);
         }
         catch (Exception ex) { _notice = ex.Message; }
@@ -651,39 +753,9 @@
         try
         {
             view.Turn = await ChatTurns.CancelTurnAsync(OrganizationId, _selected.Id, view.Turn.Id, _disposeCts.Token);
-            view.Expanded = false;
         }
         catch (Exception ex) { _notice = ex.Message; }
     }
-
-    private RenderFragment TracePanel(TurnView view) => @<div class="chat-trace @TraceClass(view.Turn.Status)">
-        <button type="button" class="chat-trace-summary" aria-expanded="@view.Expanded" @onclick="@(() => ToggleTraceAsync(view))">
-            <MudIcon Icon="@TraceIcon(view.Turn.Status)" Size="Size.Small" />
-            <span>@TraceSummary(view)</span>
-            <MudIcon Icon="@(view.Expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
-        </button>
-        @if (view.Expanded)
-        {
-            <div class="chat-trace-events" role="list" aria-label="Execution trace" tabindex="0">
-                @foreach (var traceEvent in view.Events.OrderBy(x => x.Sequence))
-                {
-                    <div class="chat-trace-event" role="listitem">
-                        <div><strong>@traceEvent.Title</strong><small>@traceEvent.OccurredAt.ToLocalTime().ToString("T") @if (traceEvent.DurationMs.HasValue) { <span>· @traceEvent.DurationMs ms</span> }</small></div>
-                        @if (!string.IsNullOrWhiteSpace(traceEvent.Summary)) { <pre>@traceEvent.Summary</pre> }
-                        @if (traceEvent.Details.HasValue) { <details><summary>Structured details</summary><pre>@traceEvent.Details.Value.ToString()</pre></details> }
-                    </div>
-                }
-                @if (!IsTerminal(view.Turn.Status))
-                {
-                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => CancelTurnAsync(view))">Cancel</MudButton>
-                }
-                else if (view.Turn.Status is "Failed" or "CompletedWithWarnings" or "Cancelled")
-                {
-                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@HasActiveTurnFor(view)" OnClick="@(() => RetryTurnAsync(view))">Retry</MudButton>
-                }
-            </div>
-        }
-    </div>;
 
     private static bool IsTerminal(string status) => status is "Completed" or "CompletedWithWarnings" or "Failed" or "Cancelled";
     private bool HasActiveTurnFor(TurnView view) => _turns.Values.Any(x =>
@@ -691,14 +763,6 @@
         x.Turn.TargetAgentOrganizationUserId == view.Turn.TargetAgentOrganizationUserId &&
         !IsTerminal(x.Turn.Status));
     private static string TraceClass(string status) => status switch { "Failed" => "chat-trace-failed", "CompletedWithWarnings" => "chat-trace-warning", _ => string.Empty };
-    private static string TraceIcon(string status) => status switch
-    {
-        "Completed" => Icons.Material.Filled.CheckCircle,
-        "Failed" => Icons.Material.Filled.Error,
-        "CompletedWithWarnings" => Icons.Material.Filled.Warning,
-        "Cancelled" => Icons.Material.Filled.Cancel,
-        _ => Icons.Material.Filled.Psychology
-    };
     private static string TraceSummary(TurnView view)
     {
         var duration = (view.Turn.CompletedAt ?? DateTimeOffset.UtcNow) - view.Turn.CreatedAt;
@@ -751,7 +815,6 @@
         public ChatTurnResponse Turn { get; set; } = turn;
         public List<ChatTurnTraceEventResponse> Events { get; } = [];
         public string StreamingText { get; set; } = string.Empty;
-        public bool Expanded { get; set; }
     }
 
     public async ValueTask DisposeAsync()

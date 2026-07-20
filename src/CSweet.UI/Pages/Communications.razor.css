@@ -81,12 +81,19 @@
 .hub-message-meta strong { font-size: .86rem; }
 .hub-message-meta span { margin-left: 0; }
 .hub-message-meta time { color: #9a9faa; font-size: .65rem; }
+.hub-thinking-button { width: 23px; height: 23px; margin-left: -2px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: #8b829f; cursor: pointer; }
+.hub-thinking-button:hover, .hub-thinking-button:focus-visible { background: #ece8fa; color: var(--hub-purple); outline: 0; }
+.hub-thinking-button ::deep .mud-icon-root { font-size: 17px; }
 .hub-message ::deep .chat-markdown { margin-top: 5px; color: #333c47; font-size: .88rem; line-height: 1.45; overflow-wrap: anywhere; }
 .hub-message-pending { margin-top: 4px; background: #faf9ff; border: 1px solid #ece9fb; }
 .hub-turn-running { display: grid; gap: 7px; margin-top: 9px; color: var(--hub-muted); font-size: .76rem; }
-.hub-message ::deep .chat-trace { margin: 9px 0 0; max-width: 48rem; background: #f7f6fb; color: #3d4652; }
 .hub-composer { grid-row: 4; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; padding: 12px 19px 17px; border-top: 1px solid #f0f1f4; }
 .hub-composer ::deep .mud-input-control { margin: 0; }
+
+.thinking-dialog { border: 1px solid rgba(92, 111, 139, .28); border-radius: 10px; color: #3d4652; overflow: hidden; }
+.thinking-dialog .chat-trace-events { max-height: min(65vh, 42rem); padding: 0 14px; border-top: 0; }
+.thinking-dialog-loading { min-height: 130px; display: flex; align-items: center; justify-content: center; gap: 12px; color: #6d7785; }
+.thinking-dialog-empty { padding: 28px 8px; color: #6d7785; text-align: center; }
 
 .hub-people { border-left: 1px solid var(--hub-line); background: #fafafd; overflow-y: auto; }
 .hub-empty { grid-row: 1 / -1; }

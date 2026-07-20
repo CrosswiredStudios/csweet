@@ -192,12 +192,19 @@
             <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mt-4">Email delivery was tested successfully.</MudAlert>
         }
         @StepMessage()
-        <MudStack Row="true" Class="setup-actions">
+        <footer class="email-step-actions">
             <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="BackToProvider">Back</MudButton>
-            <MudButton Variant="Variant.Text" Disabled="@_isBusy" OnClick="SkipEmailDeliveryAsync">Skip for now</MudButton>
-            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@_isBusy" OnClick="SaveEmailDeliveryAsync">Save</MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_isBusy" OnClick="TestEmailDeliveryAsync">Save &amp; Test</MudButton>
-        </MudStack>
+            <div class="email-step-primary-actions">
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" Disabled="@_isBusy" OnClick="SkipEmailDeliveryAsync">Skip for now</MudButton>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           EndIcon="@Icons.Material.Filled.ArrowForward"
+                           Disabled="@_isBusy"
+                           OnClick="TestEmailDeliveryAsync">
+                    Continue
+                </MudButton>
+            </div>
+        </footer>
     </div>;
 
     private RenderFragment CommunicationsStep => @<CommunicationsSetupStep Options="@_communicationOptions"

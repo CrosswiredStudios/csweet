@@ -4,6 +4,7 @@ namespace CSweet.Contracts.Core;
 
 public static class HiringCapabilities
 {
+    public const string ListRecommendations = "platform.hiring-recommendation.list.v1";
     public const string UpsertRecommendation = "platform.hiring-recommendation.upsert.v1";
     public const string StageWorkflow = "platform.hiring-workflow.stage.v1";
 }
@@ -30,21 +31,28 @@ public sealed record HiringRecommendationResponse(
     string Title,
     string Objective,
     string Status,
-    string RecommendedCandidateReference,
+    string? RecommendedCandidateReference,
     IReadOnlyList<HiringCandidateResponse> Candidates,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt)
 {
+    public int Priority { get; init; } = 50;
     public string HiringUrl { get; init; } = string.Empty;
 }
+
+public sealed record HiringBacklogResponse(IReadOnlyList<HiringRecommendationResponse> Recommendations);
 
 public sealed record UpsertHiringRecommendationRequest(
     [property: Required, MaxLength(256)] string Title,
     [property: Required, MaxLength(2048)] string Objective,
     Guid? WorkstreamId,
-    [property: MinLength(1), MaxLength(3)] IReadOnlyList<string> CandidateReferences,
-    [property: Required] string RecommendedCandidateReference,
-    [property: Required, MaxLength(160)] string IdempotencyKey);
+    [property: MaxLength(3)] IReadOnlyList<string> CandidateReferences,
+    string? RecommendedCandidateReference,
+    [property: Required, MaxLength(160)] string IdempotencyKey)
+{
+    [Range(1, 100)]
+    public int Priority { get; init; } = 50;
+}
 
 public sealed record StageHiringWorkflowRequest(
     Guid RecommendationId,

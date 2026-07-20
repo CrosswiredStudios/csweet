@@ -528,6 +528,7 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
             entity.Property(x => x.PackageDigest).HasMaxLength(64);
             entity.Property(x => x.LogPath).HasMaxLength(2048);
             entity.Property(x => x.FailureMessage).HasMaxLength(2048);
+            entity.Property(x => x.StepsJson).HasColumnType("text").IsRequired();
             entity.HasIndex(x => new { x.PackageVersionId, x.Attempt }).IsUnique();
             entity.HasIndex(x => new { x.Status, x.QueuedAt });
             entity.HasOne(x => x.PackageVersion)

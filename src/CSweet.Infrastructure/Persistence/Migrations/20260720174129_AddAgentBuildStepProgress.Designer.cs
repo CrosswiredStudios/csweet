@@ -3,6 +3,7 @@ using System;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CSweet.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CSweetDbContext))]
-    partial class CSweetDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260720174129_AddAgentBuildStepProgress")]
+    partial class AddAgentBuildStepProgress
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2687,12 +2690,7 @@ namespace CSweet.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
 
-                    b.Property<int>("Priority")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(50);
-
-                    b.Property<Guid?>("RecommendedCandidateId")
+                    b.Property<Guid>("RecommendedCandidateId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("RejectedAlternativesJson")

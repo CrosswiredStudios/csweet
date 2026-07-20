@@ -11,6 +11,7 @@ public sealed class AgentBuildJob
     public string? PackageDigest { get; set; }
     public string? LogPath { get; set; }
     public string? FailureMessage { get; set; }
+    public string StepsJson { get; set; } = "[]";
     public DateTimeOffset QueuedAt { get; set; }
     public DateTimeOffset? StartedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }

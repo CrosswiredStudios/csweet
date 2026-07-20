@@ -28,15 +28,49 @@ public sealed record AgentBuildExecutionResult(
     string PackageDigest,
     string LogPath);
 
+public static class AgentBuildStepKeys
+{
+    public const string Queued = "queued";
+    public const string Source = "source";
+    public const string Isolate = "isolate";
+    public const string Restore = "restore";
+    public const string Publish = "publish";
+    public const string Package = "package";
+}
+
+public static class AgentBuildStepStatuses
+{
+    public const string Pending = "Pending";
+    public const string InProgress = "InProgress";
+    public const string Succeeded = "Succeeded";
+    public const string Failed = "Failed";
+    public const string Cancelled = "Cancelled";
+}
+
+public sealed record AgentBuildProgressUpdate(
+    string StepKey,
+    string Status,
+    string? Detail = null,
+    string? Error = null);
+
+public interface IAgentBuildProgressReporter
+{
+    Task ReportAsync(
+        AgentBuildProgressUpdate update,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IAgentBuildExecutor
 {
     Task<AgentBuildWorkspace> CloneAsync(
         AgentBuildExecutionRequest request,
+        IAgentBuildProgressReporter progress,
         CancellationToken cancellationToken = default);
 
     Task<AgentBuildExecutionResult> BuildAsync(
         AgentBuildExecutionRequest request,
         AgentBuildWorkspace workspace,
+        IAgentBuildProgressReporter progress,
         CancellationToken cancellationToken = default);
 
     Task CleanupWorkspaceAsync(

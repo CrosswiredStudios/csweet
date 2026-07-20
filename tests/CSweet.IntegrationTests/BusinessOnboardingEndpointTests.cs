@@ -48,7 +48,7 @@ public class BusinessOnboardingEndpointTests
         Assert.Equal(6, result.CreatedRoleCount);
         Assert.Equal(5, result.CreatedTaskCount);
         Assert.True(result.OrganizationActivated);
-        Assert.Contains("command-center", result.NextRoute);
+        Assert.StartsWith($"/organizations/{result.OrganizationId}/communications/", result.NextRoute);
         Assert.NotNull(result.ChiefOrganizationUserId);
 
         var organization = await client.GetFromJsonAsync<OrganizationResponse>($"/api/organizations/{result.OrganizationId}");

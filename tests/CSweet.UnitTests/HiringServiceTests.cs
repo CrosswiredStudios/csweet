@@ -9,6 +9,35 @@ namespace CSweet.UnitTests;
 public sealed class HiringServiceTests
 {
     [Fact]
+    public async Task RoleBacklog_IsPrioritizedAndScopedToRequestingInstallation()
+    {
+        await using var db = CreateDb();
+        var now = DateTimeOffset.UtcNow;
+        var organizationId = Guid.NewGuid();
+        var firstInstallationId = Guid.NewGuid();
+        var secondInstallationId = Guid.NewGuid();
+        db.CoreOrganizations.Add(new Organization
+        {
+            Id = organizationId, Name = "Example", CreatedAt = now, UpdatedAt = now
+        });
+        await db.SaveChangesAsync();
+        var service = new HiringService(db, new OrganizationUserService(db, new TestAuditEventWriter()), new TestAuditEventWriter());
+
+        await service.UpsertRecommendationAsync(organizationId, firstInstallationId,
+            new("QA Engineer", "Own release quality", null, [], null, "qa-role") { Priority = 20 });
+        await service.UpsertRecommendationAsync(organizationId, firstInstallationId,
+            new("Product Manager", "Own product definition", null, [], null, "pm-role") { Priority = 1 });
+        await service.UpsertRecommendationAsync(organizationId, secondInstallationId,
+            new("Sales Lead", "Own revenue", null, [], null, "sales-role") { Priority = 1 });
+
+        var backlog = await service.ListRecommendationsForInstallationAsync(organizationId, firstInstallationId);
+
+        Assert.Collection(backlog,
+            item => { Assert.Equal("Product Manager", item.Title); Assert.Equal(1, item.Priority); Assert.Empty(item.Candidates); },
+            item => { Assert.Equal("QA Engineer", item.Title); Assert.Equal(20, item.Priority); Assert.Empty(item.Candidates); });
+    }
+
+    [Fact]
     public async Task CurrentStaffWorkflow_RequiresOwnerAndAssignsApprovedRole()
     {
         await using var db = CreateDb();
@@ -31,7 +60,7 @@ public sealed class HiringServiceTests
         var recommendation = await service.UpsertRecommendationAsync(organizationId, installationId,
             new("Operations lead", "Own reliable delivery", null, [$"candidate:{candidate.Id:N}"], $"candidate:{candidate.Id:N}", "rec-1"));
         var workflow = await service.StageWorkflowAsync(organizationId, installationId,
-            new(recommendation.Id, recommendation.RecommendedCandidateReference, "Operations Lead", null, [], "workflow-1"));
+            new(recommendation.Id, recommendation.RecommendedCandidateReference!, "Operations Lead", null, [], "workflow-1"));
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.ConfirmWorkflowAsync(organizationId, workflow.Id,
             Guid.NewGuid(), new("not-owner")));

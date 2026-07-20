@@ -177,10 +177,11 @@ public sealed class WorkforcePlan
     public Guid OrganizationId { get; set; }
     public Guid? WorkstreamId { get; set; }
     public Guid RequestingInstallationId { get; set; }
-    public Guid RecommendedCandidateId { get; set; }
+    public Guid? RecommendedCandidateId { get; set; }
     public string Title { get; set; } = string.Empty;
     public string IdempotencyKey { get; set; } = string.Empty;
     public string Objective { get; set; } = string.Empty;
+    public int Priority { get; set; } = 50;
     public string AssignmentsJson { get; set; } = "[]";
     public string RejectedAlternativesJson { get; set; } = "[]";
     public decimal? EstimatedMonthlyCost { get; set; }
