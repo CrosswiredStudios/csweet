@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using PlatformCapabilities = CSweet.Agent.SDK.PlatformCapabilities;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Agents;
 using CSweet.Contracts.Plugins;
@@ -316,7 +317,7 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
         {
             PluginKind = version.PluginKind.ToString(),
             ManifestFileName = version.ManifestFileName,
-            RequestedCapabilities = manifest.Requires.Select(x => x.Name).ToArray(),
+            RequestedCapabilities = GrantRequiredCapabilities(manifest),
             WebAccess = manifest.WebAccess,
             ConfigurationFields = manifest.Configuration,
             CredentialBindings = manifest.Credentials
@@ -328,6 +329,12 @@ public sealed partial class AgentImportPreviewService : IPluginImportService
         PluginWebAccessMode.AllPublic => ["all-public"],
         _ => manifest.WebAccess.Rules.Select(WebGrantToken).ToArray()
     };
+
+    public static IReadOnlyList<string> GrantRequiredCapabilities(PluginManifest manifest) =>
+        manifest.Requires.Select(x => x.Name)
+            .Where(capability => !PlatformCapabilities.Global.Contains(capability))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
     public static string WebGrantToken(PluginWebAccessRule rule)
     {

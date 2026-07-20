@@ -102,7 +102,8 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
         ValidateSchedule(request.TickFrequencySeconds, request.MaxRuntimeSeconds, activationMode, settings);
         ValidateResources(request.MemoryMb, request.CpuPercent, settings);
         ValidateGrant("provided capabilities", request.GrantedCapabilities, manifest.Provides.Select(x => x.Name).ToArray());
-        ValidateGrant("required capabilities", request.GrantedRequestedCapabilities, manifest.Requires.Select(x => x.Name).ToArray());
+        ValidateGrant("required capabilities", request.GrantedRequestedCapabilities,
+            AgentImportPreviewService.GrantRequiredCapabilities(manifest));
         ValidateGrant("subscriptions", request.GrantedSubscriptions, manifest.Events.Subscribes);
         ValidateGrant("publications", request.GrantedPublications, manifest.Events.Publishes);
         if (request.GrantedPermissions.Count > 0)
@@ -411,7 +412,8 @@ public sealed class AgentInstallationService : IAgentInstallationService, IPlugi
         ValidateSchedule(request.TickFrequencySeconds, request.MaxRuntimeSeconds, activation, settings);
         ValidateResources(request.MemoryMb, request.CpuPercent, settings);
         ValidateGrant("provided capabilities", request.GrantedCapabilities, manifest.Provides.Select(x => x.Name).ToArray());
-        ValidateGrant("required capabilities", request.GrantedRequestedCapabilities, manifest.Requires.Select(x => x.Name).ToArray());
+        ValidateGrant("required capabilities", request.GrantedRequestedCapabilities,
+            AgentImportPreviewService.GrantRequiredCapabilities(manifest));
         ValidateGrant("subscriptions", request.GrantedSubscriptions, manifest.Events.Subscribes);
         ValidateGrant("publications", request.GrantedPublications, manifest.Events.Publishes);
         if (request.GrantedPermissions.Count > 0)

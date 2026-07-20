@@ -13,6 +13,17 @@ public enum McpToolExecutionPolicy
     PlatformOnly
 }
 
+/// <summary>
+/// Controls discovery separately from execution risk. Global tools are available to every
+/// authenticated, active installation without a manifest-requested capability grant.
+/// </summary>
+public enum McpToolAvailability
+{
+    GrantRequired,
+    Global,
+    PlatformOnly
+}
+
 public sealed record McpToolDescriptor(
     string Capability,
     string Name,
@@ -20,6 +31,7 @@ public sealed record McpToolDescriptor(
     JsonElement InputSchema,
     JsonElement? OutputSchema,
     McpToolExecutionPolicy ExecutionPolicy,
+    McpToolAvailability Availability = McpToolAvailability.GrantRequired,
     bool ModelVisible = true);
 
 public sealed class McpToolCatalog
@@ -28,7 +40,7 @@ public sealed class McpToolCatalog
         { "type": "object", "properties": {}, "additionalProperties": false }
         """);
 
-    private readonly IReadOnlyList<McpToolDescriptor> _tools =
+    private static readonly IReadOnlyList<McpToolDescriptor> Tools =
     [
         Read(PlatformCapabilities.BusinessProfileRead, "read_business_profile",
             "Read the authoritative business profile for this organization."),
@@ -56,8 +68,8 @@ public sealed class McpToolCatalog
             "Create a durable, separately gated action proposal."),
         Read(PlatformCapabilities.ManagementCycleRead, "read_management_cycle",
             "Read management cadence, executive briefing schedule, and quiet hours."),
-        Write(CommunicationHubCapabilities.CreateExecutiveDecision, "create_executive_decision",
-            "Present one structured executive decision with two to four options. The recommended option is shown first and the UI automatically adds Something else."),
+        GlobalWrite(CommunicationHubCapabilities.AskUser, "ask_user",
+            "Ask the user one structured multiple-choice question with two to four mutually exclusive options. Put the recommended option first. The UI automatically adds Something else with a free-text response."),
         Write(HiringCapabilities.UpsertRecommendation, "upsert_hiring_recommendation",
             "Maintain the ranked HR hiring backlog using opaque candidate references returned by search_workforce."),
         Approval(HiringCapabilities.StageWorkflow, "stage_hiring_workflow",
@@ -65,20 +77,32 @@ public sealed class McpToolCatalog
     ];
 
     public IReadOnlyList<McpToolDescriptor> List(IReadOnlySet<string> grantedCapabilities) =>
-        _tools.Where(tool => tool.ModelVisible &&
-                             tool.ExecutionPolicy != McpToolExecutionPolicy.PlatformOnly &&
-                             grantedCapabilities.Contains(tool.Capability))
+        Tools.Where(tool => tool.ModelVisible &&
+                             tool.Availability != McpToolAvailability.PlatformOnly &&
+                             (tool.Availability == McpToolAvailability.Global ||
+                              grantedCapabilities.Contains(tool.Capability)))
             .OrderBy(tool => tool.Name, StringComparer.Ordinal)
             .ToList();
 
     public McpToolDescriptor? Find(string name, IReadOnlySet<string> grantedCapabilities) =>
         List(grantedCapabilities).SingleOrDefault(tool => string.Equals(tool.Name, name, StringComparison.Ordinal));
 
+    public static IReadOnlySet<string> GlobalCapabilities { get; } = Tools
+        .Where(tool => tool.Availability == McpToolAvailability.Global)
+        .Select(tool => tool.Capability)
+        .ToHashSet(StringComparer.Ordinal);
+
+    public static bool IsGlobalCapability(string capability) => GlobalCapabilities.Contains(capability);
+
     private static McpToolDescriptor Read(string capability, string name, string description) =>
         new(capability, name, description, InputFor(capability), null, McpToolExecutionPolicy.ReadOnly);
 
     private static McpToolDescriptor Write(string capability, string name, string description) =>
         new(capability, name, description, InputFor(capability), null, McpToolExecutionPolicy.AdvisoryWrite);
+
+    private static McpToolDescriptor GlobalWrite(string capability, string name, string description) =>
+        new(capability, name, description, InputFor(capability), null, McpToolExecutionPolicy.AdvisoryWrite,
+            McpToolAvailability.Global);
 
     private static McpToolDescriptor Approval(string capability, string name, string description) =>
         new(capability, name, description, InputFor(capability), null, McpToolExecutionPolicy.ApprovalCreating);
@@ -101,7 +125,7 @@ public sealed class McpToolCatalog
         PlatformCapabilities.BudgetEvaluate => Schema("""
             {"type":"object","required":["scopeType","amount","currency","purpose","reserve","idempotencyKey"],"properties":{"scopeType":{"type":"string"},"scopeId":{"type":["string","null"]},"amount":{"type":"number","minimum":0},"currency":{"type":"string"},"purpose":{"type":"string"},"reserve":{"type":"boolean"},"idempotencyKey":{"type":"string"}},"additionalProperties":false}
             """),
-        CommunicationHubCapabilities.CreateExecutiveDecision => Schema("""
+        CommunicationHubCapabilities.AskUser => Schema("""
             {"type":"object","required":["conversationId","chatTurnId","prompt","options","recommendedOptionId","idempotencyKey"],"properties":{"conversationId":{"type":"string","format":"uuid"},"chatTurnId":{"type":"string","format":"uuid"},"prompt":{"type":"string","minLength":1,"maxLength":2048},"options":{"type":"array","minItems":2,"maxItems":4,"items":{"type":"object","required":["id","label"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"label":{"type":"string","minLength":1,"maxLength":160},"description":{"type":["string","null"],"maxLength":500}},"additionalProperties":false}},"recommendedOptionId":{"type":"string","minLength":1,"maxLength":80},"idempotencyKey":{"type":"string","minLength":1,"maxLength":160}},"additionalProperties":false}
             """),
         HiringCapabilities.UpsertRecommendation => Schema("""

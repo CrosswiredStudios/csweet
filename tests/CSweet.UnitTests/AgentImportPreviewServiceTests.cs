@@ -1,4 +1,5 @@
 using System.Text;
+using CSweet.Agent.SDK;
 using CSweet.Application.Setup;
 using CSweet.Contracts.Agents;
 using CSweet.Infrastructure.Persistence;
@@ -60,6 +61,25 @@ public class AgentImportPreviewServiceTests
         var version = Assert.Single(await dbContext.AgentPackageVersions.ToListAsync());
         Assert.Equal(result.ImportId, version.Id);
         Assert.Equal(result.ManifestDigest, version.ManifestDigest);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_OmitsGlobalToolsFromRequestedGrantApproval()
+    {
+        await using var dbContext = CreateDbContext();
+        var manifest = ValidManifest().Replace(
+            "\"requires\": [{\"name\":\"documents.read.v1\",\"scope\":\"organization\"}]",
+            $"\"requires\": [{{\"name\":\"documents.read.v1\",\"scope\":\"organization\"}},{{\"name\":\"{PlatformCapabilities.UserInputRequest}\",\"scope\":\"organization\"}}]",
+            StringComparison.Ordinal);
+        var service = new AgentImportPreviewService(
+            dbContext,
+            new FakeGitHubAgentRepositoryClient(manifest),
+            new TestAuditEventWriter());
+
+        var result = await service.PreviewAsync(new PreviewAgentImportRequest(
+            "https://github.com/example/research-agent"));
+
+        Assert.Equal(["documents.read.v1"], result.RequestedCapabilities);
     }
 
     [Fact]

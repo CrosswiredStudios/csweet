@@ -123,9 +123,9 @@
                                  <ChatMarkdown Content="@message.Content" />
                                 @if (message.Decision is { } decision)
                                 {
-                                    <section class="executive-decision-card" aria-label="Executive decision">
+                                    <section class="executive-decision-card" aria-label="Question">
                                         <header>
-                                            <span>DECISION</span>
+                                            <span>QUESTION</span>
                                             <strong>@decision.Prompt</strong>
                                         </header>
                                         @if (decision.Status == "Pending")
@@ -446,7 +446,7 @@
                 $"{BasePath}/chats/{_selected.Id}/decisions/{decision.Id}/respond", request, _disposeCts.Token);
             var result = await response.Content.ReadFromJsonAsync<AnswerExecutiveDecisionResponse>(_disposeCts.Token);
             if (!response.IsSuccessStatusCode || result is null || !result.Succeeded)
-                throw new InvalidOperationException(result?.Message ?? "The decision could not be submitted.");
+                throw new InvalidOperationException(result?.Message ?? "The answer could not be submitted.");
             var index = _messages.FindIndex(x => x.Id == message.Id);
             if (index >= 0) _messages[index] = _messages[index] with { Decision = result.Decision };
             if (result.Turn is not null)
@@ -465,7 +465,7 @@
 
     private static string DecisionAnswer(ExecutiveDecisionCardResponse decision) =>
         decision.SelectedOptionId is { } selected
-            ? decision.Options.FirstOrDefault(x => x.Id == selected)?.Label ?? "Decision submitted"
+            ? decision.Options.FirstOrDefault(x => x.Id == selected)?.Label ?? "Answer submitted"
             : decision.FreeTextAnswer ?? decision.Status;
 
     private Task OnComposerKeyDown(KeyboardEventArgs args) => args.Key == "Enter" && !args.ShiftKey ? SendAsync() : Task.CompletedTask;

@@ -22,7 +22,7 @@ public sealed class PlatformCapabilityDispatcher(
         CancellationToken cancellationToken)
     {
         var requested = session.Grant.RequestedCapabilities ?? new HashSet<string>(StringComparer.Ordinal);
-        if (!requested.Contains(request.Capability))
+        if (!McpToolCatalog.IsGlobalCapability(request.Capability) && !requested.Contains(request.Capability))
         {
             return Single(Failure(request.RequestId,
                 $"Agent '{session.AgentId}' may not request '{request.Capability}'."));

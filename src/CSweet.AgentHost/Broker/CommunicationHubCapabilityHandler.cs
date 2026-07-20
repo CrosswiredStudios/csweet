@@ -29,7 +29,8 @@ public sealed class CommunicationHubCapabilityHandler(
 
     private async Task<CapabilityResult> HandleCoreAsync(AgentSession session, RequestCapability request, CancellationToken token)
     {
-        if (session.Grant.RequestedCapabilities?.Contains(request.Capability) != true)
+        if (!McpToolCatalog.IsGlobalCapability(request.Capability) &&
+            session.Grant.RequestedCapabilities?.Contains(request.Capability) != true)
             return Failure(request.RequestId, PlatformCapabilityErrorCode.Denied,
                 $"The installation is not granted {request.Capability}.");
         if (!Guid.TryParse(session.BusinessId, out var organizationId) ||
@@ -57,7 +58,7 @@ public sealed class CommunicationHubCapabilityHandler(
                         Read<ChatReference>(request).ChatId ?? throw new JsonException("chatId is required."),
                         actorId.Value, token)),
                 CommunicationHubCapabilities.SendMessage => await SendAsync(request, organizationId, actorId.Value, token),
-                CommunicationHubCapabilities.CreateExecutiveDecision => await CreateDecisionAsync(
+                CommunicationHubCapabilities.AskUser => await AskUserAsync(
                     request, organizationId, installationId, token),
                 _ => Failure(request.RequestId, PlatformCapabilityErrorCode.NotFound, "The communication capability is not implemented.")
             };
@@ -104,13 +105,13 @@ public sealed class CommunicationHubCapabilityHandler(
             : Success(request.RequestId, message.Message);
     }
 
-    private async Task<CapabilityResult> CreateDecisionAsync(
+    private async Task<CapabilityResult> AskUserAsync(
         RequestCapability request,
         Guid organizationId,
         Guid installationId,
         CancellationToken token)
     {
-        var input = Read<CreateDecisionCapabilityRequest>(request);
+        var input = Read<AskUserCapabilityRequest>(request);
         try
         {
             var decision = await (decisions ?? throw new InvalidOperationException("The executive decision service is unavailable.")).CreateAsync(new CreateExecutiveDecisionCommand(
@@ -157,7 +158,7 @@ public sealed class CommunicationHubCapabilityHandler(
         IReadOnlyList<Guid>? AudienceRoleIds = null,
         IReadOnlyList<Guid>? AudienceWorkstreamIds = null);
     private sealed record SendMessageCapabilityRequest(Guid ChatId, string Content, string? IdempotencyKey = null);
-    private sealed record CreateDecisionCapabilityRequest(
+    private sealed record AskUserCapabilityRequest(
         Guid ConversationId,
         Guid ChatTurnId,
         string Prompt,

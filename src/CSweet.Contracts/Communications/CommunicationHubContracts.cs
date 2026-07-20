@@ -127,10 +127,10 @@ public static class CommunicationHubCapabilities
     public const string Modify = "communication.chat.modify.v1";
     public const string Delete = "communication.chat.delete.v1";
     public const string SendMessage = "communication.message.send.v1";
-    public const string CreateExecutiveDecision = "platform.chat-decision.create.v1";
+    public const string AskUser = "platform.user-input.request.v1";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
-        Read, Create, Modify, Delete, SendMessage, CreateExecutiveDecision
+        Read, Create, Modify, Delete, SendMessage, AskUser
     };
 }

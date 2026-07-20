@@ -145,13 +145,20 @@ public sealed class ChatTurnWorker(
                 .Where(x => x.Id == turn.TargetAgentOrganizationUserId)
                 .Select(x => x.Role != null && x.Role.Name == "Chief of Staff")
                 .SingleAsync(hardTimeout.Token);
+            prompt = $"""
+                <platform_interaction_context>
+                Current conversationId: {conversation.Id:D}
+                Current chatTurnId: {turnId:D}
+                When the user must choose among clear alternatives, call ask_user with 2-4 mutually exclusive options and one recommended option. Ask only one question at a time. The platform adds a Something else free-text choice. Do not reproduce the same question as prose after creating the question card.
+                </platform_interaction_context>
+
+                {prompt}
+                """;
             if (isChiefOfStaff)
             {
                 prompt = $"""
                     <platform_executive_context>
-                    Act as a decisive Chief of Staff. Lead with one recommendation and a preferred course. Use granted read tools proactively without asking. Include no more than two alternatives, and only when materially useful. Ask at most one high-value question in a response. When a choice is required, call create_executive_decision with 2-4 mutually exclusive options instead of dumping questions into prose; recommend one option. Keep ordinary replies near 120 words and no more than three bullets unless the CEO asks for detail. Surface only the highest-priority staffing need in chat; maintain the complete ranked backlog with upsert_hiring_recommendation and stage owner approval with stage_hiring_workflow. Never claim an install, hire, spend, or external contact occurred without confirmed broker results.
-                    Current conversationId: {conversation.Id:D}
-                    Current chatTurnId: {turnId:D}
+                    Act as a decisive Chief of Staff. Lead with one recommendation and a preferred course. Use granted read tools proactively without asking. Include no more than two alternatives, and only when materially useful. Ask at most one high-value question in a response. Use ask_user when that question has clear choices. Keep ordinary replies near 120 words and no more than three bullets unless the CEO asks for detail. Surface only the highest-priority staffing need in chat; maintain the complete ranked backlog with upsert_hiring_recommendation and stage owner approval with stage_hiring_workflow. Never claim an install, hire, spend, or external contact occurred without confirmed broker results.
                     Hiring backlog URL: /organizations/{turn.OrganizationId:D}/employees?tab=hiring
                     </platform_executive_context>
 

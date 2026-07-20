@@ -120,7 +120,10 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         registration.GrantedSubscriptions.AddRange(grant.Subscriptions);
         registration.GrantedPublications.AddRange(grant.Publications);
         registration.GrantedPermissions.AddRange(grant.Permissions);
-        registration.GrantedRequestedCapabilities.AddRange(grant.RequestedCapabilities);
+        registration.GrantedRequestedCapabilities.AddRange(
+            (grant.RequestedCapabilities ?? new HashSet<string>(StringComparer.Ordinal))
+            .Where(capability => !McpToolCatalog.IsGlobalCapability(capability)));
+        registration.GlobalCapabilities.AddRange(McpToolCatalog.GlobalCapabilities.Order(StringComparer.Ordinal));
         registration.McpEndpoint = _configuration["Mcp:PublicEndpoint"] ?? DefaultMcpEndpoint(context.Host);
         registration.McpAccessToken = session.ConsumeInitialMcpAccessToken();
         registration.McpTokenExpiresAt = Timestamp.FromDateTimeOffset(session.McpTokenExpiresAt);
