@@ -4,6 +4,12 @@
 
 Agent containers remain language-neutral. They register over the existing gRPC broker for identity, lifecycle, events, and streaming. An accepted registration also returns a dedicated one-time-visible MCP bearer credential, endpoint, expiration, installation revision, granted requested-capability names, and separately identified global capabilities.
 
+## Agent employee identity
+
+An accepted registration for a hired agent also returns its organization-scoped employee identity: employee ID, hired display name, assigned role and responsibilities, authority level, and reporting manager. The package ID continues to identify the software implementation and is not an employee persona. Service installations that have not been hired do not receive an employee identity.
+
+Before every broker-mediated LLM request, AgentHost reloads the active employee bound to the authenticated organization and installation and prepends a protected identity instruction. Matching employee or installation records in organization and workforce data are explicitly identified as self. Agent-authored role instructions are preserved after the platform block, but cannot replace the platform identity. Because resolution occurs per request, name, role, responsibility, authority, and manager changes take effect without restarting the agent. The registration field is additive, so older agents ignore it while still receiving broker-side identity enforcement.
+
 The bearer credential is random and session-bound. C-Sweet stores only its SHA-256 hash after registration. It expires after one hour, stops working as soon as the broker session ends, and is not the container workload credential. Agents must reconnect to rotate it. Credentials belong in HTTP authorization headers, never prompts or tool arguments.
 
 `POST /mcp` implements Streamable HTTP JSON-RPC initialization, tool discovery, and invocation. `tools/list` exposes global model-visible tools plus grant-required tools present in both the immutable installation grant and active session grant. `tools/call` rechecks the active organization and installation, current policy, request size, rate limit, basic JSON schema, and trusted capability handler. MCP never calls a handler outside the broker dispatcher.

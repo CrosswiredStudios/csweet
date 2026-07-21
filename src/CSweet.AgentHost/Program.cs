@@ -29,6 +29,7 @@ builder.Services
 builder.Services.AddHostedService<ManagementReviewScheduler>();
 builder.Services.AddHostedService<AgentOnboardingEventDispatcher>();
 builder.Services.AddScoped<IAgentRuntimeSignalService, AgentRuntimeSignalService>();
+builder.Services.AddScoped<AgentEmployeeIdentityResolver>();
 builder.Services.AddScoped<PlatformLlmCapabilityHandler>();
 builder.Services.AddSingleton<IMemoryStore>(_ => new PostgreSqlMemoryStore(
     builder.Configuration.GetConnectionString("Postgres")

@@ -25,6 +25,7 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
     private readonly IConfiguration _configuration;
     private readonly IAuditEventWriter _audit;
     private readonly IAuditExecutionContextAccessor _auditContext;
+    private readonly AgentEmployeeIdentityResolver _employeeIdentityResolver;
 
     public AgentBrokerService(
         IAgentAuthorizationPolicy authorizationPolicy,
@@ -38,6 +39,7 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         IConfiguration configuration,
         IAuditEventWriter audit,
         IAuditExecutionContextAccessor auditContext,
+        AgentEmployeeIdentityResolver employeeIdentityResolver,
         ILogger<AgentBrokerService> logger)
     {
         _authorizationPolicy = authorizationPolicy;
@@ -51,6 +53,7 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         _configuration = configuration;
         _audit = audit;
         _auditContext = auditContext;
+        _employeeIdentityResolver = employeeIdentityResolver;
         _logger = logger;
     }
 
@@ -162,6 +165,9 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         registration.McpEndpoint = _configuration["Mcp:PublicEndpoint"] ?? DefaultMcpEndpoint(context.Host);
         registration.McpAccessToken = session.ConsumeInitialMcpAccessToken();
         registration.McpTokenExpiresAt = Timestamp.FromDateTimeOffset(session.McpTokenExpiresAt);
+        registration.EmployeeIdentity = await _employeeIdentityResolver.ResolveAsync(
+            session,
+            context.CancellationToken);
         if (Guid.TryParse(firstMessage.Register.InstallationId, out var registeredInstallationId))
             registration.GrantRevision = await _db.AgentInstallations.AsNoTracking()
                 .Where(x => x.Id == registeredInstallationId)

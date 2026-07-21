@@ -16,14 +16,17 @@ public sealed class PlatformLlmCapabilityHandler
     private readonly CSweetDbContext _dbContext;
     private readonly ILlmProviderFactory _providerFactory;
     private readonly ILogger<PlatformLlmCapabilityHandler> _logger;
+    private readonly AgentEmployeeIdentityResolver _employeeIdentityResolver;
 
     public PlatformLlmCapabilityHandler(
         CSweetDbContext dbContext,
         ILlmProviderFactory providerFactory,
+        AgentEmployeeIdentityResolver employeeIdentityResolver,
         ILogger<PlatformLlmCapabilityHandler> logger)
     {
         _dbContext = dbContext;
         _providerFactory = providerFactory;
+        _employeeIdentityResolver = employeeIdentityResolver;
         _logger = logger;
     }
 
@@ -109,10 +112,13 @@ public sealed class PlatformLlmCapabilityHandler
             yield break;
         }
 
+        var identity = await _employeeIdentityResolver.ResolveAsync(session, requestToken);
         var messages = input.Messages.Select(ToChatMessage).ToList();
         var options = new ChatOptions
         {
-            Instructions = input.Instructions,
+            Instructions = identity is null
+                ? input.Instructions
+                : AgentEmployeeIdentityResolver.ApplyToInstructions(session, identity, input.Instructions),
             Tools = input.Tools?
                 .Select(tool => (AITool)AIFunctionFactory.CreateDeclaration(
                     tool.Name,
