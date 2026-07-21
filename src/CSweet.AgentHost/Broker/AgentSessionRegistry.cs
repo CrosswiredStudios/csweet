@@ -3,6 +3,7 @@ using CSweet.Agent.Contracts.Grpc;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
+using CSweet.Application.Setup;
 
 namespace CSweet.AgentHost.Broker;
 
@@ -11,10 +12,12 @@ public sealed class AgentSessionRegistry
     private readonly ConcurrentDictionary<string, AgentSession> _sessions = new();
     private readonly ConcurrentDictionary<string, PendingCapabilityRequest> _pendingCapabilities = new();
     private readonly ILogger<AgentSessionRegistry> _logger;
+    private readonly IAuditEventWriter? _audit;
 
-    public AgentSessionRegistry(ILogger<AgentSessionRegistry> logger)
+    public AgentSessionRegistry(ILogger<AgentSessionRegistry> logger, IAuditEventWriter? audit = null)
     {
         _logger = logger;
+        _audit = audit;
     }
 
     public AgentSession Register(
@@ -29,7 +32,8 @@ public sealed class AgentSessionRegistry
             registration.RuntimeInstanceId,
             registration.TickId,
             registration.WorkloadToken,
-            grant);
+            grant,
+            registration.AgentVersion);
 
         if (!_sessions.TryAdd(session.SessionId, session))
         {
@@ -126,12 +130,27 @@ public sealed class AgentSessionRegistry
                 continue;
             }
 
-            if (target.TrySend(new BrokerToAgentMessage
+            var deliveryId = Append(new AuditEventWriteRequest(
+                "broker.event.delivery", "BrokerEvent", "Outbound", "Authorized",
+                BrokerAuditIdentity.OrganizationId(source), "DeliveredEvent",
+                Summary: $"Authorized delivery of {publishedEvent.EventType} to {target.AgentId}.",
+                CorrelationId: correlationId, Actor: BrokerAuditIdentity.Actor(source),
+                Target: BrokerAuditIdentity.Target(target), ContentType: publishedEvent.ContentType,
+                Payload: publishedEvent.Payload.ToByteArray()));
+            var sent = target.TrySend(new BrokerToAgentMessage
             {
                 MessageId = Guid.NewGuid().ToString("N"),
                 CorrelationId = correlationId,
                 Event = delivered
-            }))
+            });
+            Append(new AuditEventWriteRequest(
+                "broker.event.delivery.result", "BrokerEvent", "Outbound", sent ? "Delivered" : "Dropped",
+                BrokerAuditIdentity.OrganizationId(source), "DeliveredEvent",
+                Summary: sent ? $"Enqueued {publishedEvent.EventType} for {target.AgentId}."
+                    : $"Dropped {publishedEvent.EventType} for {target.AgentId} because its queue was full.",
+                ParentEventId: deliveryId, CorrelationId: correlationId, Actor: BrokerAuditIdentity.Actor(source),
+                Target: BrokerAuditIdentity.Target(target), ErrorCode: sent ? null : "target_queue_full"));
+            if (sent)
             {
                 deliveredCount++;
                 deliveredTargets.Add(target.AgentId);
@@ -181,11 +200,33 @@ public sealed class AgentSessionRegistry
         return _sessions.Values.FirstOrDefault(session => session.MatchesMcpAccessToken(token));
     }
 
+    public bool SendAudited(AgentSession target, BrokerToAgentMessage message, AuditEventWriteRequest auditEvent)
+    {
+        var auditId = Append(auditEvent);
+        var sent = target.TrySend(message);
+        Append(auditEvent with
+        {
+            EventType = auditEvent.EventType + ".result",
+            Outcome = sent ? "Delivered" : "Dropped",
+            ParentEventId = auditId,
+            Payload = null,
+            ErrorCode = sent ? null : "target_queue_full"
+        });
+        return sent;
+    }
+
     /// <summary>Publishes a trusted, durable application event without impersonating an agent.</summary>
     public int PublishPlatformEvent(string businessId, string eventType, string subject, ByteString payload, string correlationId,
         string? targetInstallationId = null, string? eventId = null, bool requireSubscription = true,
         DateTimeOffset? occurredAt = null)
     {
+        var organizationId = Guid.TryParse(businessId, out var parsedOrganizationId) ? parsedOrganizationId : (Guid?)null;
+        var platformEventAuditId = Append(new AuditEventWriteRequest(
+            "broker.platform-event.publish", "BrokerEvent", "Internal", "Accepted", organizationId,
+            "DeliveredEvent", Summary: $"Platform published {eventType} for business {businessId}.",
+            ExternalMessageId: eventId, CorrelationId: correlationId,
+            Actor: new AuditActor("Platform", DisplayName: "C-Sweet platform"),
+            ContentType: "application/json", Payload: payload.ToByteArray()));
         var delivered = new DeliveredEvent
         {
             EventId = eventId ?? Guid.NewGuid().ToString("N"),
@@ -203,16 +244,34 @@ public sealed class AgentSessionRegistry
                      (targetInstallationId is null || string.Equals(x.InstallationId, targetInstallationId, StringComparison.OrdinalIgnoreCase)) &&
                      (!requireSubscription || x.Grant.Subscriptions.Contains(eventType))))
         {
-            if (target.TrySend(new BrokerToAgentMessage
+            var deliveryId = Append(new AuditEventWriteRequest(
+                "broker.platform-event.delivery", "BrokerEvent", "Outbound", "Authorized", organizationId,
+                "DeliveredEvent", Summary: $"Authorized platform event {eventType} for {target.AgentId}.",
+                ParentEventId: platformEventAuditId, CorrelationId: correlationId,
+                Actor: new AuditActor("Platform", DisplayName: "C-Sweet platform"),
+                Target: BrokerAuditIdentity.Target(target), ContentType: "application/json", Payload: payload.ToByteArray()));
+            var sent = target.TrySend(new BrokerToAgentMessage
                 {
                     MessageId = Guid.NewGuid().ToString("N"),
                     CorrelationId = correlationId,
                     Event = delivered
-                }))
+                });
+            Append(new AuditEventWriteRequest(
+                "broker.platform-event.delivery.result", "BrokerEvent", "Outbound", sent ? "Delivered" : "Dropped",
+                organizationId, "DeliveredEvent", ParentEventId: deliveryId, CorrelationId: correlationId,
+                Actor: new AuditActor("Platform", DisplayName: "C-Sweet platform"),
+                Target: BrokerAuditIdentity.Target(target), ErrorCode: sent ? null : "target_queue_full"));
+            if (sent)
             {
                 count++;
             }
         }
+        Append(new AuditEventWriteRequest(
+            "broker.platform-event.publish.result", "BrokerEvent", "Internal", count > 0 ? "Delivered" : "Undelivered",
+            organizationId, "DeliveredEvent", Summary: $"Platform event {eventType} reached {count} session(s).",
+            ParentEventId: platformEventAuditId, CorrelationId: correlationId,
+            Actor: new AuditActor("Platform", DisplayName: "C-Sweet platform"),
+            ErrorCode: count > 0 ? null : "event_undelivered"));
         return count;
     }
 
@@ -223,6 +282,13 @@ public sealed class AgentSessionRegistry
         RequestCapability request,
         CancellationToken cancellationToken)
     {
+        var platformOrganizationId = Guid.TryParse(businessId, out var parsedBusinessId) ? parsedBusinessId : (Guid?)null;
+        var requestAuditId = await AppendAsync(new AuditEventWriteRequest(
+            "broker.platform-capability.request", "BrokerCapability", "Internal", "Received",
+            platformOrganizationId, "CapabilityRequest", ExternalRequestId: request.RequestId,
+            Actor: new AuditActor("Platform", DisplayName: "C-Sweet platform"),
+            Target: new AuditTarget("Agent", InstallationId: Guid.TryParse(installationId, out var targetId) ? targetId : null),
+            ContentType: request.ContentType, Payload: request.Payload.ToByteArray()), cancellationToken);
         var provider = _sessions.Values
             .Where(session =>
                 string.Equals(session.BusinessId, businessId, StringComparison.Ordinal) &&
@@ -232,6 +298,11 @@ public sealed class AgentSessionRegistry
             .FirstOrDefault();
         if (provider is null)
         {
+            await AppendAsync(new AuditEventWriteRequest(
+                "broker.platform-capability.request.result", "BrokerCapability", "Internal", "Failed",
+                platformOrganizationId, "CapabilityRequest", ParentEventId: requestAuditId,
+                ExternalRequestId: request.RequestId, Actor: new AuditActor("Platform", DisplayName: "C-Sweet platform"),
+                ErrorCode: "provider_unavailable"), cancellationToken);
             return CapabilityFailure(
                 request.RequestId,
                 $"The target installation is not connected or does not provide '{request.Capability}'.");
@@ -249,6 +320,13 @@ public sealed class AgentSessionRegistry
         if (!_pendingCapabilities.TryAdd(request.RequestId, pending))
             return CapabilityFailure(request.RequestId, "A capability request with this id is already pending.");
 
+        var platformDeliveryId = Append(new AuditEventWriteRequest(
+            "broker.platform-capability.delivery", "BrokerCapability", "Outbound", "Authorized",
+            platformOrganizationId, "CapabilityRequest", ExternalRequestId: request.RequestId,
+            ParentEventId: requestAuditId, CorrelationId: correlationId,
+            Actor: new AuditActor("Platform", DisplayName: "C-Sweet platform"),
+            Target: BrokerAuditIdentity.Target(provider), ContentType: request.ContentType,
+            Payload: request.Payload.ToByteArray()));
         var accepted = provider.TrySend(new BrokerToAgentMessage
         {
             MessageId = Guid.NewGuid().ToString("N"),
@@ -262,6 +340,12 @@ public sealed class AgentSessionRegistry
                 Payload = request.Payload
             }
         });
+        Append(new AuditEventWriteRequest(
+            "broker.platform-capability.delivery.result", "BrokerCapability", "Outbound",
+            accepted ? "Delivered" : "Dropped", platformOrganizationId, "CapabilityRequest",
+            ParentEventId: platformDeliveryId, ExternalRequestId: request.RequestId,
+            CorrelationId: correlationId, Actor: new AuditActor("Platform", DisplayName: "C-Sweet platform"),
+            Target: BrokerAuditIdentity.Target(provider), ErrorCode: accepted ? null : "provider_overloaded"));
         if (!accepted)
         {
             _pendingCapabilities.TryRemove(request.RequestId, out _);
@@ -367,6 +451,13 @@ public sealed class AgentSessionRegistry
             return;
         }
 
+        var deliveryId = Append(new AuditEventWriteRequest(
+            "broker.capability.delivery", "BrokerCapability", "Outbound", "Authorized",
+            BrokerAuditIdentity.OrganizationId(requester), "CapabilityRequest",
+            Summary: $"Authorized capability {request.Capability} for provider {provider.AgentId}.",
+            ExternalRequestId: request.RequestId, CorrelationId: correlationId,
+            Actor: BrokerAuditIdentity.Actor(requester), Target: BrokerAuditIdentity.Target(provider),
+            ContentType: request.ContentType, Payload: request.Payload.ToByteArray()));
         var accepted = provider.TrySend(new BrokerToAgentMessage
         {
             MessageId = Guid.NewGuid().ToString("N"),
@@ -380,6 +471,12 @@ public sealed class AgentSessionRegistry
                 Payload = request.Payload
             }
         });
+        Append(new AuditEventWriteRequest(
+            "broker.capability.delivery.result", "BrokerCapability", "Outbound", accepted ? "Delivered" : "Dropped",
+            BrokerAuditIdentity.OrganizationId(requester), "CapabilityRequest", ParentEventId: deliveryId,
+            ExternalRequestId: request.RequestId, CorrelationId: correlationId,
+            Actor: BrokerAuditIdentity.Actor(requester), Target: BrokerAuditIdentity.Target(provider),
+            ErrorCode: accepted ? null : "provider_overloaded"));
 
         if (!accepted)
         {
@@ -438,12 +535,24 @@ public sealed class AgentSessionRegistry
         else if (pending.RequesterSessionId is not null &&
                  _sessions.TryGetValue(pending.RequesterSessionId, out var requester))
         {
-            requester.TrySend(new BrokerToAgentMessage
+            var deliveryId = Append(new AuditEventWriteRequest(
+                "broker.capability-result.delivery", "BrokerCapability", "Outbound", "Authorized",
+                BrokerAuditIdentity.OrganizationId(provider), "CapabilityResult",
+                ExternalRequestId: result.RequestId, CorrelationId: pending.CorrelationId,
+                Actor: BrokerAuditIdentity.Actor(provider), Target: BrokerAuditIdentity.Target(requester),
+                ContentType: result.ContentType, Payload: result.Payload.ToByteArray(), ErrorMessage: result.Error));
+            var sent = requester.TrySend(new BrokerToAgentMessage
             {
                 MessageId = Guid.NewGuid().ToString("N"),
                 CorrelationId = pending.CorrelationId,
                 CapabilityResult = result
             });
+            Append(new AuditEventWriteRequest(
+                "broker.capability-result.delivery.result", "BrokerCapability", "Outbound",
+                sent ? "Delivered" : "Dropped", BrokerAuditIdentity.OrganizationId(provider), "CapabilityResult",
+                ParentEventId: deliveryId, ExternalRequestId: result.RequestId,
+                CorrelationId: pending.CorrelationId, Actor: BrokerAuditIdentity.Actor(provider),
+                Target: BrokerAuditIdentity.Target(requester), ErrorCode: sent ? null : "requester_queue_full"));
         }
     }
 
@@ -465,13 +574,13 @@ public sealed class AgentSessionRegistry
         return separator < 0 ? remainder : remainder[..separator];
     }
 
-    private static void SendCapabilityFailure(
+    private void SendCapabilityFailure(
         AgentSession requester,
         string requestId,
         string correlationId,
         string error)
     {
-        requester.TrySend(new BrokerToAgentMessage
+        SendAudited(requester, new BrokerToAgentMessage
         {
             MessageId = Guid.NewGuid().ToString("N"),
             CorrelationId = correlationId,
@@ -482,7 +591,11 @@ public sealed class AgentSessionRegistry
                 ContentType = "application/json",
                 Error = error
             }
-        });
+        }, new AuditEventWriteRequest(
+            "broker.capability.error", "BrokerCapability", "Outbound", "Denied",
+            BrokerAuditIdentity.OrganizationId(requester), "CapabilityResult", ExternalRequestId: requestId,
+            CorrelationId: correlationId, Actor: new AuditActor("Platform", DisplayName: "C-Sweet broker"),
+            Target: BrokerAuditIdentity.Target(requester), ErrorCode: "capability_denied", ErrorMessage: error));
     }
 
     private static CapabilityResult CapabilityFailure(string requestId, string error) => new()
@@ -493,13 +606,13 @@ public sealed class AgentSessionRegistry
         Error = error
     };
 
-    private static void SendError(
+    private void SendError(
         AgentSession session,
         string correlationId,
         string code,
         string message)
     {
-        session.TrySend(new BrokerToAgentMessage
+        SendAudited(session, new BrokerToAgentMessage
         {
             MessageId = Guid.NewGuid().ToString("N"),
             CorrelationId = correlationId,
@@ -508,7 +621,23 @@ public sealed class AgentSessionRegistry
                 Code = code,
                 Message = message
             }
-        });
+        }, new AuditEventWriteRequest(
+            "broker.error", "BrokerConnection", "Outbound", "Denied",
+            BrokerAuditIdentity.OrganizationId(session), "BrokerError", CorrelationId: correlationId,
+            Actor: new AuditActor("Platform", DisplayName: "C-Sweet broker"),
+            Target: BrokerAuditIdentity.Target(session), ErrorCode: code, ErrorMessage: message));
+    }
+
+    private Guid Append(AuditEventWriteRequest request)
+    {
+        if (_audit is null) return Guid.NewGuid();
+        return _audit.AppendAsync(request).GetAwaiter().GetResult();
+    }
+
+    private Task<Guid> AppendAsync(AuditEventWriteRequest request, CancellationToken cancellationToken)
+    {
+        if (_audit is null) return Task.FromResult(Guid.NewGuid());
+        return _audit.AppendAsync(request, cancellationToken);
     }
 
     private sealed record PendingCapabilityRequest(

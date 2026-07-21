@@ -2,11 +2,25 @@ using CSweet.Agent.Contracts.Grpc;
 using CSweet.AgentHost.Broker;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
+using CSweet.Application.Setup;
 
 namespace CSweet.UnitTests;
 
 public sealed class AgentSessionRegistryTests
 {
+    [Fact]
+    public void PublishEvent_WhenAuditPersistenceFails_DoesNotDeliver()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance, new FailingAuditWriter());
+        var source = Register(registry, "source", "business-1", publications: new[] { "sensitive.v1" });
+        var target = Register(registry, "target", "business-1", subscriptions: new[] { "sensitive.v1" });
+
+        Assert.Throws<InvalidOperationException>(() => registry.PublishEvent(source, new PublishEvent
+        {
+            EventType = "sensitive.v1", ContentType = "application/json", Payload = ByteString.CopyFromUtf8("{}")
+        }, "correlation"));
+        Assert.False(target.Outbound.TryRead(out _));
+    }
     [Fact]
     public void McpCredential_IsDedicatedSessionBoundAndReturnedOnlyOnce()
     {
@@ -372,4 +386,14 @@ public sealed class AgentSessionRegistryTests
                 (publications ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
                 (permissions ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal),
                 (requestedCapabilities ?? Enumerable.Empty<string>()).ToHashSet(StringComparer.Ordinal)));
+}
+
+file sealed class FailingAuditWriter : IAuditEventWriter
+{
+    public Task WriteAsync(string eventType, string entityType, Guid? entityId, string? summary,
+        string? metadataJson = null, CancellationToken cancellationToken = default) =>
+        Task.FromException(new InvalidOperationException("audit unavailable"));
+
+    public Task<Guid> AppendAsync(AuditEventWriteRequest request, CancellationToken cancellationToken = default) =>
+        Task.FromException<Guid>(new InvalidOperationException("audit unavailable"));
 }

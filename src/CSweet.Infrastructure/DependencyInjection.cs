@@ -17,6 +17,8 @@ using CSweet.Infrastructure.Llm;
 using CSweet.Infrastructure.Persistence;
 using CSweet.Infrastructure.Planning;
 using CSweet.Infrastructure.Setup;
+using CSweet.Infrastructure.Security;
+using CSweet.Application.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
@@ -78,7 +80,9 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 
         builder.Services.AddScoped<ISetupService, SetupService>();
-        builder.Services.AddScoped<IAuditEventWriter, AuditEventWriter>();
+        builder.Services.AddSingleton<IAuditExecutionContextAccessor, AuditExecutionContextAccessor>();
+        builder.Services.AddSingleton<IAuditEventWriter, AuditEventWriter>();
+        builder.Services.AddScoped<ISecurityAuditService, SecurityAuditService>();
         builder.Services.AddScoped<IAgentRuntimeSettingsService, AgentRuntimeSettingsService>();
         builder.Services.AddScoped<AgentImportPreviewService>();
         builder.Services.AddScoped<IAgentImportPreviewService>(sp => sp.GetRequiredService<AgentImportPreviewService>());

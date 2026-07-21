@@ -1,0 +1,178 @@
+@page "/organizations/{OrganizationId:guid}/security"
+@using System.Net
+@using System.Net.Http.Json
+@using CSweet.Contracts.Security
+@inject HttpClient Http
+
+<PageTitle>Security - C-Sweet</PageTitle>
+
+<MudPaper Elevation="1" Class="surface-panel security-audit-page">
+    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="security-audit-heading">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Primary">Company controls</MudText>
+            <MudText Typo="Typo.h4">Security</MudText>
+            <MudText Color="Color.Secondary">Immutable event history for people, agents, broker traffic, and platform capabilities.</MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Refresh"
+                   Disabled="_loading" OnClick="ReloadAsync">Refresh</MudButton>
+    </MudStack>
+
+    <div class="security-audit-filters">
+        <MudSelect T="string" Label="Time range" Value="_range" ValueChanged="OnRangeChanged" Variant="Variant.Outlined" Dense="true">
+            <MudSelectItem T="string" Value="@("24h")">Last 24 hours</MudSelectItem>
+            <MudSelectItem T="string" Value="@("7d")">Last 7 days</MudSelectItem>
+            <MudSelectItem T="string" Value="@("30d")">Last 30 days</MudSelectItem>
+            <MudSelectItem T="string" Value="@("all")">All time</MudSelectItem>
+        </MudSelect>
+        <MudSelect T="string" Label="Category" Value="_category" ValueChanged="OnCategoryChanged" Variant="Variant.Outlined" Dense="true">
+            <MudSelectItem T="string" Value="@string.Empty">All categories</MudSelectItem>
+            @foreach (var value in Categories) { <MudSelectItem T="string" Value="@value">@value</MudSelectItem> }
+        </MudSelect>
+        <MudSelect T="string" Label="Outcome" Value="_outcome" ValueChanged="OnOutcomeChanged" Variant="Variant.Outlined" Dense="true">
+            <MudSelectItem T="string" Value="@string.Empty">All outcomes</MudSelectItem>
+            @foreach (var value in Outcomes) { <MudSelectItem T="string" Value="@value">@value</MudSelectItem> }
+        </MudSelect>
+        <MudSelect T="string" Label="Actor" Value="_actorKind" ValueChanged="OnActorChanged" Variant="Variant.Outlined" Dense="true">
+            <MudSelectItem T="string" Value="@string.Empty">All actors</MudSelectItem>
+            @foreach (var value in ActorKinds) { <MudSelectItem T="string" Value="@value">@value</MudSelectItem> }
+        </MudSelect>
+        <MudTextField Label="Search" @bind-Value="_search" Variant="Variant.Outlined"
+                      Placeholder="Event, actor, correlation…" Adornment="Adornment.End"
+                      AdornmentIcon="@Icons.Material.Outlined.Search" OnKeyDown="OnSearchKeyDown" />
+    </div>
+
+    @if (_forbidden)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mt-4">
+            Security history is restricted to signed-in human Owners and Managers for this company.
+        </MudAlert>
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mt-4">@_error</MudAlert>
+    }
+    else
+    {
+        @if (_items.Any(x => x.IntegrityStatus != "Verified"))
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mt-4">
+                This result contains legacy unsealed history or a record that failed integrity verification. Open the record for details.
+            </MudAlert>
+        }
+
+        <MudTable T="SecurityEventSummaryResponse" Items="_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Md"
+                  Loading="_loading" Class="security-audit-table mt-4" AriaLabel="Security events">
+            <HeaderContent>
+                <MudTh>Time</MudTh><MudTh>Event</MudTh><MudTh>Actor</MudTh><MudTh>Direction</MudTh><MudTh>Outcome</MudTh><MudTh>Integrity</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Time"><button class="security-event-link" @onclick="@(() => OpenDetailAsync(context.Id))">@FormatTime(context.OccurredAt)</button></MudTd>
+                <MudTd DataLabel="Event">
+                    <MudText Typo="Typo.body2"><strong>@context.EventType</strong></MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@context.Category · @context.Summary</MudText>
+                </MudTd>
+                <MudTd DataLabel="Actor"><MudText Typo="Typo.body2">@context.ActorDisplayName</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">@context.ActorKind</MudText></MudTd>
+                <MudTd DataLabel="Direction">@context.Direction</MudTd>
+                <MudTd DataLabel="Outcome"><MudChip T="string" Size="Size.Small" Color="@OutcomeColor(context.Outcome)">@context.Outcome</MudChip></MudTd>
+                <MudTd DataLabel="Integrity"><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@IntegrityColor(context.IntegrityStatus)">@context.IntegrityStatus</MudChip></MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Color="Color.Secondary" Class="pa-4">No security events match these filters.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+
+        @if (_nextCursor is not null)
+        {
+            <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="_loadingMore" OnClick="LoadMoreAsync" Class="mt-3">
+                @(_loadingMore ? "Loading…" : "Load more")
+            </MudButton>
+        }
+    }
+</MudPaper>
+
+<MudDialog @bind-Visible="_detailOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">Security event</MudText></TitleContent>
+    <DialogContent>
+        @if (_detailLoading) { <MudProgressLinear Indeterminate="true" /> }
+        else if (_detail is not null)
+        {
+            @if (_detail.IntegrityStatus != "Verified")
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-3">Integrity status: @_detail.IntegrityStatus</MudAlert>
+            }
+            <dl class="security-event-details">
+                <dt>Event</dt><dd>@_detail.EventType</dd><dt>Outcome</dt><dd>@_detail.Outcome</dd>
+                <dt>Occurred</dt><dd>@FormatTime(_detail.OccurredAt)</dd><dt>Actor</dt><dd>@ActorLabel(_detail) (@_detail.ActorKind)</dd>
+                <dt>Agent ID</dt><dd>@Value(_detail.ActorAgentId)</dd><dt>Installation</dt><dd>@Value(_detail.ActorInstallationId)</dd>
+                <dt>Runtime</dt><dd>@Value(_detail.ActorRuntimeInstanceId)</dd><dt>Session</dt><dd>@Value(_detail.ActorSessionId)</dd>
+                <dt>Target</dt><dd>@Value(_detail.TargetDisplayName ?? _detail.TargetAgentId)</dd><dt>Correlation</dt><dd>@Value(_detail.CorrelationId)</dd>
+                <dt>Trace</dt><dd>@_detail.TraceId</dd><dt>Message/request</dt><dd>@Value(_detail.ExternalMessageId ?? _detail.ExternalRequestId)</dd>
+                <dt>Parent event</dt><dd>@Value(_detail.ParentEventId)</dd><dt>Child events</dt><dd>@(_detail.ChildEventIds.Count == 0 ? "—" : string.Join(", ", _detail.ChildEventIds))</dd>
+                <dt>Payload bytes</dt><dd>@Value(_detail.PayloadSize)</dd><dt>SHA-256</dt><dd class="security-hash">@Value(_detail.PayloadSha256)</dd>
+            </dl>
+            @if (!string.IsNullOrWhiteSpace(_detail.ErrorMessage)) { <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mt-3">@_detail.ErrorCode: @_detail.ErrorMessage</MudAlert> }
+            @if (!string.IsNullOrWhiteSpace(_detail.PayloadPreview))
+            {
+                <MudText Typo="Typo.subtitle2" Class="mt-4">Redacted payload @(_detail.PayloadTruncated ? "(truncated)" : "")</MudText>
+                <pre class="security-payload">@_detail.PayloadPreview</pre>
+            }
+            @if (!string.IsNullOrWhiteSpace(_detail.MetadataJson))
+            {
+                <MudText Typo="Typo.subtitle2" Class="mt-4">Metadata</MudText><pre class="security-payload">@_detail.MetadataJson</pre>
+            }
+        }
+    </DialogContent>
+    <DialogActions><MudButton OnClick="@(() => _detailOpen = false)">Close</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter] public Guid OrganizationId { get; set; }
+    private static readonly string[] Categories = ["BrokerConnection", "BrokerEvent", "BrokerCapability", "Mcp", "SecurityAccess", "Domain"];
+    private static readonly string[] Outcomes = ["Received", "Accepted", "Authorized", "Delivered", "Completed", "Denied", "Rejected", "Failed", "Dropped"];
+    private static readonly string[] ActorKinds = ["Human", "Agent", "Platform", "Unknown"];
+    private readonly List<SecurityEventSummaryResponse> _items = [];
+    private string _range = "24h", _category = "", _outcome = "", _actorKind = "", _search = "";
+    private string? _nextCursor, _error; private bool _loading, _loadingMore, _forbidden, _detailOpen, _detailLoading;
+    private SecurityEventDetailResponse? _detail;
+
+    protected override Task OnParametersSetAsync() => ReloadAsync();
+    private async Task ReloadAsync() { _items.Clear(); _nextCursor = null; await LoadAsync(false); }
+    private Task LoadMoreAsync() => LoadAsync(true);
+    private async Task LoadAsync(bool append)
+    {
+        if (append) _loadingMore = true; else _loading = true;
+        _error = null; _forbidden = false;
+        try
+        {
+            var response = await Http.GetAsync(BuildUrl(append ? _nextCursor : null));
+            if (response.StatusCode == HttpStatusCode.Forbidden) { _forbidden = true; return; }
+            response.EnsureSuccessStatusCode();
+            var page = await response.Content.ReadFromJsonAsync<SecurityEventPageResponse>();
+            if (page is null) return;
+            if (!append) _items.Clear();
+            _items.AddRange(page.Items); _nextCursor = page.NextCursor;
+        }
+        catch (Exception exception) { _error = exception.Message; }
+        finally { _loading = false; _loadingMore = false; }
+    }
+    private string BuildUrl(string? cursor)
+    {
+        var query = new List<string> { "limit=50" };
+        var from = _range switch { "24h" => DateTimeOffset.UtcNow.AddHours(-24), "7d" => DateTimeOffset.UtcNow.AddDays(-7), "30d" => DateTimeOffset.UtcNow.AddDays(-30), _ => (DateTimeOffset?)null };
+        if (from.HasValue) query.Add($"from={Uri.EscapeDataString(from.Value.ToString("O"))}");
+        Add(query, "category", _category); Add(query, "outcome", _outcome); Add(query, "actorKind", _actorKind); Add(query, "search", _search); Add(query, "cursor", cursor);
+        return $"api/organizations/{OrganizationId:D}/security/events?{string.Join('&', query)}";
+    }
+    private static void Add(List<string> query, string key, string? value) { if (!string.IsNullOrWhiteSpace(value)) query.Add($"{key}={Uri.EscapeDataString(value.Trim())}"); }
+    private async Task OpenDetailAsync(Guid id) { _detailOpen = true; _detailLoading = true; _detail = null; try { _detail = await Http.GetFromJsonAsync<SecurityEventDetailResponse>($"api/organizations/{OrganizationId:D}/security/events/{id:D}"); } finally { _detailLoading = false; } }
+    private Task OnRangeChanged(string value) { _range = value; return ReloadAsync(); }
+    private Task OnCategoryChanged(string value) { _category = value; return ReloadAsync(); }
+    private Task OnOutcomeChanged(string value) { _outcome = value; return ReloadAsync(); }
+    private Task OnActorChanged(string value) { _actorKind = value; return ReloadAsync(); }
+    private async Task OnSearchKeyDown(KeyboardEventArgs args) { if (args.Key == "Enter") await ReloadAsync(); }
+    private static string FormatTime(DateTimeOffset value) => value.ToLocalTime().ToString("g");
+    private static string ActorLabel(SecurityEventDetailResponse value) => value.ActorDisplayName ?? value.ActorAgentId ?? value.ActorApplicationUserId?.ToString("D") ?? value.ActorKind;
+    private static string Value(object? value) => value?.ToString() ?? "—";
+    private static Color OutcomeColor(string value) => value is "Denied" or "Rejected" or "Failed" or "Dropped" ? Color.Error : value is "Received" or "Authorized" ? Color.Info : Color.Success;
+    private static Color IntegrityColor(string value) => value == "Verified" ? Color.Success : value == "LegacyUnsealed" ? Color.Warning : Color.Error;
+}

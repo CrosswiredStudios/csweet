@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Identity;
 using CSweet.Infrastructure.Core;
 using CSweet.Infrastructure.Communications;
 using CSweet.Api.Notifications;
+using CSweet.Api.Security;
 using CSweet.Application.Notifications;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -118,6 +119,7 @@ if (app.Environment.IsDevelopment())
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<AuditExecutionContextMiddleware>();
 app.UseMiddleware<ApiAntiforgeryMiddleware>();
 app.UseMiddleware<FirstRunSetupGuardMiddleware>();
 
@@ -149,6 +151,7 @@ app.MapAgentMemoryEndpoints();
 app.MapCommunicationEndpoints();
 app.MapAgentManagementEndpoints();
 app.MapPluginManagementEndpoints();
+app.MapSecurityAuditEndpoints();
 
 app.MapControllers();
 app.MapHub<AppEventsHub>("/hubs/app-events");

@@ -107,6 +107,7 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        EnforceAppendOnlyAuditLedger();
         AssignInMemoryMessageSequences();
         CaptureCommunicationEvents();
         CaptureApplicationNotificationEvents();
@@ -115,10 +116,18 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        EnforceAppendOnlyAuditLedger();
         AssignInMemoryMessageSequences();
         CaptureCommunicationEvents();
         CaptureApplicationNotificationEvents();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void EnforceAppendOnlyAuditLedger()
+    {
+        ChangeTracker.DetectChanges();
+        if (ChangeTracker.Entries<AuditEvent>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Security audit ledger records are append-only.");
     }
 
     private void CaptureCommunicationEvents()
@@ -376,9 +385,39 @@ public sealed class CSweetDbContext : IdentityDbContext<ApplicationUser, Identit
         modelBuilder.Entity<AuditEvent>(entity =>
         {
             entity.HasKey(x => x.Id);
+            entity.Property(x => x.Sequence).ValueGeneratedOnAdd();
+            entity.Property(x => x.Category).HasMaxLength(48).IsRequired();
+            entity.Property(x => x.Direction).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.Outcome).HasMaxLength(48).IsRequired();
             entity.Property(x => x.EventType).HasMaxLength(160).IsRequired();
             entity.Property(x => x.EntityType).HasMaxLength(160).IsRequired();
             entity.Property(x => x.Summary).HasMaxLength(1024);
+            entity.Property(x => x.ExternalMessageId).HasMaxLength(200);
+            entity.Property(x => x.ExternalRequestId).HasMaxLength(200);
+            entity.Property(x => x.CorrelationId).HasMaxLength(200);
+            entity.Property(x => x.ActorKind).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.ActorDisplayName).HasMaxLength(256);
+            entity.Property(x => x.ActorAgentId).HasMaxLength(256);
+            entity.Property(x => x.ActorSessionId).HasMaxLength(128);
+            entity.Property(x => x.ActorPackageId).HasMaxLength(256);
+            entity.Property(x => x.ActorPackageVersion).HasMaxLength(80);
+            entity.Property(x => x.RemotePeer).HasMaxLength(256);
+            entity.Property(x => x.TargetKind).HasMaxLength(32);
+            entity.Property(x => x.TargetDisplayName).HasMaxLength(256);
+            entity.Property(x => x.TargetAgentId).HasMaxLength(256);
+            entity.Property(x => x.TargetSessionId).HasMaxLength(128);
+            entity.Property(x => x.ContentType).HasMaxLength(160);
+            entity.Property(x => x.ErrorCode).HasMaxLength(160);
+            entity.Property(x => x.ErrorMessage).HasMaxLength(2048);
+            entity.Property(x => x.PayloadSha256).HasMaxLength(64);
+            entity.Property(x => x.PreviousRecordHash).HasMaxLength(64);
+            entity.Property(x => x.RecordHash).HasMaxLength(64);
+            entity.HasIndex(x => x.Sequence).IsUnique();
+            entity.HasIndex(x => new { x.OrganizationId, x.Sequence });
+            entity.HasIndex(x => new { x.OrganizationId, x.Category, x.Sequence });
+            entity.HasIndex(x => x.TraceId);
+            entity.HasIndex(x => x.ParentEventId);
+            entity.HasIndex(x => x.CorrelationId);
         });
 
         modelBuilder.Entity<AgentRunLog>(entity =>

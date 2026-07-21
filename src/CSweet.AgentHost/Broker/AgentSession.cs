@@ -19,9 +19,10 @@ public sealed class AgentSession
         string businessId,
         string runtimeInstanceId,
         string tickId,
-        AuthorizedAgentGrant grant)
+        AuthorizedAgentGrant grant,
+        string? agentVersion = null)
         : this(sessionId, agentId, installationId, businessId, runtimeInstanceId, tickId,
-            Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)), grant)
+            Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)), grant, agentVersion)
     {
     }
 
@@ -33,7 +34,8 @@ public sealed class AgentSession
         string runtimeInstanceId,
         string tickId,
         string workloadToken,
-        AuthorizedAgentGrant grant)
+        AuthorizedAgentGrant grant,
+        string? agentVersion = null)
     {
         SessionId = sessionId;
         AgentId = agentId;
@@ -41,6 +43,7 @@ public sealed class AgentSession
         BusinessId = businessId;
         RuntimeInstanceId = runtimeInstanceId;
         TickId = tickId;
+        AgentVersion = agentVersion;
         WorkloadTokenHash = HashToken(workloadToken);
         _initialMcpAccessToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
         McpAccessTokenHash = HashToken(_initialMcpAccessToken);
@@ -63,6 +66,7 @@ public sealed class AgentSession
     public string BusinessId { get; }
     public string RuntimeInstanceId { get; }
     public string TickId { get; }
+    public string? AgentVersion { get; }
 
     public string WorkloadTokenHash { get; }
     public string McpAccessTokenHash { get; }

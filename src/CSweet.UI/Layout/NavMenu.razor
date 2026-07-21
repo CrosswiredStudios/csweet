@@ -40,11 +40,15 @@
                             <span>Communications</span>
                         </span>
                     </MudNavLink>
+                    <MudNavLink Href="@SecurityHref" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Outlined.Security" Class="business-nav-link">
+                        Security
+                    </MudNavLink>
                 }
                 else
                 {
                     <div class="business-nav-disabled" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Dashboard" /> Overview</div>
                     <div class="business-nav-disabled" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Groups" /> Employees</div>
+                    <div class="business-nav-disabled" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Security" /> Security</div>
                 }
             </div>
         </MudNavMenu>
@@ -80,6 +84,10 @@
 
     private string? CommunicationsHref => BusinessContext.SelectedBusiness is { } business
         ? $"/organizations/{business.Id}/communications"
+        : null;
+
+    private string? SecurityHref => BusinessContext.SelectedBusiness is { } business
+        ? $"/organizations/{business.Id}/security"
         : null;
 
     private string EmployeesClass => BusinessNavigation.IsEmployeePath(CurrentPath())

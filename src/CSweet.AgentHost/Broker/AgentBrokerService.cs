@@ -23,6 +23,8 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
     private readonly IReadOnlyList<IPlatformEventObserver> _platformEventObservers;
     private readonly CSweetDbContext _db;
     private readonly IConfiguration _configuration;
+    private readonly IAuditEventWriter _audit;
+    private readonly IAuditExecutionContextAccessor _auditContext;
 
     public AgentBrokerService(
         IAgentAuthorizationPolicy authorizationPolicy,
@@ -34,6 +36,8 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         IEnumerable<IPlatformEventObserver> platformEventObservers,
         CSweetDbContext db,
         IConfiguration configuration,
+        IAuditEventWriter audit,
+        IAuditExecutionContextAccessor auditContext,
         ILogger<AgentBrokerService> logger)
     {
         _authorizationPolicy = authorizationPolicy;
@@ -45,6 +49,8 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         _platformEventObservers = platformEventObservers.ToList();
         _db = db;
         _configuration = configuration;
+        _audit = audit;
+        _auditContext = auditContext;
         _logger = logger;
     }
 
@@ -55,12 +61,23 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
     {
         if (!await requestStream.MoveNext(context.CancellationToken))
         {
+            await _audit.AppendAsync(new AuditEventWriteRequest(
+                "broker.connection.empty", "BrokerConnection", "Inbound", "Rejected",
+                Summary: "A broker connection closed before registration.",
+                Actor: new AuditActor("Unknown", false, RemotePeer: context.Peer),
+                ErrorCode: "registration_missing"), context.CancellationToken);
             return;
         }
 
         var firstMessage = requestStream.Current;
         if (firstMessage.PayloadCase != AgentToBrokerMessage.PayloadOneofCase.Register)
         {
+            await _audit.AppendAsync(new AuditEventWriteRequest(
+                "broker.registration.rejected", "BrokerConnection", "Inbound", "Rejected",
+                ExternalMessageId: firstMessage.MessageId, CorrelationId: firstMessage.CorrelationId,
+                Summary: "The first broker message was not a registration request.",
+                Actor: new AuditActor("Unknown", false, RemotePeer: context.Peer),
+                ErrorCode: "registration_required"), context.CancellationToken);
             await responseStream.WriteAsync(CreateRejectedRegistration(
                 "The first message on an agent connection must be a registration request."));
             return;
@@ -71,6 +88,8 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
             context.CancellationToken);
         if (!authorization.Accepted || authorization.Grant is null)
         {
+            await _audit.AppendAsync(RegistrationAudit(firstMessage, context.Peer, "Rejected",
+                authorization.RejectionReason, false), context.CancellationToken);
             await responseStream.WriteAsync(CreateRejectedRegistration(authorization.RejectionReason));
             return;
         }
@@ -78,6 +97,17 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         var grant = authorization.Grant;
 
         var session = _sessions.Register(firstMessage.Register, grant);
+        Guid registrationAuditId;
+        try
+        {
+            registrationAuditId = await _audit.AppendAsync(RegistrationAudit(firstMessage, context.Peer,
+                "Accepted", "Agent registration accepted.", true, session), context.CancellationToken);
+        }
+        catch
+        {
+            _sessions.Unregister(session);
+            throw;
+        }
 
         if (!string.IsNullOrWhiteSpace(firstMessage.Register.RuntimeInstanceId))
         {
@@ -104,6 +134,11 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
             }
             catch (Exception exception) when (exception is FormatException or InvalidOperationException)
             {
+                await _audit.AppendAsync(new AuditEventWriteRequest(
+                    "broker.registration.runtime-rejected", "BrokerConnection", "Internal", "Rejected",
+                    BrokerAuditIdentity.OrganizationId(session), "AgentSession", ParentEventId: registrationAuditId,
+                    CorrelationId: firstMessage.CorrelationId, Actor: BrokerAuditIdentity.Actor(session, context.Peer),
+                    ErrorCode: "invalid_runtime_context", ErrorMessage: exception.Message), context.CancellationToken);
                 _sessions.Unregister(session);
                 _logger.LogWarning(exception, "Rejected invalid runtime registration for installation {InstallationId}.", firstMessage.Register.InstallationId);
                 await responseStream.WriteAsync(CreateRejectedRegistration("The runtime registration context is invalid."));
@@ -133,12 +168,19 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                 .Select(x => (long)x.RevisionNumber)
                 .SingleOrDefaultAsync(context.CancellationToken);
 
-        await responseStream.WriteAsync(new BrokerToAgentMessage
+        var registrationMessage = new BrokerToAgentMessage
         {
             MessageId = Guid.NewGuid().ToString("N"),
             CorrelationId = firstMessage.CorrelationId,
             Registration = registration
-        });
+        };
+        await _audit.AppendAsync(new AuditEventWriteRequest(
+            "broker.registration.response", "BrokerConnection", "Outbound", "Delivered",
+            BrokerAuditIdentity.OrganizationId(session), "RegistrationResult",
+            ParentEventId: registrationAuditId, ExternalMessageId: registrationMessage.MessageId,
+            CorrelationId: firstMessage.CorrelationId, Actor: new AuditActor("Platform", DisplayName: "C-Sweet broker"),
+            Target: BrokerAuditIdentity.Target(session)), context.CancellationToken);
+        await responseStream.WriteAsync(registrationMessage);
 
         var readTask = ProcessInboundAsync(session, requestStream, context.CancellationToken);
         _ = readTask.ContinueWith(
@@ -159,6 +201,11 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         }
         finally
         {
+            await _audit.AppendAsync(new AuditEventWriteRequest(
+                "broker.connection.disconnected", "BrokerConnection", "Internal", "Completed",
+                BrokerAuditIdentity.OrganizationId(session), "AgentSession",
+                Summary: $"Agent session {session.SessionId} disconnected.",
+                Actor: BrokerAuditIdentity.Actor(session, context.Peer)), CancellationToken.None);
             _sessions.Unregister(session);
         }
 
@@ -179,6 +226,10 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
         while (await requestStream.MoveNext(cancellationToken))
         {
             var message = requestStream.Current;
+            var inboundAuditId = await AuditInboundAsync(session, message, cancellationToken);
+            using var auditScope = _auditContext.Push(new AuditExecutionContext(
+                BrokerAuditIdentity.OrganizationId(session), BrokerAuditIdentity.Actor(session), inboundAuditId,
+                Guid.NewGuid()));
 
             switch (message.PayloadCase)
             {
@@ -214,12 +265,19 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                             message.CapabilityRequest,
                             cancellationToken))
                         {
-                            session.TrySend(new BrokerToAgentMessage
+                            _sessions.SendAudited(session, new BrokerToAgentMessage
                             {
                                 MessageId = Guid.NewGuid().ToString("N"),
                                 CorrelationId = message.CorrelationId,
                                 CapabilityResult = result
-                            });
+                            }, new AuditEventWriteRequest(
+                                "broker.platform-capability.result", "BrokerCapability", "Outbound",
+                                result.Succeeded ? "Delivered" : "Failed", BrokerAuditIdentity.OrganizationId(session),
+                                "CapabilityResult", ParentEventId: inboundAuditId,
+                                ExternalRequestId: result.RequestId, CorrelationId: message.CorrelationId,
+                                Actor: new AuditActor("Platform", DisplayName: "C-Sweet platform"),
+                                Target: BrokerAuditIdentity.Target(session), ContentType: result.ContentType,
+                                Payload: result.Payload.ToByteArray(), ErrorMessage: result.Error));
                         }
                         break;
                     }
@@ -241,7 +299,7 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                     break;
 
                 case AgentToBrokerMessage.PayloadOneofCase.Register:
-                    session.TrySend(new BrokerToAgentMessage
+                    _sessions.SendAudited(session, new BrokerToAgentMessage
                     {
                         MessageId = Guid.NewGuid().ToString("N"),
                         CorrelationId = message.CorrelationId,
@@ -250,7 +308,12 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                             Code = "duplicate_registration",
                             Message = "An agent session may register only once."
                         }
-                    });
+                    }, new AuditEventWriteRequest(
+                        "broker.duplicate-registration.error", "BrokerConnection", "Outbound", "Denied",
+                        BrokerAuditIdentity.OrganizationId(session), "BrokerError", ParentEventId: inboundAuditId,
+                        CorrelationId: message.CorrelationId,
+                        Actor: new AuditActor("Platform", DisplayName: "C-Sweet broker"),
+                        Target: BrokerAuditIdentity.Target(session), ErrorCode: "duplicate_registration"));
                     break;
 
                 default:
@@ -261,6 +324,65 @@ public sealed class AgentBrokerService : AgentBroker.AgentBrokerBase
                     break;
             }
         }
+    }
+
+    private async Task<Guid> AuditInboundAsync(
+        AgentSession session,
+        AgentToBrokerMessage message,
+        CancellationToken cancellationToken)
+    {
+        var payload = message.PayloadCase switch
+        {
+            AgentToBrokerMessage.PayloadOneofCase.PublishEvent => message.PublishEvent.Payload.ToByteArray(),
+            AgentToBrokerMessage.PayloadOneofCase.CapabilityRequest => message.CapabilityRequest.Payload.ToByteArray(),
+            AgentToBrokerMessage.PayloadOneofCase.CapabilityResult => message.CapabilityResult.Payload.ToByteArray(),
+            _ => null
+        };
+        var contentType = message.PayloadCase switch
+        {
+            AgentToBrokerMessage.PayloadOneofCase.PublishEvent => message.PublishEvent.ContentType,
+            AgentToBrokerMessage.PayloadOneofCase.CapabilityRequest => message.CapabilityRequest.ContentType,
+            AgentToBrokerMessage.PayloadOneofCase.CapabilityResult => message.CapabilityResult.ContentType,
+            _ => null
+        };
+        var requestId = message.PayloadCase switch
+        {
+            AgentToBrokerMessage.PayloadOneofCase.CapabilityRequest => message.CapabilityRequest.RequestId,
+            AgentToBrokerMessage.PayloadOneofCase.CapabilityResult => message.CapabilityResult.RequestId,
+            _ => null
+        };
+        var category = message.PayloadCase is AgentToBrokerMessage.PayloadOneofCase.CapabilityRequest or
+            AgentToBrokerMessage.PayloadOneofCase.CapabilityResult ? "BrokerCapability" : "BrokerEvent";
+        return await _audit.AppendAsync(new AuditEventWriteRequest(
+            $"broker.message.{message.PayloadCase.ToString().ToLowerInvariant()}", category, "Inbound", "Received",
+            BrokerAuditIdentity.OrganizationId(session), message.PayloadCase.ToString(),
+            Summary: $"Received {message.PayloadCase} from {session.AgentId}.",
+            ExternalMessageId: message.MessageId, ExternalRequestId: requestId,
+            CorrelationId: message.CorrelationId, Actor: BrokerAuditIdentity.Actor(session),
+            ContentType: contentType, Payload: payload), cancellationToken);
+    }
+
+    private static AuditEventWriteRequest RegistrationAudit(
+        AgentToBrokerMessage message,
+        string remotePeer,
+        string outcome,
+        string? summary,
+        bool verified,
+        AgentSession? session = null)
+    {
+        var registration = message.Register;
+        var organizationId = Guid.TryParse(registration.BusinessId, out var businessId) ? businessId : (Guid?)null;
+        var actor = session is null
+            ? new AuditActor("Agent", verified, DisplayName: registration.AgentId, AgentId: registration.AgentId,
+                InstallationId: Guid.TryParse(registration.InstallationId, out var installationId) ? installationId : null,
+                RuntimeInstanceId: Guid.TryParse(registration.RuntimeInstanceId, out var runtimeId) ? runtimeId : null,
+                TickId: Guid.TryParse(registration.TickId, out var tickId) ? tickId : null,
+                PackageVersion: registration.AgentVersion, RemotePeer: remotePeer)
+            : BrokerAuditIdentity.Actor(session, remotePeer) with { PackageVersion = registration.AgentVersion };
+        return new AuditEventWriteRequest("broker.registration", "BrokerConnection", "Inbound", outcome,
+            organizationId, "AgentSession", Summary: summary, ExternalMessageId: message.MessageId,
+            CorrelationId: message.CorrelationId, Actor: actor,
+            ErrorCode: outcome == "Rejected" ? "registration_rejected" : null);
     }
 
     private async Task RecordCompletionAsync(AgentSession session, PublishEvent publishedEvent, CancellationToken cancellationToken)
