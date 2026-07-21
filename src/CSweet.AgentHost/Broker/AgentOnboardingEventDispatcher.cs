@@ -22,11 +22,13 @@ public sealed class AgentOnboardingEventDispatcher(
     ILogger<AgentOnboardingEventDispatcher> logger) : BackgroundService
 {
     private const string ConnectionUnavailableErrorPrefix = "The target agent installation is not connected yet.";
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ConnectionRetryDelay = PollInterval;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2), clock);
+        using var timer = new PeriodicTimer(PollInterval, clock);
         do
         {
             await DispatchPendingAsync(stoppingToken);
@@ -220,7 +222,10 @@ public sealed class AgentOnboardingEventDispatcher(
             }
             else
             {
-                item.NextAttemptAt = now + TimeSpan.FromSeconds(15);
+                // Runtime startup and onboarding delivery intentionally race. Retry on
+                // the next dispatcher poll once the container has had a chance to
+                // register instead of making a healthy first launch wait 15 seconds.
+                item.NextAttemptAt = now + ConnectionRetryDelay;
                 item.LastError = configurationWarning is null
                     ? ConnectionUnavailableErrorPrefix
                     : $"{ConnectionUnavailableErrorPrefix} {configurationWarning}";

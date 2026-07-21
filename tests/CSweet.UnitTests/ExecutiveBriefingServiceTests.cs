@@ -39,6 +39,35 @@ public sealed class ExecutiveBriefingServiceTests
     }
 
     [Fact]
+    public async Task RuntimeStartup_ReusesPendingActivationBriefing()
+    {
+        await using var db = CreateDb();
+        var organization = new Organization { Id = Guid.NewGuid(), Name = "Example", Status = OrganizationStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow };
+        var owner = Person(organization.Id, "Owner", EmployeeType.Human, OrganizationPermissionLevel.Owner);
+        var installationId = Guid.NewGuid();
+        var chief = Person(organization.Id, "Chief", EmployeeType.Agent, OrganizationPermissionLevel.Manager);
+        chief.AgentInstallationId = installationId; chief.ReportsToOrganizationUserId = owner.Id;
+        var cycle = new ManagementCycle { Id = Guid.NewGuid(), OrganizationId = organization.Id, TimeZone = "UTC" };
+        db.AddRange(organization, owner, chief, cycle, new LeadershipAssignment
+        {
+            Id = Guid.NewGuid(), OrganizationId = organization.Id, OrganizationUserId = chief.Id,
+            PositionKey = "chief-of-staff", StartsAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+        var service = new ExecutiveBriefingService(db, new TestAuditEventWriter(), TimeProvider.System);
+
+        var activation = await service.QueueActivationAsync(organization.Id, chief.Id);
+        var runtimeStartup = await service.QueueRuntimeStartupAsync(installationId, Guid.NewGuid());
+
+        Assert.True(activation.Succeeded);
+        Assert.True(runtimeStartup.Succeeded);
+        Assert.Equal(activation.RequestId, runtimeStartup.RequestId);
+        var request = Assert.Single(await db.ManagementCheckInRequests.ToListAsync());
+        Assert.Equal("Activation", request.TriggerType);
+    }
+
+    [Fact]
     public async Task Settings_RejectReportingCycleAndAcceptConfiguredManager()
     {
         await using var db = CreateDb();

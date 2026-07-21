@@ -478,6 +478,10 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
                 "Restarted under the assigned organization for the Chief of Staff's initial onboarding conversation.",
                 interactive: true,
                 cancellationToken);
+            // Do not leave the first-run experience waiting for the schedule worker's
+            // next poll. Start reconciling the newly queued interactive runtime now so
+            // it can connect and receive its durable onboarding event immediately.
+            await _agentRuntimeManager.ReconcileAsync(cancellationToken);
             return null;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

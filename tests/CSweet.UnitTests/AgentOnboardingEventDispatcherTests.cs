@@ -242,6 +242,7 @@ public sealed class AgentOnboardingEventDispatcherTests
             Options.Create(new AgentOnboardingDeliveryOptions { MaximumAttempts = 3 }),
             NullLogger<AgentOnboardingEventDispatcher>.Instance);
 
+        var dispatchStartedAt = DateTimeOffset.UtcNow;
         await dispatcher.DispatchPendingAsync(CancellationToken.None);
 
         await using var verificationScope = provider.CreateAsyncScope();
@@ -249,7 +250,7 @@ public sealed class AgentOnboardingEventDispatcherTests
             .AgentOnboardingEventOutbox.SingleAsync();
         Assert.Equal(AgentOnboardingEventOutboxStatus.Pending, item.Status);
         Assert.Equal(0, item.Attempts);
-        Assert.True(item.NextAttemptAt > DateTimeOffset.UtcNow);
+        Assert.InRange(item.NextAttemptAt, dispatchStartedAt.AddSeconds(1), dispatchStartedAt.AddSeconds(3));
         Assert.Contains("not connected", item.LastError);
         var schedule = await verificationScope.ServiceProvider.GetRequiredService<CSweetDbContext>()
             .AgentSchedules.SingleAsync();

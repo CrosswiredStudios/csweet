@@ -87,6 +87,12 @@ public sealed class ExecutiveBriefingService(
             .ToListAsync(cancellationToken);
         foreach (var pending in waiting) pending.LastDispatchedAt = null;
         if (waiting.Count > 0) await db.SaveChangesAsync(cancellationToken);
+        var pendingStartup = waiting
+            .Where(x => x.TriggerType is "Activation" or "RuntimeStartup")
+            .OrderBy(x => x.CreatedAt)
+            .FirstOrDefault();
+        if (pendingStartup is not null)
+            return new(true, null, "The queued startup briefing will be dispatched by this runtime.", pendingStartup.Id);
         var key = $"briefing:runtime:{runtimeInstanceId:D}";
         var duplicate = await db.ManagementCheckInRequests.AsNoTracking()
             .Where(x => x.OrganizationId == chief.OrganizationId && x.IdempotencyKey == key)

@@ -91,6 +91,7 @@ public class BusinessOnboardingServiceTests
         Assert.Equal(organization.Id.ToString("D"), installation.BusinessId);
         Assert.Equal(installation.Id, runtimeManager.QueuedInstallationId);
         Assert.True(runtimeManager.Interactive);
+        Assert.Equal(1, runtimeManager.ReconcileCount);
     }
 
     [Fact]
@@ -253,6 +254,7 @@ public class BusinessOnboardingServiceTests
     {
         public Guid? QueuedInstallationId { get; private set; }
         public bool Interactive { get; private set; }
+        public int ReconcileCount { get; private set; }
 
         public Task<bool> EnsureRuntimeQueuedAsync(
             Guid installationId,
@@ -282,7 +284,10 @@ public class BusinessOnboardingServiceTests
         public Task<int> ProcessDueSchedulesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(0);
 
-        public Task<int> ReconcileAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(0);
+        public Task<int> ReconcileAsync(CancellationToken cancellationToken = default)
+        {
+            ReconcileCount++;
+            return Task.FromResult(0);
+        }
     }
 }
