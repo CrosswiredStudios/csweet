@@ -6,7 +6,8 @@ public sealed record AgentCommunicationOnboardingResult(
     bool Succeeded,
     string? ErrorCode,
     string Message,
-    Guid? ConversationId = null);
+    Guid? ConversationId = null,
+    Guid? EventId = null);
 
 public interface IAgentCommunicationOnboardingService
 {

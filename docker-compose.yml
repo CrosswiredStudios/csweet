@@ -118,8 +118,8 @@ services:
   csweet-agenthost:
     container_name: agenthost
     build:
-      context: ..
-      dockerfile: csweet/docker/agenthost.Dockerfile
+      context: .
+      dockerfile: docker/agenthost.Dockerfile
     expose:
       - "8080"
     depends_on:

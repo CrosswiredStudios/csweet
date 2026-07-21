@@ -108,6 +108,156 @@ public sealed class AgentOnboardingEventDispatcherTests
     }
 
     [Fact]
+    public async Task Dispatch_WhenSavedConfigurationCannotBeHydrated_StillOffersOnboardingEvent()
+    {
+        var services = new ServiceCollection();
+        var databaseName = Guid.NewGuid().ToString("N");
+        services.AddDbContext<CSweetDbContext>(options => options.UseInMemoryDatabase(databaseName));
+        await using var provider = services.BuildServiceProvider();
+        var organizationId = Guid.NewGuid();
+        var installationId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var ownerId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var eventId = Guid.NewGuid();
+        var occurredAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
+            db.AddRange(
+                new OrganizationUser
+                {
+                    Id = agentId,
+                    OrganizationId = organizationId,
+                    AgentInstallationId = installationId,
+                    DisplayName = "Chief",
+                    EmployeeType = EmployeeType.Agent,
+                    PermissionLevel = OrganizationPermissionLevel.Manager,
+                    IsActive = true,
+                    CreatedAt = occurredAt
+                },
+                new AgentInstallationConfiguration
+                {
+                    Id = Guid.NewGuid(),
+                    AgentInstallationId = installationId,
+                    SchemaVersion = "1.0",
+                    SettingsJson = "{\"llmProviderId\":\"11111111-1111-1111-1111-111111111111\"}",
+                    CreatedAt = occurredAt,
+                    UpdatedAt = occurredAt
+                },
+                new AgentOnboardingEventOutboxItem
+                {
+                    Id = eventId,
+                    OrganizationId = organizationId,
+                    AgentOrganizationUserId = agentId,
+                    HiringOrganizationUserId = ownerId,
+                    ConversationId = conversationId,
+                    Status = AgentOnboardingEventOutboxStatus.Pending,
+                    NextAttemptAt = occurredAt,
+                    OccurredAt = occurredAt
+                });
+            await db.SaveChangesAsync();
+        }
+
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var target = Register(registry, organizationId, installationId);
+        var dispatcher = new AgentOnboardingEventDispatcher(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            registry,
+            TimeProvider.System,
+            Options.Create(new AgentOnboardingDeliveryOptions { MaximumAttempts = 3 }),
+            NullLogger<AgentOnboardingEventDispatcher>.Instance);
+
+        await dispatcher.DispatchPendingAsync(CancellationToken.None);
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var delivered = await target.Outbound.ReadAsync(timeout.Token);
+        Assert.Equal(AgentLifecycleEvents.Onboarded, delivered.Event.EventType);
+        Assert.Equal(eventId.ToString("N"), delivered.Event.EventId);
+        await using var verificationScope = provider.CreateAsyncScope();
+        var item = await verificationScope.ServiceProvider.GetRequiredService<CSweetDbContext>()
+            .AgentOnboardingEventOutbox.SingleAsync();
+        Assert.Equal(1, item.Attempts);
+        Assert.Contains("has not acknowledged", item.LastError);
+    }
+
+    [Fact]
+    public async Task Dispatch_WhenLegacyFailureOnlyWaitedForConnection_ReopensWithoutConsumingDeliveryAttempts()
+    {
+        var services = new ServiceCollection();
+        var databaseName = Guid.NewGuid().ToString("N");
+        services.AddDbContext<CSweetDbContext>(options => options.UseInMemoryDatabase(databaseName));
+        await using var provider = services.BuildServiceProvider();
+        var organizationId = Guid.NewGuid();
+        var installationId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var occurredAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
+            db.AddRange(
+                new OrganizationUser
+                {
+                    Id = agentId,
+                    OrganizationId = organizationId,
+                    AgentInstallationId = installationId,
+                    DisplayName = "Chief",
+                    EmployeeType = EmployeeType.Agent,
+                    PermissionLevel = OrganizationPermissionLevel.Manager,
+                    IsActive = true,
+                    CreatedAt = occurredAt
+                },
+                new AgentOnboardingEventOutboxItem
+                {
+                    Id = Guid.NewGuid(),
+                    OrganizationId = organizationId,
+                    AgentOrganizationUserId = agentId,
+                    HiringOrganizationUserId = Guid.NewGuid(),
+                    ConversationId = Guid.NewGuid(),
+                    Status = AgentOnboardingEventOutboxStatus.Failed,
+                    Attempts = 3,
+                    NextAttemptAt = occurredAt,
+                    OccurredAt = occurredAt,
+                    LastError = "The target agent installation is not connected yet."
+                },
+                new AgentSchedule
+                {
+                    Id = Guid.NewGuid(),
+                    AgentInstallationId = installationId,
+                    ActivationMode = ActivationMode.AlwaysOn,
+                    TickFrequencySeconds = 60,
+                    MaxRuntimeSeconds = 300,
+                    ConsecutiveStartupFailures = 5,
+                    AutomaticStartSuppressedAt = occurredAt,
+                    OverlapPolicy = OverlapPolicy.Skip,
+                    IsEnabled = true
+                });
+            await db.SaveChangesAsync();
+        }
+
+        var dispatcher = new AgentOnboardingEventDispatcher(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance),
+            TimeProvider.System,
+            Options.Create(new AgentOnboardingDeliveryOptions { MaximumAttempts = 3 }),
+            NullLogger<AgentOnboardingEventDispatcher>.Instance);
+
+        await dispatcher.DispatchPendingAsync(CancellationToken.None);
+
+        await using var verificationScope = provider.CreateAsyncScope();
+        var item = await verificationScope.ServiceProvider.GetRequiredService<CSweetDbContext>()
+            .AgentOnboardingEventOutbox.SingleAsync();
+        Assert.Equal(AgentOnboardingEventOutboxStatus.Pending, item.Status);
+        Assert.Equal(0, item.Attempts);
+        Assert.True(item.NextAttemptAt > DateTimeOffset.UtcNow);
+        Assert.Contains("not connected", item.LastError);
+        var schedule = await verificationScope.ServiceProvider.GetRequiredService<CSweetDbContext>()
+            .AgentSchedules.SingleAsync();
+        Assert.Equal(0, schedule.ConsecutiveStartupFailures);
+        Assert.Null(schedule.AutomaticStartSuppressedAt);
+    }
+
+    [Fact]
     public async Task ExhaustedAttempts_FailsEventAndCreatesRealtimeHiringUserNotification()
     {
         var services = new ServiceCollection();

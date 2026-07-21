@@ -39,6 +39,7 @@ public sealed class AgentCommunicationOnboardingTests
 
         Assert.True(first.Succeeded);
         Assert.Equal(first.ConversationId, second.ConversationId);
+        Assert.Equal(first.EventId, second.EventId);
         var chat = await db.CoreConversations.Include(x => x.Participants).Include(x => x.Messages).SingleAsync();
         Assert.True(chat.IsDeletionProtected);
         Assert.True(chat.IsPrivate);
@@ -50,6 +51,48 @@ public sealed class AgentCommunicationOnboardingTests
         Assert.Equal(agent.Id, lifecycleEvent.AgentOrganizationUserId);
         Assert.Equal(owner.Id, lifecycleEvent.HiringOrganizationUserId);
         Assert.Equal(chat.Id, lifecycleEvent.ConversationId);
+    }
+
+    [Fact]
+    public async Task EnsureAsync_AfterAgentIsFiredAndInstallationIsRehired_CreatesNewLifecycleEvent()
+    {
+        await using var db = CreateDb();
+        var organization = new Organization { Id = Guid.NewGuid(), Name = "Example", Status = OrganizationStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow };
+        var applicationUserId = Guid.NewGuid();
+        var owner = new OrganizationUser { Id = Guid.NewGuid(), OrganizationId = organization.Id,
+            ApplicationUserId = applicationUserId, DisplayName = "Owner", EmployeeType = EmployeeType.Human,
+            PermissionLevel = OrganizationPermissionLevel.Owner, CreatedAt = DateTimeOffset.UtcNow };
+        var installationId = Guid.NewGuid();
+        var firstAgent = new OrganizationUser { Id = Guid.NewGuid(), OrganizationId = organization.Id,
+            AgentInstallationId = installationId, DisplayName = "Programmer A", EmployeeType = EmployeeType.Agent,
+            PermissionLevel = OrganizationPermissionLevel.Contributor, CreatedAt = DateTimeOffset.UtcNow };
+        db.AddRange(organization, owner, firstAgent);
+        await db.SaveChangesAsync();
+        var service = new AgentCommunicationOnboardingService(db);
+
+        var first = await service.EnsureAsync(organization.Id, firstAgent, applicationUserId);
+        await db.SaveChangesAsync();
+        firstAgent.IsActive = false;
+        firstAgent.ArchivedAt = DateTimeOffset.UtcNow;
+        firstAgent.AgentInstallationId = null;
+        var secondAgent = new OrganizationUser { Id = Guid.NewGuid(), OrganizationId = organization.Id,
+            AgentInstallationId = installationId, DisplayName = "Programmer B", EmployeeType = EmployeeType.Agent,
+            PermissionLevel = OrganizationPermissionLevel.Contributor, CreatedAt = DateTimeOffset.UtcNow };
+        db.CoreOrganizationUsers.Add(secondAgent);
+        await db.SaveChangesAsync();
+
+        var second = await service.EnsureAsync(organization.Id, secondAgent, applicationUserId);
+        await db.SaveChangesAsync();
+
+        Assert.True(second.Succeeded);
+        Assert.NotEqual(first.EventId, second.EventId);
+        Assert.NotEqual(first.ConversationId, second.ConversationId);
+        var events = await db.AgentOnboardingEventOutbox.OrderBy(x => x.OccurredAt).ToListAsync();
+        Assert.Equal(2, events.Count);
+        Assert.Equal(firstAgent.Id, events[0].AgentOrganizationUserId);
+        Assert.Equal(secondAgent.Id, events[1].AgentOrganizationUserId);
+        Assert.Equal(AgentOnboardingEventOutboxStatus.Pending, events[1].Status);
     }
 
     private static CSweetDbContext CreateDb() => new(new DbContextOptionsBuilder<CSweetDbContext>()

@@ -3,11 +3,23 @@ using CSweet.Domain.Communications;
 using CSweet.Domain.Core;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace CSweet.Infrastructure.Communications;
 
-public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IAgentCommunicationOnboardingService
+public sealed class AgentCommunicationOnboardingService : IAgentCommunicationOnboardingService
 {
+    private readonly CSweetDbContext _db;
+    private readonly ILogger<AgentCommunicationOnboardingService>? _logger;
+
+    public AgentCommunicationOnboardingService(
+        CSweetDbContext db,
+        ILogger<AgentCommunicationOnboardingService>? logger = null)
+    {
+        _db = db;
+        _logger = logger;
+    }
+
     public async Task<AgentCommunicationOnboardingResult> EnsureAsync(
         Guid organizationId,
         OrganizationUser agent,
@@ -21,10 +33,10 @@ public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IA
         if (hiringUser is null)
             return Failure("hiring_user_not_found", "An active human owner or hiring user is required to start the agent conversation.");
 
-        var existing = db.CoreConversations.Local.FirstOrDefault(x =>
+        var existing = _db.CoreConversations.Local.FirstOrDefault(x =>
             x.OrganizationId == organizationId && x.InitiatedByOrganizationUserId == hiringUser.Id &&
             x.AgentOrganizationUserId == agent.Id && x.Kind == ConversationKind.DirectHumanAgent)
-            ?? await db.CoreConversations
+            ?? await _db.CoreConversations
                 .Include(x => x.Participants)
                 .Where(x => x.OrganizationId == organizationId &&
                     x.InitiatedByOrganizationUserId == hiringUser.Id && x.AgentOrganizationUserId == agent.Id &&
@@ -53,11 +65,14 @@ public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IA
         EnsureParticipant(conversation, hiringUser, ConversationParticipantRole.Coordinator, now);
         EnsureParticipant(conversation, agent, ConversationParticipantRole.Member, now);
 
-        var eventExists = db.AgentOnboardingEventOutbox.Local.Any(x => x.AgentOrganizationUserId == agent.Id) ||
-            await db.AgentOnboardingEventOutbox.AnyAsync(x => x.AgentOrganizationUserId == agent.Id, cancellationToken);
-        if (!eventExists)
+        var onboardingEvent = _db.AgentOnboardingEventOutbox.Local.FirstOrDefault(
+                x => x.AgentOrganizationUserId == agent.Id)
+            ?? await _db.AgentOnboardingEventOutbox
+                .OrderByDescending(x => x.OccurredAt)
+                .FirstOrDefaultAsync(x => x.AgentOrganizationUserId == agent.Id, cancellationToken);
+        if (onboardingEvent is null)
         {
-            db.AgentOnboardingEventOutbox.Add(new AgentOnboardingEventOutboxItem
+            onboardingEvent = new AgentOnboardingEventOutboxItem
             {
                 Id = Guid.NewGuid(),
                 OrganizationId = organizationId,
@@ -67,11 +82,36 @@ public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IA
                 Status = AgentOnboardingEventOutboxStatus.Pending,
                 NextAttemptAt = now,
                 OccurredAt = now
-            });
+            };
+            _db.AgentOnboardingEventOutbox.Add(onboardingEvent);
+            _logger?.LogInformation(
+                "Created agent onboarding event {OnboardingEventId} for organization {OrganizationId}, employee {AgentOrganizationUserId}, installation {InstallationId}, hiring employee {HiringOrganizationUserId}, and conversation {ConversationId}.",
+                onboardingEvent.Id,
+                organizationId,
+                agent.Id,
+                agent.AgentInstallationId,
+                hiringUser.Id,
+                conversation.Id);
+        }
+        else
+        {
+            _logger?.LogInformation(
+                "Reused agent onboarding event {OnboardingEventId} with status {OnboardingStatus} for organization {OrganizationId}, employee {AgentOrganizationUserId}, installation {InstallationId}, and conversation {ConversationId}.",
+                onboardingEvent.Id,
+                onboardingEvent.Status,
+                organizationId,
+                agent.Id,
+                agent.AgentInstallationId,
+                conversation.Id);
         }
 
-        if (existing is null) db.CoreConversations.Add(conversation);
-        return new AgentCommunicationOnboardingResult(true, null, "Agent conversation initialized.", conversation.Id);
+        if (existing is null) _db.CoreConversations.Add(conversation);
+        return new AgentCommunicationOnboardingResult(
+            true,
+            null,
+            "Agent conversation initialized.",
+            conversation.Id,
+            onboardingEvent.Id);
     }
 
     private async Task<OrganizationUser?> ResolveHiringUserAsync(
@@ -81,12 +121,12 @@ public sealed class AgentCommunicationOnboardingService(CSweetDbContext db) : IA
     {
         if (applicationUserId.HasValue)
         {
-            var actor = await db.CoreOrganizationUsers.SingleOrDefaultAsync(x => x.OrganizationId == organizationId &&
+            var actor = await _db.CoreOrganizationUsers.SingleOrDefaultAsync(x => x.OrganizationId == organizationId &&
                 x.ApplicationUserId == applicationUserId && x.EmployeeType == EmployeeType.Human && x.IsActive, cancellationToken);
             if (actor is not null) return actor;
         }
 
-        return await db.CoreOrganizationUsers
+        return await _db.CoreOrganizationUsers
             .Where(x => x.OrganizationId == organizationId && x.EmployeeType == EmployeeType.Human && x.IsActive)
             .OrderByDescending(x => x.PermissionLevel == OrganizationPermissionLevel.Owner)
             .ThenBy(x => x.CreatedAt)

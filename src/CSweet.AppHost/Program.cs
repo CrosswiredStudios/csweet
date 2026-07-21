@@ -17,13 +17,13 @@ var postgresServer = builder.AddPostgres("postgres", userName: postgresUserName,
 var postgres = postgresServer.AddDatabase("csweet", postgresDatabaseName);
 
 var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-var workspaceRoot = Directory.GetParent(repositoryRoot)?.FullName
-    ?? throw new InvalidOperationException("The C-Sweet repository must have a workspace parent directory.");
 var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 var localStateDirectory = string.IsNullOrWhiteSpace(localAppData)
     ? Path.Combine(repositoryRoot, ".csweet")
     : Path.Combine(localAppData, "CSweet");
 Directory.CreateDirectory(localStateDirectory);
+var appLaunchProfile = builder.Configuration["CSweet:App:LaunchProfile"]
+    ?? "http-no-wasm-debug";
 
 var migrator = builder.AddExecutable(
         "migrator",
@@ -40,8 +40,8 @@ var migrator = builder.AddExecutable(
 // network instead of exposing the runtime to the host or Aspire network.
 var agentHost = builder.AddDockerfile(
         "agenthost",
-        workspaceRoot,
-        Path.Combine("csweet", "docker", "agenthost.Dockerfile"))
+        repositoryRoot,
+        Path.Combine("docker", "agenthost.Dockerfile"))
     .WithContainerName("agenthost")
     .WithHttpEndpoint(targetPort: 8080, name: "http")
     .WithHttpEndpoint(targetPort: 8081, name: "mcp")
@@ -62,7 +62,7 @@ var api = builder.AddProject<Projects.CSweet_Api>("api")
     .WaitFor(agentHost)
     .WaitForCompletion(migrator);
 
-builder.AddProject<Projects.CSweet_App>("app", launchProfileName: "http")
+builder.AddProject<Projects.CSweet_App>("app", launchProfileName: appLaunchProfile)
     .WithReference(api)
     .WaitFor(api);
 

@@ -2,10 +2,7 @@
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0.203 AS restore
 WORKDIR /src
-COPY csweet/ csweet/
-COPY CSweetAgentSdk/ CSweetAgentSdk/
-COPY CSweet.Memory/ CSweet.Memory/
-WORKDIR /src/csweet
+COPY . .
 RUN dotnet restore "src/CSweet.AgentHost/CSweet.AgentHost.csproj"
 
 FROM restore AS publish

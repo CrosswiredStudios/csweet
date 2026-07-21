@@ -7,13 +7,15 @@ using CSweet.Domain.Communications;
 using CSweet.Infrastructure.Persistence;
 using Google.Protobuf;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace CSweet.AgentHost.Broker;
 
 /// <summary>Acknowledges the stable lifecycle event only from the installation it targets.</summary>
 public sealed class AgentOnboardingCapabilityHandler(
     CSweetDbContext db,
-    TimeProvider clock) : IPlatformCapabilityHandler
+    TimeProvider clock,
+    ILogger<AgentOnboardingCapabilityHandler>? logger = null) : IPlatformCapabilityHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -70,6 +72,15 @@ public sealed class AgentOnboardingCapabilityHandler(
             item.LastError = null;
             await db.SaveChangesAsync(cancellationToken);
         }
+
+        logger?.LogInformation(
+            "Acknowledged onboarding event {OnboardingEventId} for organization {OrganizationId}, employee {AgentOrganizationUserId}, installation {InstallationId}, and conversation {ConversationId} at {CompletedAt}.",
+            item.Id,
+            item.OrganizationId,
+            item.AgentOrganizationUserId,
+            installationId,
+            item.ConversationId,
+            completedAt);
 
         return Success(request.RequestId, new CompleteAgentOnboardingResponse(true, completedAt));
     }

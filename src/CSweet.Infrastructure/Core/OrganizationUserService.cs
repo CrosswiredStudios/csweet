@@ -204,13 +204,25 @@ public sealed class OrganizationUserService : IOrganizationUserService
         }
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        if (onboarding is not null)
+        {
+            _logger?.LogInformation(
+                "Persisted agent hire onboarding event {OnboardingEventId} for organization {OrganizationId}, employee {AgentOrganizationUserId}, installation {InstallationId}, and conversation {ConversationId}.",
+                onboarding.EventId,
+                organizationId,
+                user.Id,
+                user.AgentInstallationId,
+                onboarding.ConversationId);
+        }
+
         if (user.AgentInstallationId.HasValue && _agentRuntimeManager is not null)
         {
             try
             {
+                bool queued;
                 if (agentInstallationReassigned)
                 {
-                    await _agentRuntimeManager.RestartRuntimeAsync(
+                    queued = await _agentRuntimeManager.RestartRuntimeAsync(
                         user.AgentInstallationId.Value,
                         "Restarted under the assigned organization for the agent employee's initial onboarding conversation.",
                         interactive: true,
@@ -218,12 +230,20 @@ public sealed class OrganizationUserService : IOrganizationUserService
                 }
                 else
                 {
-                    await _agentRuntimeManager.EnsureRuntimeQueuedAsync(
+                    queued = await _agentRuntimeManager.EnsureRuntimeQueuedAsync(
                         user.AgentInstallationId.Value,
                         "Prioritized for the agent employee's initial onboarding conversation.",
                         interactive: true,
                         cancellationToken);
                 }
+                _logger?.LogInformation(
+                    "Requested onboarding runtime for event {OnboardingEventId}, organization {OrganizationId}, employee {AgentOrganizationUserId}, and installation {InstallationId}. Reassigned: {InstallationReassigned}; new runtime queued: {RuntimeQueued}.",
+                    onboarding?.EventId,
+                    organizationId,
+                    user.Id,
+                    user.AgentInstallationId,
+                    agentInstallationReassigned,
+                    queued);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -267,6 +287,7 @@ public sealed class OrganizationUserService : IOrganizationUserService
         }
 
         var name = user.DisplayName;
+        var installationId = user.AgentInstallationId;
         var directReports = await _dbContext.CoreOrganizationUsers
             .Where(x => x.ReportsToOrganizationUserId == id)
             .ToListAsync(cancellationToken);
@@ -294,6 +315,15 @@ public sealed class OrganizationUserService : IOrganizationUserService
                 CreateEmployeeDelivery(user, connectionId, CommunicationDeliveryKind.ArchiveEmployee, now)));
         }
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        if (user.EmployeeType == EmployeeType.Agent)
+        {
+            _logger?.LogInformation(
+                "Archived agent employee {AgentOrganizationUserId} in organization {OrganizationId} and detached installation {InstallationId}. A later rehire will create a new employee and onboarding event.",
+                user.Id,
+                user.OrganizationId,
+                installationId);
+        }
 
         await _auditEventWriter.WriteAsync(
             "organization_user.deleted",

@@ -41,7 +41,8 @@ public sealed class AgentContainerRunnerTests
         Assert.Contains("com.csweet.agent-runtime=true", args);
         Assert.Contains("com.csweet.runtime-instance-id=11111111111111111111111111111111", args);
         Assert.Contains("/bin/bash", args);
-        Assert.Contains(args, value => value.Contains("C-Sweet broker watchdog", StringComparison.Ordinal));
+        var watchdogScript = Assert.Single(args, value => value.Contains("C-Sweet broker watchdog", StringComparison.Ordinal));
+        Assert.DoesNotContain('\r', watchdogScript);
     }
 
     [Fact]

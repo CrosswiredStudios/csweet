@@ -125,7 +125,10 @@ public sealed class DockerAgentContainerRunner(
         args.Add(request.RuntimeImage);
         if (runtimeOptions.BrokerWatchdogEnabled)
         {
-            args.AddRange(["/bin/bash", "-c", BrokerWatchdogScript, "--", $"/app/{request.EntryAssembly}"]);
+            // Raw string literals retain the source file's line endings. Normalize before
+            // passing the script to a Linux container so a Windows checkout cannot inject
+            // carriage returns into shell commands or the agent assembly argument.
+            args.AddRange(["/bin/bash", "-c", NormalizeShellScript(BrokerWatchdogScript), "--", $"/app/{request.EntryAssembly}"]);
         }
         else
         {
@@ -386,6 +389,9 @@ public sealed class DockerAgentContainerRunner(
 
     private static string SanitizeError(string error)
         => string.IsNullOrWhiteSpace(error) ? "unknown Docker error" : error.Trim().Replace("\r", " ").Replace("\n", " ");
+
+    private static string NormalizeShellScript(string script) =>
+        script.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
     private static string CreatePackageMount(string packagePath)
     {

@@ -21,6 +21,7 @@ public sealed class AgentOnboardingEventDispatcher(
     IOptions<AgentOnboardingDeliveryOptions> options,
     ILogger<AgentOnboardingEventDispatcher> logger) : BackgroundService
 {
+    private const string ConnectionUnavailableErrorPrefix = "The target agent installation is not connected yet.";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -39,10 +40,22 @@ public sealed class AgentOnboardingEventDispatcher(
         var db = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
         var now = clock.GetUtcNow();
         var pending = await db.AgentOnboardingEventOutbox
-            .Where(x => x.Status == AgentOnboardingEventOutboxStatus.Pending && x.NextAttemptAt <= now)
+            .Where(x =>
+                (x.Status == AgentOnboardingEventOutboxStatus.Pending && x.NextAttemptAt <= now) ||
+                (x.Status == AgentOnboardingEventOutboxStatus.Failed &&
+                 x.LastError != null &&
+                 x.LastError.StartsWith(ConnectionUnavailableErrorPrefix)))
             .OrderBy(x => x.OccurredAt)
             .Take(50)
             .ToListAsync(cancellationToken);
+
+        if (pending.Count > 0)
+        {
+            logger.LogInformation(
+                "Found {PendingOnboardingEventCount} agent onboarding event(s) ready for delivery at {DispatchTime}.",
+                pending.Count,
+                now);
+        }
 
         foreach (var item in pending)
         {
@@ -54,7 +67,50 @@ public sealed class AgentOnboardingEventDispatcher(
             {
                 item.Status = AgentOnboardingEventOutboxStatus.Cancelled;
                 item.LastError = "The agent employee is no longer active or assigned to an installation.";
+                logger.LogWarning(
+                    "Cancelled onboarding event {OnboardingEventId} for organization {OrganizationId} and employee {AgentOrganizationUserId}: {OnboardingError}",
+                    item.Id,
+                    item.OrganizationId,
+                    item.AgentOrganizationUserId,
+                    item.LastError);
                 continue;
+            }
+
+            var recoveringLegacyConnectionWait =
+                WasWaitingForConnection(item.LastError) &&
+                (item.Attempts > 0 || item.Status == AgentOnboardingEventOutboxStatus.Failed);
+            if (recoveringLegacyConnectionWait)
+            {
+                var schedule = await db.AgentSchedules.SingleOrDefaultAsync(
+                    x => x.AgentInstallationId == agent.AgentInstallationId.Value,
+                    cancellationToken);
+                if (schedule?.AutomaticStartSuppressedAt is not null)
+                {
+                    schedule.ConsecutiveStartupFailures = 0;
+                    schedule.AutomaticStartSuppressedAt = null;
+                    logger.LogInformation(
+                        "Cleared automatic startup suppression for installation {InstallationId} while recovering onboarding event {OnboardingEventId}; always-on reconciliation can start the corrected runtime.",
+                        agent.AgentInstallationId,
+                        item.Id);
+                }
+            }
+
+            // Older dispatcher versions counted polls made while the installation was
+            // disconnected as delivery attempts. Recover those counters so an event that
+            // the agent never received still gets the full acknowledgement retry budget.
+            if (WasWaitingForConnection(item.LastError))
+            {
+                if (item.Status == AgentOnboardingEventOutboxStatus.Failed)
+                {
+                    logger.LogInformation(
+                        "Reopened onboarding event {OnboardingEventId} for organization {OrganizationId}, employee {AgentOrganizationUserId}, and installation {InstallationId} because an older dispatcher exhausted retries before the installation connected.",
+                        item.Id,
+                        item.OrganizationId,
+                        item.AgentOrganizationUserId,
+                        agent.AgentInstallationId);
+                    item.Status = AgentOnboardingEventOutboxStatus.Pending;
+                }
+                item.Attempts = 0;
             }
 
             if (item.Attempts >= options.Value.MaximumAttempts)
@@ -66,58 +122,73 @@ public sealed class AgentOnboardingEventDispatcher(
                 continue;
             }
 
+            string? configurationWarning = null;
             var configuration = await db.AgentInstallationConfigurations.AsNoTracking()
                 .SingleOrDefaultAsync(
                     x => x.AgentInstallationId == agent.AgentInstallationId.Value,
                     cancellationToken);
             if (configuration is not null)
             {
-                var settings = JsonSerializer.Deserialize<IReadOnlyDictionary<string, JsonElement>>(
-                    configuration.SettingsJson,
-                    JsonOptions) ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-                var update = new UpdateAgentConfigurationRequest(settings)
-                {
-                    SchemaVersion = configuration.SchemaVersion
-                };
-                using var hydrationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                hydrationTimeout.CancelAfter(TimeSpan.FromSeconds(10));
-                CapabilityResult hydration;
+                IReadOnlyDictionary<string, JsonElement>? settings = null;
                 try
                 {
-                    hydration = await sessions.InvokeInstallationCapabilityAsync(
-                        item.OrganizationId.ToString("D"),
-                        agent.AgentInstallationId.Value.ToString("D"),
-                        new RequestCapability
-                        {
-                            RequestId = Guid.NewGuid().ToString("N"),
-                            Capability = AgentConfigurationCapabilities.Update,
-                            ContentType = "application/json",
-                            Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(update, JsonOptions))
-                        },
-                        hydrationTimeout.Token);
+                    settings = JsonSerializer.Deserialize<IReadOnlyDictionary<string, JsonElement>>(
+                        configuration.SettingsJson,
+                        JsonOptions) ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
                 }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                catch (JsonException exception)
                 {
-                    hydration = new CapabilityResult
-                    {
-                        Succeeded = false,
-                        Error = "The agent did not accept its saved configuration before onboarding."
-                    };
+                    configurationWarning = "The saved agent configuration is not valid JSON.";
+                    logger.LogWarning(
+                        exception,
+                        "Could not deserialize saved configuration for onboarding event {OnboardingEventId} and installation {InstallationId}. The lifecycle event will still be offered.",
+                        item.Id,
+                        agent.AgentInstallationId);
                 }
 
-                if (!hydration.Succeeded)
+                if (settings is not null)
                 {
-                    item.Attempts++;
-                    item.NextAttemptAt = now + RetryDelay(item.Attempts);
-                    item.LastError = string.IsNullOrWhiteSpace(hydration.Error)
-                        ? "The agent rejected its saved configuration before onboarding."
-                        : $"The agent could not load its saved configuration before onboarding: {hydration.Error}";
-                    logger.LogWarning(
-                        "Deferred onboarding event {EventId} until installation {InstallationId} accepts its saved configuration. {Error}",
-                        item.Id,
-                        agent.AgentInstallationId,
-                        item.LastError);
-                    continue;
+                    var update = new UpdateAgentConfigurationRequest(settings)
+                    {
+                        SchemaVersion = configuration.SchemaVersion
+                    };
+                    using var hydrationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    hydrationTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+                    CapabilityResult hydration;
+                    try
+                    {
+                        hydration = await sessions.InvokeInstallationCapabilityAsync(
+                            item.OrganizationId.ToString("D"),
+                            agent.AgentInstallationId.Value.ToString("D"),
+                            new RequestCapability
+                            {
+                                RequestId = Guid.NewGuid().ToString("N"),
+                                Capability = AgentConfigurationCapabilities.Update,
+                                ContentType = "application/json",
+                                Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(update, JsonOptions))
+                            },
+                            hydrationTimeout.Token);
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        hydration = new CapabilityResult
+                        {
+                            Succeeded = false,
+                            Error = "The agent did not accept its saved configuration before onboarding."
+                        };
+                    }
+
+                    if (!hydration.Succeeded)
+                    {
+                        configurationWarning = string.IsNullOrWhiteSpace(hydration.Error)
+                            ? "The agent rejected its saved configuration before onboarding."
+                            : $"The agent could not load its saved configuration before onboarding: {hydration.Error}";
+                        logger.LogWarning(
+                            "Installation {InstallationId} could not load saved configuration before onboarding event {EventId}. The lifecycle event will still be offered so the agent can use its built-in or contextual fallback. {Error}",
+                            agent.AgentInstallationId,
+                            item.Id,
+                            configurationWarning);
+                    }
                 }
             }
 
@@ -138,9 +209,9 @@ public sealed class AgentOnboardingEventDispatcher(
                 requireSubscription: false,
                 occurredAt: item.OccurredAt);
 
-            item.Attempts++;
             if (delivered > 0)
             {
+                item.Attempts++;
                 item.NextAttemptAt = now + TimeSpan.FromSeconds(30);
                 item.LastError = "The agent received the onboarding event but has not acknowledged successful handling.";
                 logger.LogInformation(
@@ -149,8 +220,18 @@ public sealed class AgentOnboardingEventDispatcher(
             }
             else
             {
-                item.NextAttemptAt = now + RetryDelay(item.Attempts);
-                item.LastError = "The target agent installation is not connected yet.";
+                item.NextAttemptAt = now + TimeSpan.FromSeconds(15);
+                item.LastError = configurationWarning is null
+                    ? ConnectionUnavailableErrorPrefix
+                    : $"{ConnectionUnavailableErrorPrefix} {configurationWarning}";
+                logger.LogWarning(
+                    "Could not offer onboarding event {OnboardingEventId} for organization {OrganizationId}, employee {AgentOrganizationUserId}, and installation {InstallationId} because the installation is not connected. This does not consume an acknowledgement attempt. Next retry: {NextAttemptAt}. {OnboardingError}",
+                    item.Id,
+                    item.OrganizationId,
+                    item.AgentOrganizationUserId,
+                    agent.AgentInstallationId,
+                    item.NextAttemptAt,
+                    item.LastError);
             }
         }
 
@@ -183,11 +264,6 @@ public sealed class AgentOnboardingEventDispatcher(
         });
     }
 
-    private static TimeSpan RetryDelay(int attempts) => attempts switch
-    {
-        <= 1 => TimeSpan.FromSeconds(5),
-        <= 5 => TimeSpan.FromSeconds(15),
-        <= 8 => TimeSpan.FromSeconds(30),
-        _ => TimeSpan.FromMinutes(1)
-    };
+    private static bool WasWaitingForConnection(string? lastError) =>
+        lastError?.StartsWith(ConnectionUnavailableErrorPrefix, StringComparison.Ordinal) == true;
 }

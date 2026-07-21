@@ -1,11 +1,3 @@
-*
-!csweet/
-!csweet/**
-!CSweetAgentSdk/
-!CSweetAgentSdk/**
-!CSweet.Memory/
-!CSweet.Memory/**
-
 **/.git
 **/.vs
 **/.idea

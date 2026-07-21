@@ -113,16 +113,6 @@ Local-first does not mean isolated. It means your company can decide when the ne
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine with Compose
 - Git
 - An OpenAI-compatible model endpoint; [LM Studio](https://lmstudio.ai/) is the default local preset
-- For the current source build, companion `CSweetAgentSdk` and `CSweet.Memory` repositories checked out beside this repository
-
-The current Docker build expects this contributor workspace shape:
-
-```text
-workspace/
-├── csweet/
-├── CSweetAgentSdk/
-└── CSweet.Memory/
-```
 
 ### Start the stack
 
@@ -203,7 +193,7 @@ dotnet test tests/CSweet.UnitTests/CSweet.UnitTests.csproj
 dotnet test tests/CSweet.IntegrationTests/CSweet.IntegrationTests.csproj
 ```
 
-Local sibling checkouts of `CSweetAgentSdk` and `CSweet.Memory` are detected automatically. Without them, the solution uses the centrally pinned package versions.
+Optional local sibling checkouts of `CSweetAgentSdk` and `CSweet.Memory` are detected automatically by local .NET builds. Without them, local builds and Docker use the centrally pinned package versions.
 
 ## Help build the company OS
 

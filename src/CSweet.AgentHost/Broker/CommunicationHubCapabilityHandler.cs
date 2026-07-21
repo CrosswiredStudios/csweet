@@ -7,13 +7,15 @@ using CSweet.Contracts.Communications;
 using CSweet.Infrastructure.Persistence;
 using Google.Protobuf;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace CSweet.AgentHost.Broker;
 
 public sealed class CommunicationHubCapabilityHandler(
     CSweetDbContext db,
     ICommunicationHubService hub,
-    IExecutiveDecisionService? decisions = null) : IPlatformCapabilityHandler
+    IExecutiveDecisionService? decisions = null,
+    ILogger<CommunicationHubCapabilityHandler>? logger = null) : IPlatformCapabilityHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -99,6 +101,27 @@ public sealed class CommunicationHubCapabilityHandler(
         var input = Read<SendMessageCapabilityRequest>(request);
         var message = await hub.SendAsync(organizationId, input.ChatId, actorId,
             new SendCommunicationMessageRequest(input.Content, input.IdempotencyKey), token);
+        if (message is null)
+        {
+            logger?.LogWarning(
+                "Agent communication send failed for organization {OrganizationId}, employee {AgentOrganizationUserId}, chat {ConversationId}, request {RequestId}, and idempotency key {IdempotencyKey}. The message was empty or the employee is not an active chat member.",
+                organizationId,
+                actorId,
+                input.ChatId,
+                request.RequestId,
+                input.IdempotencyKey);
+        }
+        else
+        {
+            logger?.LogInformation(
+                "Agent communication message {MessageId} persisted for organization {OrganizationId}, employee {AgentOrganizationUserId}, chat {ConversationId}, request {RequestId}, and idempotency key {IdempotencyKey}.",
+                message.Message.Id,
+                organizationId,
+                actorId,
+                input.ChatId,
+                request.RequestId,
+                input.IdempotencyKey);
+        }
         return message is null
             ? Failure(request.RequestId, PlatformCapabilityErrorCode.ValidationFailed,
                 "The message was empty or the employee is not a member of the chat.")
