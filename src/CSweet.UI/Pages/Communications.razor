@@ -386,7 +386,12 @@
         .Where(x => !IsTerminal(x.Turn.Status) && x.Turn.AssistantMessageId is null)
         .OrderBy(x => x.Turn.CreatedAt);
 
-    protected override void OnInitialized() => Realtime.EventReceived += OnRealtimeEvent;
+    protected override void OnInitialized()
+    {
+        Realtime.EventReceived += OnRealtimeEvent;
+        Realtime.Connected += OnRealtimeConnectionReady;
+        Realtime.Reconnected += OnRealtimeConnectionReady;
+    }
 
     protected override Task OnParametersSetAsync() => LoadAsync();
 
@@ -778,6 +783,8 @@
         _ = InvokeAsync(RefreshFromRealtimeAsync);
     }
 
+    private void OnRealtimeConnectionReady() => _ = InvokeAsync(RefreshFromRealtimeAsync);
+
     private async Task RefreshFromRealtimeAsync()
     {
         if (_realtimeRefreshing || _sending || _showEditor) return;
@@ -820,6 +827,8 @@
     public async ValueTask DisposeAsync()
     {
         Realtime.EventReceived -= OnRealtimeEvent;
+        Realtime.Connected -= OnRealtimeConnectionReady;
+        Realtime.Reconnected -= OnRealtimeConnectionReady;
         _chatCts?.Cancel();
         _chatCts?.Dispose();
         _disposeCts.Cancel();

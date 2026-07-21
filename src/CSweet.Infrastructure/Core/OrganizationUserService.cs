@@ -3,11 +3,13 @@ using CSweet.Application.Setup;
 using CSweet.Contracts.Core;
 using CSweet.Domain.Core;
 using CSweet.Infrastructure.Persistence;
+using CSweet.Infrastructure.Setup;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using CSweet.Domain.Communications;
 using CSweet.Application.Communications;
 using CSweet.Infrastructure.Communications;
+using Microsoft.Extensions.Logging;
 
 namespace CSweet.Infrastructure.Core;
 
@@ -16,13 +18,19 @@ public sealed class OrganizationUserService : IOrganizationUserService
     private readonly CSweetDbContext _dbContext;
     private readonly IAuditEventWriter _auditEventWriter;
     private readonly IAgentCommunicationOnboardingService _agentOnboarding;
+    private readonly IAgentRuntimeManager? _agentRuntimeManager;
+    private readonly ILogger<OrganizationUserService>? _logger;
 
     public OrganizationUserService(CSweetDbContext dbContext, IAuditEventWriter auditEventWriter,
-        IAgentCommunicationOnboardingService? agentOnboarding = null)
+        IAgentCommunicationOnboardingService? agentOnboarding = null,
+        IAgentRuntimeManager? agentRuntimeManager = null,
+        ILogger<OrganizationUserService>? logger = null)
     {
         _dbContext = dbContext;
         _auditEventWriter = auditEventWriter;
         _agentOnboarding = agentOnboarding ?? new AgentCommunicationOnboardingService(dbContext);
+        _agentRuntimeManager = agentRuntimeManager;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<OrganizationUserResponse>> ListByOrganizationAsync(Guid organizationId, CancellationToken cancellationToken = default)
@@ -69,11 +77,15 @@ public sealed class OrganizationUserService : IOrganizationUserService
             return Failure("agent_instance_required", "An imported agent installation must be selected for an agent employee.");
         }
 
+        var agentInstallationReassigned = false;
         if (request.AgentInstallationId.HasValue)
         {
-            var installation = await _dbContext.AgentInstallations.SingleOrDefaultAsync(
-                x => x.Id == request.AgentInstallationId && x.IsEnabled,
-                cancellationToken);
+            var installation = await _dbContext.AgentInstallations
+                .Include(x => x.PackageVersion)
+                .Include(x => x.Grant)
+                .SingleOrDefaultAsync(
+                    x => x.Id == request.AgentInstallationId && x.IsEnabled,
+                    cancellationToken);
             if (installation is null)
             {
                 return Failure("invalid_agent_instance", "The selected agent installation is not available.");
@@ -86,7 +98,16 @@ public sealed class OrganizationUserService : IOrganizationUserService
                 return Failure("agent_instance_in_use", "The selected agent installation already belongs to another employee.");
             }
 
-            installation.BusinessId = organizationId.ToString("D");
+            var organizationKey = organizationId.ToString("D");
+            agentInstallationReassigned = !string.Equals(
+                installation.BusinessId,
+                organizationKey,
+                StringComparison.OrdinalIgnoreCase);
+            installation.BusinessId = organizationKey;
+            await AgentInstallationConfigurationDefaults.EnsureAsync(
+                _dbContext,
+                installation,
+                cancellationToken);
         }
 
         if (request.ReportsToOrganizationUserId.HasValue)
@@ -175,12 +196,44 @@ public sealed class OrganizationUserService : IOrganizationUserService
         {
             managedUser.ReportsToOrganizationUserId = user.Id;
         }
+        AgentCommunicationOnboardingResult? onboarding = null;
         if (user.EmployeeType == EmployeeType.Agent)
         {
-            var onboarding = await _agentOnboarding.EnsureAsync(organizationId, user, hiringApplicationUserId, cancellationToken);
+            onboarding = await _agentOnboarding.EnsureAsync(organizationId, user, hiringApplicationUserId, cancellationToken);
             if (!onboarding.Succeeded) return Failure(onboarding.ErrorCode!, onboarding.Message);
         }
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        if (user.AgentInstallationId.HasValue && _agentRuntimeManager is not null)
+        {
+            try
+            {
+                if (agentInstallationReassigned)
+                {
+                    await _agentRuntimeManager.RestartRuntimeAsync(
+                        user.AgentInstallationId.Value,
+                        "Restarted under the assigned organization for the agent employee's initial onboarding conversation.",
+                        interactive: true,
+                        cancellationToken);
+                }
+                else
+                {
+                    await _agentRuntimeManager.EnsureRuntimeQueuedAsync(
+                        user.AgentInstallationId.Value,
+                        "Prioritized for the agent employee's initial onboarding conversation.",
+                        interactive: true,
+                        cancellationToken);
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                _logger?.LogWarning(
+                    exception,
+                    "Could not queue the initial onboarding runtime for agent employee {OrganizationUserId} installation {InstallationId}.",
+                    user.Id,
+                    user.AgentInstallationId.Value);
+            }
+        }
 
         await _auditEventWriter.WriteAsync(
             "organization_user.created",
@@ -189,7 +242,11 @@ public sealed class OrganizationUserService : IOrganizationUserService
             $"User '{user.DisplayName}' added to organization {organizationId}.",
             cancellationToken: cancellationToken);
 
-        return new CoreActionResponse(true, null, "User added successfully.", OrganizationUser: user.ToResponse());
+        return new CoreActionResponse(
+            true,
+            null,
+            "User added successfully.",
+            OrganizationUser: user.ToResponse() with { InitialConversationId = onboarding?.ConversationId });
     }
 
     public async Task<CoreActionResponse> DeleteAsync(Guid id, CancellationToken cancellationToken = default)

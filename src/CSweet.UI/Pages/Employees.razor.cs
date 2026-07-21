@@ -605,7 +605,21 @@ public partial class Employees
                 return;
             }
 
+            var hiredEmployee = await response.Content.ReadFromJsonAsync<OrganizationUserResponse>();
+            if (hiredEmployee is null)
+            {
+                _actionError = "The employee was hired, but the response was empty.";
+                return;
+            }
+
             _hireDialogOpen = false;
+            if (_hireEmployeeType == 1 && hiredEmployee.InitialConversationId.HasValue)
+            {
+                Navigation.NavigateTo(
+                    $"/organizations/{OrganizationId}/communications/{hiredEmployee.InitialConversationId.Value:D}");
+                return;
+            }
+
             await LoadEmployeesAsync();
         }
         catch (Exception ex)

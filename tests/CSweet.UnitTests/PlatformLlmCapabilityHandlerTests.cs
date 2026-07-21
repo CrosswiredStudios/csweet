@@ -75,6 +75,86 @@ public sealed class PlatformLlmCapabilityHandlerTests
         Assert.Null(factory.Model);
     }
 
+    [Fact]
+    public async Task InstallationWithoutTypedLlmGrant_IsRejected()
+    {
+        await using var db = CreateDb();
+        var providerId = Guid.NewGuid();
+        var installationId = Guid.NewGuid();
+        db.LlmProviderProfiles.Add(Profile(providerId));
+        await db.SaveChangesAsync();
+        var factory = new RecordingProviderFactory();
+        var handler = new PlatformLlmCapabilityHandler(
+            db,
+            factory,
+            NullLogger<PlatformLlmCapabilityHandler>.Instance);
+
+        var results = new List<CapabilityResult>();
+        await foreach (var result in handler.StreamAsync(
+            Session(installationId, grantLlm: false),
+            Request(providerId, "configured-model"),
+            CancellationToken.None))
+        {
+            results.Add(result);
+        }
+
+        var failure = Assert.Single(results);
+        Assert.False(failure.Succeeded);
+        Assert.Contains(BrokerLlmCapabilities.ChatStream, failure.Error, StringComparison.Ordinal);
+        Assert.Null(factory.Model);
+    }
+
+    [Fact]
+    public async Task InstructionsToolsAndFunctionCalls_AreTransportedAcrossBroker()
+    {
+        await using var db = CreateDb();
+        var providerId = Guid.NewGuid();
+        var installationId = Guid.NewGuid();
+        db.LlmProviderProfiles.Add(Profile(providerId));
+        db.AgentInstallationConfigurations.Add(Configuration(installationId, providerId, "configured-model"));
+        await db.SaveChangesAsync();
+        using var schemaDocument = JsonDocument.Parse("""
+            {"type":"object","properties":{"question":{"type":"string"}},"required":["question"]}
+            """);
+        var factory = new RecordingProviderFactory();
+        var handler = new PlatformLlmCapabilityHandler(
+            db,
+            factory,
+            NullLogger<PlatformLlmCapabilityHandler>.Instance);
+        var payload = new BrokerLlmRequest(
+            providerId,
+            "configured-model",
+            [new BrokerLlmMessage("user", Contents: [new BrokerLlmContent("text", Text: "Help me staff the company")])],
+            "Recommend roles only.",
+            [new BrokerLlmTool("ask_user", "Ask the owner to choose.", schemaDocument.RootElement.Clone())]);
+        var request = new RequestCapability
+        {
+            RequestId = Guid.NewGuid().ToString("N"),
+            Capability = BrokerLlmCapabilities.ChatStream,
+            ContentType = "application/json",
+            Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions))
+        };
+
+        var results = new List<CapabilityResult>();
+        await foreach (var result in handler.StreamAsync(Session(installationId), request, CancellationToken.None))
+        {
+            results.Add(result);
+        }
+
+        Assert.Equal("Recommend roles only.", factory.Client.Options?.Instructions);
+        var forwardedTool = Assert.IsAssignableFrom<AIFunctionDeclaration>(Assert.Single(factory.Client.Options!.Tools!));
+        Assert.Equal("ask_user", forwardedTool.Name);
+        var chunks = results
+            .Where(result => result.Succeeded && !result.Payload.IsEmpty)
+            .Select(result => JsonSerializer.Deserialize<BrokerLlmChunk>(result.Payload.Span, JsonOptions)!)
+            .ToList();
+        var call = Assert.Single(
+            chunks.SelectMany(chunk => chunk.Contents ?? []),
+            content => content.Kind == "function_call");
+        Assert.Equal("ask_user", call.Name);
+        Assert.Equal("call-1", call.CallId);
+    }
+
     private static CSweetDbContext CreateDb() => new(
         new DbContextOptionsBuilder<CSweetDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -109,7 +189,7 @@ public sealed class PlatformLlmCapabilityHandlerTests
         UpdatedAt = DateTimeOffset.UtcNow
     };
 
-    private static AgentSession Session(Guid installationId) => new(
+    private static AgentSession Session(Guid installationId, bool grantLlm = true) => new(
         Guid.NewGuid().ToString("N"),
         "test-agent",
         installationId.ToString("D"),
@@ -120,7 +200,10 @@ public sealed class PlatformLlmCapabilityHandlerTests
             new HashSet<string>(),
             new HashSet<string>(),
             new HashSet<string>(),
-            new HashSet<string>(["capability.request"], StringComparer.Ordinal)));
+            new HashSet<string>(),
+            grantLlm
+                ? new HashSet<string>([BrokerLlmCapabilities.ChatStream], StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal)));
 
     private static RequestCapability Request(Guid providerId, string model)
     {
@@ -140,11 +223,12 @@ public sealed class PlatformLlmCapabilityHandlerTests
     private sealed class RecordingProviderFactory : ILlmProviderFactory
     {
         public string? Model { get; private set; }
+        public RecordingChatClient Client { get; } = new();
 
         public Task<IChatClient> CreateChatClientAsync(
             Guid providerProfileId,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IChatClient>(new FakeChatClient());
+            Task.FromResult<IChatClient>(Client);
 
         public Task<IChatClient> CreateChatClientAsync(
             Guid providerProfileId,
@@ -152,7 +236,44 @@ public sealed class PlatformLlmCapabilityHandlerTests
             CancellationToken cancellationToken = default)
         {
             Model = model;
-            return Task.FromResult<IChatClient>(new FakeChatClient());
+            return Task.FromResult<IChatClient>(Client);
+        }
+    }
+
+    private sealed class RecordingChatClient : IChatClient
+    {
+        public ChatOptions? Options { get; private set; }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "response")));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Options = options;
+            await Task.Yield();
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+            [
+                new FunctionCallContent(
+                    "call-1",
+                    "ask_user",
+                    new Dictionary<string, object?>
+                    {
+                        ["question"] = "Which role should we hire first?"
+                    })
+            ]);
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) =>
+            serviceType.IsInstanceOfType(this) ? this : null;
+
+        public void Dispose()
+        {
         }
     }
 }

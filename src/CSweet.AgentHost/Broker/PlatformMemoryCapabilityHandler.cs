@@ -45,8 +45,8 @@ public sealed class PlatformMemoryCapabilityHandler
             return Failure(request.RequestId, "The memory request exceeds the 1 MB limit.");
         if (!string.Equals(request.ContentType, "application/json", StringComparison.OrdinalIgnoreCase))
             return Failure(request.RequestId, "Platform memory requests must use application/json.");
-        if (!session.Grant.Permissions.Contains("capability.request"))
-            return Failure(request.RequestId, "The installation is not granted capability.request.");
+        if (session.Grant.RequestedCapabilities?.Contains(request.Capability) != true)
+            return Failure(request.RequestId, $"The installation is not granted {request.Capability}.");
 
         try
         {

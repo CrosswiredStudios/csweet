@@ -1,16 +1,35 @@
 using CSweet.Application.Notifications;
+using CSweet.Infrastructure.Persistence;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 namespace CSweet.Api.Notifications;
 
-public sealed class SignalRApplicationRealtimePublisher(IHubContext<AppEventsHub> hub) : IApplicationRealtimePublisher
+public sealed class SignalRApplicationRealtimePublisher(
+    IHubContext<AppEventsHub> hub,
+    IServiceScopeFactory scopeFactory) : IApplicationRealtimePublisher
 {
-    public Task PublishAsync(ApplicationRealtimePublication publication, CancellationToken cancellationToken = default)
+    public async Task PublishAsync(ApplicationRealtimePublication publication, CancellationToken cancellationToken = default)
     {
-        if (publication.RecipientOrganizationUserIds.Count == 0) return Task.CompletedTask;
-        var groups = publication.RecipientOrganizationUserIds.Distinct()
-            .Select(AppEventGroups.OrganizationUser).ToList();
-        return hub.Clients.Groups(groups).SendAsync("AppEvent", publication.Envelope, cancellationToken);
+        if (publication.RecipientOrganizationUserIds.Count == 0) return;
+        var recipientIds = publication.RecipientOrganizationUserIds.Distinct().ToList();
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
+        var identities = await db.CoreOrganizationUsers.AsNoTracking()
+            .Where(x => recipientIds.Contains(x.Id) && x.IsActive)
+            .Select(x => new { x.Id, x.ApplicationUserId })
+            .ToListAsync(cancellationToken);
+        var applicationUserIds = identities.Where(x => x.ApplicationUserId.HasValue)
+            .Select(x => x.ApplicationUserId!.Value).Distinct().ToList();
+        var applicationBackedOrganizationUserIds = identities.Where(x => x.ApplicationUserId.HasValue)
+            .Select(x => x.Id).ToHashSet();
+        var groups = applicationUserIds.Select(AppEventGroups.ApplicationUser)
+            .Concat(recipientIds.Where(x => !applicationBackedOrganizationUserIds.Contains(x))
+                .Select(AppEventGroups.OrganizationUser))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (groups.Count > 0)
+            await hub.Clients.Groups(groups).SendAsync("AppEvent", publication.Envelope, cancellationToken);
     }
 }
 

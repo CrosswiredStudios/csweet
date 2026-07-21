@@ -575,6 +575,32 @@ public sealed class AgentRuntimeManagerTests
     }
 
     [Fact]
+    public async Task RestartRuntime_StopsExistingContainerAndQueuesFreshInteractiveInstance()
+    {
+        await using var db = CreateDb();
+        var installation = await SeedAsync(db, due: false);
+        var current = RunningInstance(installation.Id);
+        current.ContainerId = "old-container";
+        current.AgentInstallation = installation;
+        db.AgentRuntimeInstances.Add(current);
+        await db.SaveChangesAsync();
+        var containers = new FakeRunner();
+        var manager = CreateManager(db, containers);
+
+        var queued = await manager.RestartRuntimeAsync(
+            installation.Id,
+            "Organization assignment changed.",
+            interactive: true);
+
+        Assert.True(queued);
+        Assert.Equal(AgentRuntimeStatus.Cancelled, current.Status);
+        Assert.Equal("old-container", Assert.Single(containers.Stops));
+        var replacement = Assert.Single(
+            await db.AgentRuntimeInstances.Where(x => x.Status == AgentRuntimeStatus.Queued).ToListAsync());
+        Assert.True(replacement.IsInteractive);
+    }
+
+    [Fact]
     public async Task AlwaysOnInteractiveRuntime_HasNoIdleDeadline()
     {
         await using var db = CreateDb();

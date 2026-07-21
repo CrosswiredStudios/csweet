@@ -1,4 +1,5 @@
 using CSweet.Agent.Contracts.Grpc;
+using CSweet.Contracts.Agents;
 using Google.Protobuf;
 
 namespace CSweet.AgentHost.Broker;
@@ -22,7 +23,7 @@ public sealed class PlatformCapabilityDispatcher(
         CancellationToken cancellationToken)
     {
         var requested = session.Grant.RequestedCapabilities ?? new HashSet<string>(StringComparer.Ordinal);
-        if (!McpToolCatalog.IsGlobalCapability(request.Capability) && !requested.Contains(request.Capability))
+        if (!IsImplicitPlatformCapability(request.Capability) && !requested.Contains(request.Capability))
         {
             return Single(Failure(request.RequestId,
                 $"Agent '{session.AgentId}' may not request '{request.Capability}'."));
@@ -33,6 +34,10 @@ public sealed class PlatformCapabilityDispatcher(
             ? Single(Failure(request.RequestId, $"No platform handler provides '{request.Capability}'."))
             : handler.HandleAsync(session, request, cancellationToken);
     }
+
+    private static bool IsImplicitPlatformCapability(string capability) =>
+        McpToolCatalog.IsGlobalCapability(capability) ||
+        capability == AgentLifecycleCapabilities.CompleteOnboarding;
 
     private static async IAsyncEnumerable<CapabilityResult> Single(CapabilityResult result)
     {

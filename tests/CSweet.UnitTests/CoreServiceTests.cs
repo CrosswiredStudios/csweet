@@ -1,7 +1,10 @@
 using CSweet.Application.Core;
 using CSweet.Application.Setup;
+using CSweet.Agent.SDK;
 using CSweet.Contracts.Core;
+using CSweet.Domain.Communications;
 using CSweet.Domain.Core;
+using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Core;
 using CSweet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -160,6 +163,166 @@ public class CoreServiceTests
 
         Assert.False(result.Succeeded);
         Assert.Equal("agent_instance_required", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task OrganizationUserCreation_AgentReturnsConversationAndQueuesInitialRuntime()
+    {
+        await using var dbContext = CreateDbContext();
+        var runtimeManager = new RecordingAgentRuntimeManager();
+        var service = new OrganizationUserService(
+            dbContext,
+            new TestAuditEventWriter(),
+            agentRuntimeManager: runtimeManager);
+        var organization = CreateOrganization();
+        var applicationUserId = Guid.NewGuid();
+        var owner = new OrganizationUser
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organization.Id,
+            ApplicationUserId = applicationUserId,
+            DisplayName = "Owner",
+            EmployeeType = EmployeeType.Human,
+            PermissionLevel = OrganizationPermissionLevel.Owner,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        var package = new AgentPackageVersion
+        {
+            Id = Guid.NewGuid(),
+            PackageSourceId = Guid.NewGuid(),
+            AgentId = "example.assistant",
+            AgentName = "Assistant",
+            Version = "1.0.0",
+            Status = AgentPackageVersionStatus.Built,
+            ManifestJson = "{}",
+            ImportedAt = DateTimeOffset.UtcNow
+        };
+        var installation = new AgentInstallation
+        {
+            Id = Guid.NewGuid(),
+            InstallationKey = Guid.NewGuid(),
+            PackageVersionId = package.Id,
+            PackageVersion = package,
+            BusinessId = "default",
+            IsEnabled = true,
+            RevisionStatus = PluginRevisionStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(organization, owner, package, installation);
+        await dbContext.SaveChangesAsync();
+
+        var result = await service.CreateAsync(
+            organization.Id,
+            new CreateOrganizationUserRequest(
+                "Assistant",
+                null,
+                (int)OrganizationPermissionLevel.Contributor,
+                (int)EmployeeType.Agent,
+                AgentInstallationId: installation.Id),
+            hiringApplicationUserId: applicationUserId);
+
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.OrganizationUser?.InitialConversationId);
+        var conversation = await dbContext.CoreConversations.SingleAsync();
+        Assert.Equal(conversation.Id, result.OrganizationUser.InitialConversationId);
+        Assert.Equal(result.OrganizationUser.Id, conversation.AgentOrganizationUserId);
+        var onboardingEvent = await dbContext.AgentOnboardingEventOutbox.SingleAsync();
+        Assert.Equal(conversation.Id, onboardingEvent.ConversationId);
+        Assert.Equal(AgentOnboardingEventOutboxStatus.Pending, onboardingEvent.Status);
+        Assert.Equal(installation.Id, runtimeManager.QueuedInstallationId);
+        Assert.True(runtimeManager.Interactive);
+        Assert.True(runtimeManager.Restarted);
+    }
+
+    [Fact]
+    public async Task OrganizationUserCreation_SeedsGrantedAgentFromDefaultChatProvider()
+    {
+        await using var dbContext = CreateDbContext();
+        var service = new OrganizationUserService(dbContext, new TestAuditEventWriter());
+        var organization = CreateOrganization();
+        var owner = new OrganizationUser
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organization.Id,
+            DisplayName = "Owner",
+            EmployeeType = EmployeeType.Human,
+            PermissionLevel = OrganizationPermissionLevel.Owner,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        var providerId = Guid.NewGuid();
+        var package = new AgentPackageVersion
+        {
+            Id = Guid.NewGuid(),
+            PackageSourceId = Guid.NewGuid(),
+            AgentId = "example.chief",
+            AgentName = "Chief",
+            Version = "1.0.0",
+            Status = AgentPackageVersionStatus.Built,
+            ManifestJson = """
+                {"configuration":[
+                  {"key":"llmProviderId","type":"provider","label":"LLM provider","required":true},
+                  {"key":"llmModel","type":"model","label":"Model","required":true}
+                ]}
+                """,
+            ImportedAt = DateTimeOffset.UtcNow
+        };
+        var installation = new AgentInstallation
+        {
+            Id = Guid.NewGuid(),
+            InstallationKey = Guid.NewGuid(),
+            PackageVersionId = package.Id,
+            PackageVersion = package,
+            BusinessId = "default",
+            IsEnabled = true,
+            RevisionStatus = PluginRevisionStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        installation.Grant = new AgentInstallationGrant
+        {
+            Id = Guid.NewGuid(),
+            AgentInstallationId = installation.Id,
+            RequestedCapabilitiesJson = $"[\"{BrokerLlmCapabilities.ChatStream}\"]",
+            ApprovedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.AddRange(
+            organization,
+            owner,
+            package,
+            installation,
+            new SystemConfiguration
+            {
+                Id = Guid.NewGuid(),
+                DefaultChatProviderId = providerId,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            },
+            new LlmProviderProfile
+            {
+                Id = providerId,
+                Name = "LM Studio",
+                ProviderType = LlmProviderType.LmStudio,
+                BaseUrl = "http://localhost:1234/v1",
+                DefaultChatModel = "local-model",
+                IsEnabled = true,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+        await dbContext.SaveChangesAsync();
+
+        var result = await service.CreateAsync(organization.Id, new CreateOrganizationUserRequest(
+            "Chief",
+            null,
+            (int)OrganizationPermissionLevel.Manager,
+            (int)EmployeeType.Agent,
+            AgentInstallationId: installation.Id));
+
+        Assert.True(result.Succeeded, result.Message);
+        var configuration = await dbContext.AgentInstallationConfigurations.SingleAsync();
+        using var settings = System.Text.Json.JsonDocument.Parse(configuration.SettingsJson);
+        Assert.Equal(providerId.ToString("D"), settings.RootElement.GetProperty("llmProviderId").GetString());
+        Assert.Equal("local-model", settings.RootElement.GetProperty("llmModel").GetString());
     }
 
     [Fact]
@@ -623,6 +786,46 @@ public class CoreServiceTests
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
+    }
+
+    private sealed class RecordingAgentRuntimeManager : IAgentRuntimeManager
+    {
+        public Guid? QueuedInstallationId { get; private set; }
+        public bool Interactive { get; private set; }
+        public bool Restarted { get; private set; }
+
+        public Task<bool> EnsureRuntimeQueuedAsync(
+            Guid installationId,
+            string reason,
+            bool interactive = false,
+            CancellationToken cancellationToken = default)
+        {
+            QueuedInstallationId = installationId;
+            Interactive = interactive;
+            Restarted = false;
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> RestartRuntimeAsync(
+            Guid installationId,
+            string reason,
+            bool interactive = false,
+            CancellationToken cancellationToken = default)
+        {
+            QueuedInstallationId = installationId;
+            Interactive = interactive;
+            Restarted = true;
+            return Task.FromResult(true);
+        }
+
+        public Task<int> EnsureAlwaysOnRuntimesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<int> ProcessDueSchedulesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<int> ReconcileAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
     }
 
     #endregion

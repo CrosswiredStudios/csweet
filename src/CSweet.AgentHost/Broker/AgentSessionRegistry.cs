@@ -65,14 +65,14 @@ public sealed class AgentSessionRegistry
             }
 
             if (_pendingCapabilities.TryRemove(pair.Key, out _) &&
-                pending.ProviderSessionId == session.SessionId &&
-                _sessions.TryGetValue(pending.RequesterSessionId, out var requester))
+                pending.ProviderSessionId == session.SessionId)
             {
-                SendCapabilityFailure(
-                    requester,
-                    pending.RequestId,
-                    pending.CorrelationId,
-                    "The selected capability provider disconnected before completing the request.");
+                const string error = "The selected capability provider disconnected before completing the request.";
+                if (pending.PlatformCompletion is not null)
+                    pending.PlatformCompletion.TrySetResult(CapabilityFailure(pending.RequestId, error));
+                else if (pending.RequesterSessionId is not null &&
+                         _sessions.TryGetValue(pending.RequesterSessionId, out var requester))
+                    SendCapabilityFailure(requester, pending.RequestId, pending.CorrelationId, error);
             }
         }
 
@@ -216,6 +216,68 @@ public sealed class AgentSessionRegistry
         return count;
     }
 
+    /// <summary>Invokes a capability on an exact installation as the trusted platform.</summary>
+    public async Task<CapabilityResult> InvokeInstallationCapabilityAsync(
+        string businessId,
+        string installationId,
+        RequestCapability request,
+        CancellationToken cancellationToken)
+    {
+        var provider = _sessions.Values
+            .Where(session =>
+                string.Equals(session.BusinessId, businessId, StringComparison.Ordinal) &&
+                string.Equals(session.InstallationId, installationId, StringComparison.OrdinalIgnoreCase) &&
+                session.Grant.Capabilities.Contains(request.Capability))
+            .OrderBy(session => session.SessionId, StringComparer.Ordinal)
+            .FirstOrDefault();
+        if (provider is null)
+        {
+            return CapabilityFailure(
+                request.RequestId,
+                $"The target installation is not connected or does not provide '{request.Capability}'.");
+        }
+
+        var completion = new TaskCompletionSource<CapabilityResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var correlationId = Guid.NewGuid().ToString("N");
+        var pending = new PendingCapabilityRequest(
+            request.RequestId,
+            null,
+            provider.SessionId,
+            correlationId,
+            completion);
+        if (!_pendingCapabilities.TryAdd(request.RequestId, pending))
+            return CapabilityFailure(request.RequestId, "A capability request with this id is already pending.");
+
+        var accepted = provider.TrySend(new BrokerToAgentMessage
+        {
+            MessageId = Guid.NewGuid().ToString("N"),
+            CorrelationId = correlationId,
+            CapabilityRequest = new CapabilityRequest
+            {
+                RequestId = request.RequestId,
+                RequestingAgentId = "platform.csweet",
+                Capability = request.Capability,
+                ContentType = request.ContentType,
+                Payload = request.Payload
+            }
+        });
+        if (!accepted)
+        {
+            _pendingCapabilities.TryRemove(request.RequestId, out _);
+            return CapabilityFailure(request.RequestId, "The target installation is currently overloaded.");
+        }
+
+        try
+        {
+            return await completion.Task.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            _pendingCapabilities.TryRemove(request.RequestId, out _);
+        }
+    }
+
     public void RequestCapability(
         AgentSession requester,
         RequestCapability request,
@@ -292,7 +354,8 @@ public sealed class AgentSessionRegistry
             request.RequestId,
             requester.SessionId,
             provider.SessionId,
-            correlationId);
+            correlationId,
+            null);
 
         if (!_pendingCapabilities.TryAdd(request.RequestId, pending))
         {
@@ -367,7 +430,13 @@ public sealed class AgentSessionRegistry
             return;
         }
 
-        if (_sessions.TryGetValue(pending.RequesterSessionId, out var requester))
+        if (pending.PlatformCompletion is not null)
+        {
+            if (!result.HasMore)
+                pending.PlatformCompletion.TrySetResult(result);
+        }
+        else if (pending.RequesterSessionId is not null &&
+                 _sessions.TryGetValue(pending.RequesterSessionId, out var requester))
         {
             requester.TrySend(new BrokerToAgentMessage
             {
@@ -416,6 +485,14 @@ public sealed class AgentSessionRegistry
         });
     }
 
+    private static CapabilityResult CapabilityFailure(string requestId, string error) => new()
+    {
+        RequestId = requestId,
+        Succeeded = false,
+        ContentType = "application/json",
+        Error = error
+    };
+
     private static void SendError(
         AgentSession session,
         string correlationId,
@@ -436,7 +513,8 @@ public sealed class AgentSessionRegistry
 
     private sealed record PendingCapabilityRequest(
         string RequestId,
-        string RequesterSessionId,
+        string? RequesterSessionId,
         string ProviderSessionId,
-        string CorrelationId);
+        string CorrelationId,
+        TaskCompletionSource<CapabilityResult>? PlatformCompletion);
 }

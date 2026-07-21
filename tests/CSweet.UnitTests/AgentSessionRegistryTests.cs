@@ -228,6 +228,51 @@ public sealed class AgentSessionRegistryTests
     }
 
     [Fact]
+    public async Task PlatformCapabilityInvocation_TargetsExactInstallationAndReturnsResult()
+    {
+        var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
+        var provider = Register(
+            registry,
+            "provider",
+            "business-1",
+            capabilities: new[] { "configure.v1" },
+            installationId: "target-installation");
+        _ = Register(
+            registry,
+            "provider",
+            "business-1",
+            capabilities: new[] { "configure.v1" },
+            installationId: "sibling-installation");
+
+        var invocation = registry.InvokeInstallationCapabilityAsync(
+            "business-1",
+            "target-installation",
+            new RequestCapability
+            {
+                RequestId = "platform-request",
+                Capability = "configure.v1",
+                ContentType = "application/json",
+                Payload = ByteString.CopyFromUtf8("{}")
+            },
+            CancellationToken.None);
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var request = await provider.Outbound.ReadAsync(timeout.Token);
+        Assert.Equal("platform.csweet", request.CapabilityRequest.RequestingAgentId);
+        registry.CompleteCapability(provider, new CapabilityResult
+        {
+            RequestId = "platform-request",
+            Succeeded = true,
+            ContentType = "application/json",
+            Payload = ByteString.CopyFromUtf8("{\"configured\":true}")
+        }, request.CorrelationId);
+
+        var result = await invocation.WaitAsync(timeout.Token);
+        Assert.True(result.Succeeded);
+        Assert.Equal("{\"configured\":true}", result.Payload.ToStringUtf8());
+    }
+
+    [Fact]
     public async Task CapabilityResult_FromUnselectedAgent_IsRejectedWithoutConsumingRequest()
     {
         var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);

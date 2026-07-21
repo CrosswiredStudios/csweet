@@ -10,6 +10,7 @@ using CSweet.Domain.Setup;
 using CSweet.Application.Communications;
 using CSweet.Infrastructure.Communications;
 using CSweet.Infrastructure.Persistence;
+using CSweet.Infrastructure.Setup;
 using Microsoft.EntityFrameworkCore;
 
 namespace CSweet.Infrastructure.BusinessOnboarding;
@@ -362,6 +363,7 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
     {
         var installation = await _dbContext.AgentInstallations
             .Include(x => x.PackageVersion)
+            .Include(x => x.Grant)
             .SingleOrDefaultAsync(x => x.Id == installationId, cancellationToken);
         if (installation is null || installation.PackageVersion is null)
         {
@@ -382,6 +384,10 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
         }
 
         installation.BusinessId = organizationKey;
+        await AgentInstallationConfigurationDefaults.EnsureAsync(
+            _dbContext,
+            installation,
+            cancellationToken);
         var now = DateTimeOffset.UtcNow;
         var chiefRole = await _dbContext.CoreRoles.SingleOrDefaultAsync(
             x => x.OrganizationId == organizationId && x.Name == "Chief of Staff", cancellationToken);
@@ -467,9 +473,9 @@ public sealed class BusinessOnboardingService : IBusinessOnboardingService
 
         try
         {
-            await _agentRuntimeManager.EnsureRuntimeQueuedAsync(
+            await _agentRuntimeManager.RestartRuntimeAsync(
                 installationId,
-                "Prioritized for the Chief of Staff's initial onboarding conversation.",
+                "Restarted under the assigned organization for the Chief of Staff's initial onboarding conversation.",
                 interactive: true,
                 cancellationToken);
             return null;

@@ -265,6 +265,17 @@ public class BusinessOnboardingServiceTests
             return Task.FromResult(true);
         }
 
+        public Task<bool> RestartRuntimeAsync(
+            Guid installationId,
+            string reason,
+            bool interactive = false,
+            CancellationToken cancellationToken = default)
+        {
+            QueuedInstallationId = installationId;
+            Interactive = interactive;
+            return Task.FromResult(true);
+        }
+
         public Task<int> EnsureAlwaysOnRuntimesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(0);
 

@@ -123,7 +123,18 @@ public sealed class PlatformMemoryCapabilityHandlerTests : IAsyncLifetime
     private static AgentSession Session(string businessId, params string[] permissions) => new(
         Guid.NewGuid().ToString("N"), "test-agent", Guid.NewGuid().ToString("D"), businessId,
         Guid.NewGuid().ToString("D"), Guid.NewGuid().ToString("D"),
-        new AuthorizedAgentGrant(new HashSet<string>(), new HashSet<string>(), new HashSet<string>(), permissions.ToHashSet(StringComparer.Ordinal)));
+        new AuthorizedAgentGrant(
+            new HashSet<string>(),
+            new HashSet<string>(),
+            new HashSet<string>(),
+            permissions.ToHashSet(StringComparer.Ordinal),
+            new HashSet<string>(
+            [
+                CSweetMemoryCapabilities.Query,
+                CSweetMemoryCapabilities.Write,
+                CSweetMemoryCapabilities.Manage,
+                CSweetMemoryCapabilities.Export
+            ], StringComparer.Ordinal)));
 
     private static RequestCapability Request(string capability, string operation, object payload)
     {

@@ -38,9 +38,10 @@ public sealed class PlatformLlmCapabilityHandler
             yield break;
         }
 
-        if (!session.Grant.Permissions.Contains("capability.request"))
+        if (session.Grant.RequestedCapabilities?.Contains(BrokerLlmCapabilities.ChatStream) != true)
         {
-            yield return Failure(request.RequestId, "The installation is not granted capability.request.");
+            yield return Failure(request.RequestId,
+                $"The installation is not granted {BrokerLlmCapabilities.ChatStream}.");
             yield break;
         }
 
@@ -67,9 +68,11 @@ public sealed class PlatformLlmCapabilityHandler
             yield break;
         }
 
-        if (input.Messages.Count > 128 || input.Messages.Sum(message => message.Text.Length) > 262_144)
+        if (input.Messages.Count > 128 ||
+            input.Messages.Sum(MessageSize) > 262_144 ||
+            (input.Tools?.Count ?? 0) > 128)
         {
-            yield return Failure(request.RequestId, "The LLM request exceeds the message or text limit.");
+            yield return Failure(request.RequestId, "The LLM request exceeds the message, text, or tool limit.");
             yield break;
         }
 
@@ -106,9 +109,17 @@ public sealed class PlatformLlmCapabilityHandler
             yield break;
         }
 
-        var messages = input.Messages.Select(message => new ChatMessage(
-            ParseRole(message.Role),
-            message.Text)).ToList();
+        var messages = input.Messages.Select(ToChatMessage).ToList();
+        var options = new ChatOptions
+        {
+            Instructions = input.Instructions,
+            Tools = input.Tools?
+                .Select(tool => (AITool)AIFunctionFactory.CreateDeclaration(
+                    tool.Name,
+                    tool.Description,
+                    tool.JsonSchema))
+                .ToList()
+        };
         var sequence = 0;
 
         IAsyncEnumerator<ChatResponseUpdate>? updates = null;
@@ -121,7 +132,7 @@ public sealed class PlatformLlmCapabilityHandler
                 requestToken);
             updates = chatClient.GetStreamingResponseAsync(
                 messages,
-                options: null,
+                options,
                 requestToken).GetAsyncEnumerator(requestToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -192,10 +203,16 @@ public sealed class PlatformLlmCapabilityHandler
                 }
 
                 var usage = update.Contents.OfType<UsageContent>().FirstOrDefault()?.Details;
+                var contents = update.Contents
+                    .Where(content => content is TextContent or FunctionCallContent or FunctionResultContent)
+                    .Select(ToBrokerContent)
+                    .ToList();
                 var chunk = new BrokerLlmChunk(
                     update.Text,
                     usage?.InputTokenCount,
-                    usage?.OutputTokenCount);
+                    usage?.OutputTokenCount,
+                    update.Role?.ToString(),
+                    contents);
                 yield return Success(request.RequestId, chunk, sequence++, hasMore: true);
             }
         }
@@ -253,8 +270,68 @@ public sealed class PlatformLlmCapabilityHandler
     {
         "system" => ChatRole.System,
         "assistant" => ChatRole.Assistant,
+        "tool" => ChatRole.Tool,
         _ => ChatRole.User
     };
+
+    private static ChatMessage ToChatMessage(BrokerLlmMessage message) => new(
+        ParseRole(message.Role),
+        message.Contents is { Count: > 0 }
+            ? message.Contents.Select(ToAiContent).ToList()
+            : [new TextContent(message.Text ?? string.Empty)]);
+
+    private static AIContent ToAiContent(BrokerLlmContent content) => content.Kind switch
+    {
+        "text" => new TextContent(content.Text ?? string.Empty),
+        "function_call" when !string.IsNullOrWhiteSpace(content.CallId) &&
+            !string.IsNullOrWhiteSpace(content.Name) => new FunctionCallContent(
+                content.CallId,
+                content.Name,
+                content.Arguments?.ToDictionary(
+                    argument => argument.Key,
+                    argument => (object?)argument.Value.Clone(),
+                    StringComparer.Ordinal) ?? new Dictionary<string, object?>()),
+        "function_result" when !string.IsNullOrWhiteSpace(content.CallId) =>
+            new FunctionResultContent(content.CallId, content.Result?.Clone()),
+        _ => throw new InvalidOperationException(
+            $"The broker request contains unsupported or incomplete '{content.Kind}' content.")
+    };
+
+    private static BrokerLlmContent ToBrokerContent(AIContent content) => content switch
+    {
+        TextContent text => new BrokerLlmContent("text", Text: text.Text),
+        FunctionCallContent call => new BrokerLlmContent(
+            "function_call",
+            CallId: call.CallId,
+            Name: call.Name,
+            Arguments: call.Arguments?.ToDictionary(
+                argument => argument.Key,
+                argument => SerializeElement(argument.Value),
+                StringComparer.Ordinal)),
+        FunctionResultContent result => new BrokerLlmContent(
+            "function_result",
+            CallId: result.CallId,
+            Result: SerializeElement(result.Result)),
+        _ => throw new NotSupportedException(
+            $"Brokered LLM responses do not support {content.GetType().Name} content.")
+    };
+
+    private static JsonElement SerializeElement(object? value) =>
+        value is JsonElement element
+            ? element.Clone()
+            : JsonSerializer.SerializeToElement(value, value?.GetType() ?? typeof(object), JsonOptions);
+
+    private static int ContentSize(BrokerLlmContent content) =>
+        (content.Text?.Length ?? 0) +
+        (content.CallId?.Length ?? 0) +
+        (content.Name?.Length ?? 0) +
+        (content.Arguments?.Sum(argument => argument.Key.Length + argument.Value.GetRawText().Length) ?? 0) +
+        (content.Result?.GetRawText().Length ?? 0);
+
+    private static int MessageSize(BrokerLlmMessage message) =>
+        message.Contents is { Count: > 0 }
+            ? message.Contents.Sum(ContentSize)
+            : message.Text?.Length ?? 0;
 
     private static CapabilityResult Success(
         string requestId,

@@ -4,6 +4,7 @@ using CSweet.AgentHost.Broker;
 using CSweet.Contracts.Agents;
 using CSweet.Domain.Communications;
 using CSweet.Domain.Core;
+using CSweet.Domain.Setup;
 using CSweet.Infrastructure.Persistence;
 using Google.Protobuf;
 using Microsoft.EntityFrameworkCore;
@@ -46,7 +47,15 @@ public sealed class AgentOnboardingEventDispatcherTests
                 InitiatedByOrganizationUserId = ownerId, AgentOrganizationUserId = agentId,
                 Kind = ConversationKind.DirectHumanAgent, IsPrivate = true, IsDeletionProtected = true,
                 CreatedAt = occurredAt, UpdatedAt = occurredAt };
-            db.AddRange(organization, owner, agent, conversation, new AgentOnboardingEventOutboxItem
+            db.AddRange(organization, owner, agent, conversation, new AgentInstallationConfiguration
+            {
+                Id = Guid.NewGuid(),
+                AgentInstallationId = installationId,
+                SchemaVersion = "1.0",
+                SettingsJson = "{\"llmProviderId\":\"11111111-1111-1111-1111-111111111111\",\"llmModel\":\"local-model\"}",
+                CreatedAt = occurredAt,
+                UpdatedAt = occurredAt
+            }, new AgentOnboardingEventOutboxItem
             {
                 Id = eventId, OrganizationId = organizationId, AgentOrganizationUserId = agentId,
                 HiringOrganizationUserId = ownerId, ConversationId = conversationId,
@@ -56,15 +65,25 @@ public sealed class AgentOnboardingEventDispatcherTests
         }
 
         var registry = new AgentSessionRegistry(NullLogger<AgentSessionRegistry>.Instance);
-        var target = Register(registry, organizationId, installationId);
+        var target = Register(registry, organizationId, installationId, AgentConfigurationCapabilities.Update);
         var sibling = Register(registry, organizationId, otherInstallationId);
         var dispatcher = new AgentOnboardingEventDispatcher(provider.GetRequiredService<IServiceScopeFactory>(), registry,
             TimeProvider.System, Options.Create(new AgentOnboardingDeliveryOptions { MaximumAttempts = 3 }),
             NullLogger<AgentOnboardingEventDispatcher>.Instance);
 
-        await dispatcher.DispatchPendingAsync(CancellationToken.None);
-
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var dispatch = dispatcher.DispatchPendingAsync(CancellationToken.None);
+        var configuration = await target.Outbound.ReadAsync(timeout.Token);
+        Assert.Equal(AgentConfigurationCapabilities.Update, configuration.CapabilityRequest.Capability);
+        registry.CompleteCapability(target, new CapabilityResult
+        {
+            RequestId = configuration.CapabilityRequest.RequestId,
+            Succeeded = true,
+            ContentType = "application/json",
+            Payload = ByteString.CopyFromUtf8("{\"succeeded\":true,\"settings\":{}}")
+        }, configuration.CorrelationId);
+        await dispatch;
+
         var delivered = await target.Outbound.ReadAsync(timeout.Token);
         Assert.Equal(eventId.ToString("N"), delivered.Event.EventId);
         Assert.Equal(AgentLifecycleEvents.Onboarded, delivered.Event.EventType);
@@ -148,12 +167,16 @@ public sealed class AgentOnboardingEventDispatcherTests
             x => x.EventType == CSweet.Contracts.Realtime.AppRealtimeEvents.NotificationCreated);
     }
 
-    private static AgentSession Register(AgentSessionRegistry registry, Guid organizationId, Guid installationId) =>
+    private static AgentSession Register(
+        AgentSessionRegistry registry,
+        Guid organizationId,
+        Guid installationId,
+        params string[] capabilities) =>
         registry.Register(new RegisterAgent
         {
             AgentId = "chief", AgentVersion = "1.0.0", BusinessId = organizationId.ToString("D"),
             InstallationId = installationId.ToString("D")
-        }, new AuthorizedAgentGrant(new HashSet<string>(), new HashSet<string>(), new HashSet<string>(),
+        }, new AuthorizedAgentGrant(capabilities.ToHashSet(StringComparer.Ordinal), new HashSet<string>(), new HashSet<string>(),
             new HashSet<string>(), new HashSet<string>()));
 
     private static RequestCapability Acknowledge(Guid eventId) => new()

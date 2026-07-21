@@ -8,6 +8,12 @@ public interface IAgentRuntimeManager
         bool interactive = false,
         CancellationToken cancellationToken = default);
 
+    Task<bool> RestartRuntimeAsync(
+        Guid installationId,
+        string reason,
+        bool interactive = false,
+        CancellationToken cancellationToken = default);
+
     Task<int> EnsureAlwaysOnRuntimesAsync(CancellationToken cancellationToken = default);
 
     Task<int> ProcessDueSchedulesAsync(CancellationToken cancellationToken = default);

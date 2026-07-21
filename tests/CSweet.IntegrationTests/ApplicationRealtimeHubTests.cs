@@ -62,6 +62,44 @@ public sealed class ApplicationRealtimeHubTests
         Assert.False(secondEvent.Task.IsCompleted);
     }
 
+    [Fact]
+    public async Task ConnectionEstablishedBeforeBusinessMembership_ReceivesLaterOrganizationEvents()
+    {
+        await using var factory = CreateFactory();
+        var user = await CreateUserAndLoginAsync(factory, "new-owner@example.com");
+        await using var connection = Connection(factory, user.Cookie);
+        var received = new TaskCompletionSource<AppRealtimeEventEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.On<AppRealtimeEventEnvelope>("AppEvent", value => received.TrySetResult(value));
+        await connection.StartAsync();
+
+        Guid organizationUserId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CSweetDbContext>();
+            var organization = new Organization
+            {
+                Id = Guid.NewGuid(), Name = "New Business", Status = OrganizationStatus.Active,
+                CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+            };
+            var member = Member(organization.Id, user.UserId, "New Owner");
+            organizationUserId = member.Id;
+            db.AddRange(organization, member);
+            await db.SaveChangesAsync();
+        }
+
+        using var document = JsonDocument.Parse("{\"message\":\"welcome\"}");
+        var envelope = new AppRealtimeEventEnvelope(Guid.NewGuid(), 1,
+            "com.csweet.communication.message.created.v1", null, "test/welcome",
+            DateTimeOffset.UtcNow, document.RootElement.Clone());
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var publisher = scope.ServiceProvider.GetRequiredService<IApplicationRealtimePublisher>();
+            await publisher.PublishAsync(new ApplicationRealtimePublication(envelope, [organizationUserId]));
+        }
+
+        Assert.Equal(envelope.EventId, (await received.Task.WaitAsync(TimeSpan.FromSeconds(5))).EventId);
+    }
+
     private static OrganizationUser Member(Guid organizationId, Guid applicationUserId, string name) => new()
     {
         Id = Guid.NewGuid(), OrganizationId = organizationId, ApplicationUserId = applicationUserId,

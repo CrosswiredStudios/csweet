@@ -1,5 +1,6 @@
 using CSweet.Agent.Contracts.Grpc;
 using CSweet.AgentHost.Broker;
+using CSweet.Contracts.Agents;
 using CSweet.Contracts.Communications;
 using CSweet.Contracts.Core;
 using Google.Protobuf;
@@ -54,6 +55,24 @@ public sealed class GlobalPlatformToolTests
         Assert.Equal(1, handler.InvocationCount);
     }
 
+    [Fact]
+    public async Task Dispatcher_AllowsOnboardingAcknowledgementWithoutManifestGrant()
+    {
+        var handler = new StubHandler();
+        var dispatcher = new PlatformCapabilityDispatcher([handler]);
+        var session = new AgentSession(
+            "session", "agent", Guid.NewGuid().ToString("D"), Guid.NewGuid().ToString("D"),
+            "runtime", "tick",
+            new AuthorizedAgentGrant(
+                new HashSet<string>(), new HashSet<string>(), new HashSet<string>(),
+                new HashSet<string>(), new HashSet<string>()));
+
+        var result = await InvokeAsync(dispatcher, session, AgentLifecycleCapabilities.CompleteOnboarding);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, handler.InvocationCount);
+    }
+
     private static async Task<CapabilityResult> InvokeAsync(
         IPlatformCapabilityDispatcher dispatcher,
         AgentSession session,
@@ -76,7 +95,8 @@ public sealed class GlobalPlatformToolTests
         public int InvocationCount { get; private set; }
 
         public bool CanHandle(string capability) =>
-            capability is CommunicationHubCapabilities.AskUser or CommunicationHubCapabilities.Create;
+            capability is CommunicationHubCapabilities.AskUser or CommunicationHubCapabilities.Create or
+                AgentLifecycleCapabilities.CompleteOnboarding;
 
         public async IAsyncEnumerable<CapabilityResult> HandleAsync(
             AgentSession session,

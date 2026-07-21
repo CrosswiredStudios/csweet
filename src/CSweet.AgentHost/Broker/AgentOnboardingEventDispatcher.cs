@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CSweet.Agent.Contracts.Grpc;
 using CSweet.Contracts.Agents;
 using CSweet.Domain.Communications;
 using CSweet.Infrastructure.Persistence;
@@ -63,6 +64,61 @@ public sealed class AgentOnboardingEventDispatcher(
                     "Stopped onboarding event {EventId} for agent employee {AgentOrganizationUserId} after {AttemptCount} attempts. {LastError}",
                     item.Id, item.AgentOrganizationUserId, item.Attempts, item.LastError);
                 continue;
+            }
+
+            var configuration = await db.AgentInstallationConfigurations.AsNoTracking()
+                .SingleOrDefaultAsync(
+                    x => x.AgentInstallationId == agent.AgentInstallationId.Value,
+                    cancellationToken);
+            if (configuration is not null)
+            {
+                var settings = JsonSerializer.Deserialize<IReadOnlyDictionary<string, JsonElement>>(
+                    configuration.SettingsJson,
+                    JsonOptions) ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+                var update = new UpdateAgentConfigurationRequest(settings)
+                {
+                    SchemaVersion = configuration.SchemaVersion
+                };
+                using var hydrationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                hydrationTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+                CapabilityResult hydration;
+                try
+                {
+                    hydration = await sessions.InvokeInstallationCapabilityAsync(
+                        item.OrganizationId.ToString("D"),
+                        agent.AgentInstallationId.Value.ToString("D"),
+                        new RequestCapability
+                        {
+                            RequestId = Guid.NewGuid().ToString("N"),
+                            Capability = AgentConfigurationCapabilities.Update,
+                            ContentType = "application/json",
+                            Payload = ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(update, JsonOptions))
+                        },
+                        hydrationTimeout.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    hydration = new CapabilityResult
+                    {
+                        Succeeded = false,
+                        Error = "The agent did not accept its saved configuration before onboarding."
+                    };
+                }
+
+                if (!hydration.Succeeded)
+                {
+                    item.Attempts++;
+                    item.NextAttemptAt = now + RetryDelay(item.Attempts);
+                    item.LastError = string.IsNullOrWhiteSpace(hydration.Error)
+                        ? "The agent rejected its saved configuration before onboarding."
+                        : $"The agent could not load its saved configuration before onboarding: {hydration.Error}";
+                    logger.LogWarning(
+                        "Deferred onboarding event {EventId} until installation {InstallationId} accepts its saved configuration. {Error}",
+                        item.Id,
+                        agent.AgentInstallationId,
+                        item.LastError);
+                    continue;
+                }
             }
 
             var payload = new AgentOnboardedEvent(

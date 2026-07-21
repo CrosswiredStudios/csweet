@@ -104,7 +104,7 @@
                     @foreach (var installation in _installations)
                     {
                         var availableUpdate = UpdateFor(installation.Id);
-                        var buildProgress = BuildProgressFor(installation.Id);
+                        var buildProgress = BuildProgressFor(installation);
                         <MudPaper Elevation="1" Class="agent-installation-card">
                             <div class="configuration-section-header">
                                 <div>
@@ -177,7 +177,8 @@
                                     </MudStack>
                                 </MudAlert>
                             }
-                            @if (installation.Build?.Steps is { Count: > 0 } buildSteps)
+                            @if (ShouldShowBuildSteps(installation, buildProgress) &&
+                                 installation.Build?.Steps is { Count: > 0 } buildSteps)
                             {
                                 <div class="agent-build-steps" aria-label="Build progress">
                                     @foreach (var step in buildSteps)
@@ -374,7 +375,7 @@
                                             <MudSelect T="string"
                                                        Label="@field.Label"
                                                        Value="@GetStringValue(field.Key)"
-                                                       ValueChanged="@((string value) => SetProviderValue(field.Key, value))"
+                                                       ValueChanged="@((string value) => SetProviderValueAsync(field.Key, value))"
                                                        Variant="Variant.Outlined">
                                                 <MudSelectItem T="string" Value="@string.Empty">Select a provider</MudSelectItem>
                                                 @foreach (var profile in _providerProfiles.Where(profile => profile.IsEnabled))
@@ -382,6 +383,10 @@
                                                     <MudSelectItem T="string" Value="@profile.Id.ToString()">@profile.Name</MudSelectItem>
                                                 }
                                             </MudSelect>
+                                            @if (!string.IsNullOrWhiteSpace(ModelCatalogError(field)))
+                                            {
+                                                <MudText Typo="Typo.caption" Color="Color.Error">@ModelCatalogError(field)</MudText>
+                                            }
                                             break;
 
                                         case AgentConfigurationFieldTypes.LlmModel:
@@ -568,6 +573,7 @@
                     <MudTabPanel Text="Access review" Icon="@Icons.Material.Filled.Security">
                         <div class="agent-import-tab-content agent-import-access-grid">
                             @ApprovalSection("Capabilities", _importPreview.Capabilities, _approvedCapabilities)
+                            @ApprovalSection("Platform access", _importPreview.RequestedCapabilities, _approvedRequestedCapabilities)
                             @ApprovalSection("Subscriptions", _importPreview.RequestedSubscriptions, _approvedSubscriptions)
                             @ApprovalSection("Publications", _importPreview.RequestedPublications, _approvedPublications)
                             @ApprovalSection("Permissions", _importPreview.RequestedPermissions, _approvedPermissions)
@@ -818,6 +824,9 @@
     private IReadOnlyList<AgentInstallationResponse> _installations = [];
     private IReadOnlyList<AgentUpdateAvailabilityResponse> _updates = [];
     private IReadOnlyList<LlmProviderProfileResponse> _providerProfiles = [];
+    private readonly Dictionary<Guid, IReadOnlyList<string>> _providerModels = [];
+    private readonly HashSet<Guid> _loadingProviderModels = [];
+    private readonly Dictionary<Guid, string> _providerModelErrors = [];
     private AgentRuntimeSettingsResponse? _runtimeSettings;
     private LlmTokenUsageSummaryResponse? _usageSummary;
     private AgentInstallationResponse? _selectedAgent;
@@ -853,6 +862,7 @@
     private int _installMemoryMb = 512;
     private int _installCpuPercent = 50;
     private readonly HashSet<string> _approvedCapabilities = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _approvedRequestedCapabilities = new(StringComparer.Ordinal);
     private readonly HashSet<string> _approvedSubscriptions = new(StringComparer.Ordinal);
     private readonly HashSet<string> _approvedPublications = new(StringComparer.Ordinal);
     private readonly HashSet<string> _approvedPermissions = new(StringComparer.Ordinal);
@@ -905,7 +915,8 @@
                 : "Imported agents are disabled in global runtime settings.";
     private int ImportAccessRequestCount => _importPreview is null
         ? 0
-        : _importPreview.RequestedSubscriptions.Count +
+        : _importPreview.RequestedCapabilities.Count +
+          _importPreview.RequestedSubscriptions.Count +
           _importPreview.RequestedPublications.Count +
           _importPreview.RequestedPermissions.Count +
           _importPreview.RequestedNetworkAccess.Count;
@@ -1060,6 +1071,7 @@
         _installMemoryMb = _runtimeSettings?.DefaultContainerMemoryMb ?? 512;
         _installCpuPercent = _runtimeSettings?.DefaultContainerCpuPercent ?? 50;
         ReplaceApproval(_approvedCapabilities, preview.Capabilities);
+        ReplaceApproval(_approvedRequestedCapabilities, preview.RequestedCapabilities);
         ReplaceApproval(_approvedSubscriptions, preview.RequestedSubscriptions);
         ReplaceApproval(_approvedPublications, preview.RequestedPublications);
         ReplaceApproval(_approvedPermissions, preview.RequestedPermissions);
@@ -1091,7 +1103,10 @@
                     _approvedNetworkAccess.ToList(),
                     _installMaxRuntimeSeconds,
                     _installMemoryMb,
-                    _installCpuPercent),
+                    _installCpuPercent)
+                {
+                    GrantedRequestedCapabilities = _approvedRequestedCapabilities.ToList()
+                },
                 _disposeCts.Token);
             _installations = _installations.Append(installation).ToList();
             _importDialogOpen = false;
@@ -1143,6 +1158,7 @@
     private void ClearImportApproval()
     {
         _approvedCapabilities.Clear();
+        _approvedRequestedCapabilities.Clear();
         _approvedSubscriptions.Clear();
         _approvedPublications.Clear();
         _approvedPermissions.Clear();
@@ -1209,9 +1225,10 @@
         }
 
         var installationId = _updateInstallation.Id;
+        var progressKey = InstallationProgressKey(_updateInstallation);
         _isManagingInstallation = true;
         _updateError = null;
-        SetBuildProgress(installationId, "Preparing update", "Stopping the current runtime and queuing the new package.");
+        SetBuildProgress(progressKey, "Preparing update", "Stopping the current runtime and queuing the new package.");
         try
         {
             var updated = await AgentApi.UpdateAsync(
@@ -1219,7 +1236,7 @@
                 new UpdateAgentInstallationRequest(packageVersionId),
                 _disposeCts.Token);
             ReplaceInstallation(updated);
-            _updates = _updates.Where(update => update.InstallationId != updated.Id).ToList();
+            _updates = _updates.Where(update => update.InstallationId != installationId).ToList();
             _updateDialogOpen = false;
             _updateInstallation = null;
             _selectedUpdate = null;
@@ -1231,7 +1248,7 @@
         catch (Exception exception)
         {
             _updateError = exception.Message;
-            _buildProgress.Remove(installationId);
+            SetBuildProgress(progressKey, "Update failed", exception.Message, true, Severity.Error);
         }
         finally
         {
@@ -1254,7 +1271,7 @@
             if (build is null || string.Equals(build.Status, "Succeeded", StringComparison.Ordinal))
             {
                 var completionTitle = isUpdate ? "Update complete" : "Agent ready";
-                SetBuildProgress(installation.Id, completionTitle, $"{installation.AgentName} {installation.AgentVersion} is built and ready.", true, Severity.Success);
+                SetBuildProgress(InstallationProgressKey(installation), completionTitle, $"{installation.AgentName} {installation.AgentVersion} is built and ready.", true, Severity.Success);
                 SetInstallationMessage(
                     isUpdate
                         ? $"{installation.AgentName} updated to {installation.AgentVersion} and is ready."
@@ -1268,8 +1285,8 @@
                 var failedStep = build.Steps?.FirstOrDefault(step => !string.IsNullOrWhiteSpace(step.Error));
                 var failureDetail = failedStep is null
                     ? build.FailureMessage ?? $"The build ended with status {build.Status}."
-                    : $"The build stopped at “{failedStep.Label}.” Review that step below for the exact error.";
-                SetBuildProgress(installation.Id, "Agent build failed", failureDetail, true, Severity.Error);
+                    : $"{failedStep.Label} failed: {failedStep.Error}";
+                SetBuildProgress(InstallationProgressKey(installation), "Agent build failed", failureDetail, true, Severity.Error);
                 SetInstallationMessage(
                     isUpdate
                         ? $"{installation.AgentName} was updated, but its new package could not be built."
@@ -1285,12 +1302,12 @@
                 "Building" => ("Building package", "Compiling and packaging the new agent version."),
                 _ => ("Updating agent", $"Build status: {build.Status}.")
             };
-            SetBuildProgress(installation.Id, title, detail);
+            SetBuildProgress(InstallationProgressKey(installation), title, detail);
             await InvokeAsync(StateHasChanged);
 
             if (DateTimeOffset.UtcNow >= deadline)
             {
-                SetBuildProgress(installation.Id, "Build is still running", "Progress tracking stopped after 15 minutes. Refresh the page to see the latest status.", true, Severity.Warning);
+                SetBuildProgress(InstallationProgressKey(installation), "Build is still running", "Progress tracking stopped after 15 minutes. Refresh the page to see the latest status.", true, Severity.Warning);
                 return;
             }
 
@@ -1310,16 +1327,25 @@
                 consecutiveRefreshFailures++;
                 if (consecutiveRefreshFailures >= 3)
                 {
-                    SetBuildProgress(installation.Id, "Could not refresh build progress", exception.Message, true, Severity.Warning);
+                    SetBuildProgress(InstallationProgressKey(installation), "Could not refresh build progress", exception.Message, true, Severity.Warning);
                     return;
                 }
-                SetBuildProgress(installation.Id, "Reconnecting", "The build is continuing; retrying the progress check.");
+                SetBuildProgress(InstallationProgressKey(installation), "Reconnecting", "The build is continuing; retrying the progress check.");
             }
         }
     }
 
-    private AgentBuildProgress? BuildProgressFor(Guid installationId) =>
-        _buildProgress.GetValueOrDefault(installationId);
+    private AgentBuildProgress? BuildProgressFor(AgentInstallationResponse installation) =>
+        _buildProgress.GetValueOrDefault(InstallationProgressKey(installation));
+
+    private static bool ShouldShowBuildSteps(
+        AgentInstallationResponse installation,
+        AgentBuildProgress? buildProgress) =>
+        buildProgress is not null ||
+        installation.Build?.Status is not "Succeeded";
+
+    private static Guid InstallationProgressKey(AgentInstallationResponse installation) =>
+        installation.InstallationKey == Guid.Empty ? installation.Id : installation.InstallationKey;
 
     private void SetBuildProgress(
         Guid installationId,
@@ -1480,8 +1506,12 @@
 
     private void ReplaceInstallation(AgentInstallationResponse installation)
     {
+        var installationKey = InstallationProgressKey(installation);
         _installations = _installations
-            .Select(existing => existing.Id == installation.Id ? installation : existing)
+            .Select(existing =>
+                existing.Id == installation.Id || InstallationProgressKey(existing) == installationKey
+                    ? installation
+                    : existing)
             .ToList();
     }
 
@@ -1503,6 +1533,7 @@
         {
             _schema = await AgentApi.GetConfigurationAsync(agent.Id.ToString());
             HydrateFormValues(_schema);
+            await LoadConfiguredProviderModelsAsync(_schema);
         }
         catch (Exception ex)
         {
@@ -1527,6 +1558,17 @@
 
         try
         {
+            var missingRequired = _schema.Fields
+                .Where(field => field.Required && IsMissingValue(field))
+                .Select(field => field.Label)
+                .ToList();
+            if (missingRequired.Count > 0)
+            {
+                _actionSucceeded = false;
+                _actionMessage = $"Complete the required settings: {string.Join(", ", missingRequired)}.";
+                return;
+            }
+
             var settings = _schema.Fields.ToDictionary(
                 field => field.Key,
                 field => JsonSerializer.SerializeToElement(_formValues.GetValueOrDefault(field.Key), SerializerOptions),
@@ -1615,7 +1657,7 @@
         _formValues[key] = value;
     }
 
-    private void SetProviderValue(string key, string value)
+    private async Task SetProviderValueAsync(string key, string value)
     {
         _formValues[key] = value;
 
@@ -1624,29 +1666,46 @@
             return;
         }
 
+        var provider = FindProvider(value);
+        if (provider is not null)
+            await LoadProviderModelsAsync(provider.Id);
+
         foreach (var modelField in _schema.Fields.Where(field =>
             field.Type == AgentConfigurationFieldTypes.LlmModel &&
             string.Equals(ProviderFieldKey(field), key, StringComparison.Ordinal)))
         {
-            var provider = FindProvider(value);
-            _formValues[modelField.Key] = provider?.DefaultChatModel ?? string.Empty;
+            var models = provider is null ? [] : ModelOptions(modelField);
+            _formValues[modelField.Key] = provider is null
+                ? string.Empty
+                : models.Contains(provider.DefaultChatModel, StringComparer.Ordinal)
+                    ? provider.DefaultChatModel
+                    : models.FirstOrDefault() ?? string.Empty;
         }
     }
 
     private bool IsModelPickerDisabled(AgentConfigurationField field) =>
-        FindProvider(GetStringValue(ProviderFieldKey(field))) is null;
+        FindProvider(GetStringValue(ProviderFieldKey(field))) is not { } provider ||
+        _loadingProviderModels.Contains(provider.Id);
 
     private string ModelPlaceholder(AgentConfigurationField field) =>
-        FindProvider(GetStringValue(ProviderFieldKey(field))) is null
+        FindProvider(GetStringValue(ProviderFieldKey(field))) is not { } provider
             ? "Select a provider first"
-            : "Select a model";
+            : _loadingProviderModels.Contains(provider.Id)
+                ? "Loading models..."
+                : "Select a model";
 
     private IReadOnlyList<string> ModelOptions(AgentConfigurationField field)
     {
         var provider = FindProvider(GetStringValue(ProviderFieldKey(field)));
-        return string.IsNullOrWhiteSpace(provider?.DefaultChatModel)
-            ? []
-            : [provider.DefaultChatModel];
+        if (provider is null)
+            return [];
+
+        var models = _providerModels.GetValueOrDefault(provider.Id) ?? [];
+        return models
+            .Append(provider.DefaultChatModel)
+            .Where(model => !string.IsNullOrWhiteSpace(model))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 
     private bool SelectedModelMissing(AgentConfigurationField field)
@@ -1674,6 +1733,84 @@
             : null;
     }
 
+    private async Task LoadConfiguredProviderModelsAsync(AgentConfigurationSchemaResponse schema)
+    {
+        var providerIds = schema.Fields
+            .Where(field => field.Type == AgentConfigurationFieldTypes.LlmProvider)
+            .Select(field => GetStringValue(field.Key))
+            .Where(value => Guid.TryParse(value, out _))
+            .Select(Guid.Parse)
+            .Distinct()
+            .ToList();
+
+        await Task.WhenAll(providerIds.Select(LoadProviderModelsAsync));
+
+        foreach (var modelField in schema.Fields.Where(field =>
+                     field.Type == AgentConfigurationFieldTypes.LlmModel &&
+                     string.IsNullOrWhiteSpace(GetStringValue(field.Key))))
+        {
+            var provider = FindProvider(GetStringValue(ProviderFieldKey(modelField)));
+            if (provider is null)
+                continue;
+            var models = ModelOptions(modelField);
+            _formValues[modelField.Key] = models.Contains(provider.DefaultChatModel, StringComparer.Ordinal)
+                ? provider.DefaultChatModel
+                : models.FirstOrDefault() ?? string.Empty;
+        }
+    }
+
+    private async Task LoadProviderModelsAsync(Guid providerId)
+    {
+        if ((_providerModels.ContainsKey(providerId) && !_providerModelErrors.ContainsKey(providerId)) ||
+            !_loadingProviderModels.Add(providerId))
+            return;
+
+        _providerModelErrors.Remove(providerId);
+        try
+        {
+            var result = await LlmProviderApi.GetModelCatalogAsync(providerId);
+            if (!result.Succeeded)
+            {
+                _providerModelErrors[providerId] = result.Message ?? "Models could not be loaded from this provider.";
+                _providerModels[providerId] = [];
+                return;
+            }
+
+            _providerModels[providerId] = result.Models
+                .Select(model => model.Id)
+                .Where(model => !string.IsNullOrWhiteSpace(model))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
+        catch (Exception exception)
+        {
+            _providerModelErrors[providerId] = exception.Message;
+            _providerModels[providerId] = [];
+        }
+        finally
+        {
+            _loadingProviderModels.Remove(providerId);
+        }
+    }
+
+    private string? ModelCatalogError(AgentConfigurationField providerField)
+    {
+        var provider = FindProvider(GetStringValue(providerField.Key));
+        return provider is not null && _providerModelErrors.TryGetValue(provider.Id, out var error)
+            ? error
+            : null;
+    }
+
+    private bool IsMissingValue(AgentConfigurationField field)
+    {
+        if (!_formValues.TryGetValue(field.Key, out var value) || value is null)
+            return true;
+
+        return field.Type is AgentConfigurationFieldTypes.Boolean or AgentConfigurationFieldTypes.Number
+            ? false
+            : string.IsNullOrWhiteSpace(value.ToString());
+    }
+
     private static string FormatTokens(long tokens) => tokens >= 1_000_000
         ? $"{tokens / 1_000_000d:0.##}M"
         : tokens >= 1_000
@@ -1697,10 +1834,10 @@
 
     private static string BuildStepIcon(string status) => status switch
     {
-        "Succeeded" => Icons.Material.Filled.CheckBox,
-        "Failed" => Icons.Material.Filled.IndeterminateCheckBox,
+        "Succeeded" => Icons.Material.Filled.CheckCircle,
+        "Failed" => Icons.Material.Filled.Error,
         "Cancelled" => Icons.Material.Filled.DisabledByDefault,
-        _ => Icons.Material.Filled.CheckBoxOutlineBlank
+        _ => Icons.Material.Filled.RadioButtonUnchecked
     };
 
     private static Color BuildStepColor(string status) => status switch

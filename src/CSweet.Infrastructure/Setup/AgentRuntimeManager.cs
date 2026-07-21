@@ -120,6 +120,36 @@ public sealed class AgentRuntimeManager(
         return true;
     }
 
+    public async Task<bool> RestartRuntimeAsync(
+        Guid installationId,
+        string reason,
+        bool interactive = false,
+        CancellationToken cancellationToken = default)
+    {
+        var activeRuntime = await dbContext.AgentRuntimeInstances
+            .Include(x => x.AgentInstallation)!.ThenInclude(x => x!.Schedule)
+            .OrderByDescending(x => x.QueuedAt)
+            .FirstOrDefaultAsync(
+                x => x.AgentInstallationId == installationId &&
+                    (x.Status == AgentRuntimeStatus.Queued || ContainerActiveStatuses.Contains(x.Status)),
+                cancellationToken);
+        if (activeRuntime is not null)
+        {
+            await StopAndFinishAsync(
+                activeRuntime,
+                AgentRuntimeStatus.Cancelled,
+                reason,
+                DateTimeOffset.UtcNow,
+                cancellationToken);
+        }
+
+        return await EnsureRuntimeQueuedAsync(
+            installationId,
+            reason,
+            interactive,
+            cancellationToken);
+    }
+
     public async Task<int> EnsureAlwaysOnRuntimesAsync(CancellationToken cancellationToken = default)
     {
         var installationIds = await dbContext.AgentInstallations

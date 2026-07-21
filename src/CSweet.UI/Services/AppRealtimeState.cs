@@ -12,6 +12,7 @@ public sealed class AppRealtimeState(HttpClient http) : IAsyncDisposable
     private HubConnection? _connection;
 
     public event Action<AppRealtimeEventEnvelope>? EventReceived;
+    public event Action? Connected;
     public event Action? Reconnected;
     public event Action? Disconnected;
 
@@ -32,7 +33,11 @@ public sealed class AppRealtimeState(HttpClient http) : IAsyncDisposable
             _connection.On<AppRealtimeEventEnvelope>("AppEvent", Receive);
             _connection.Reconnected += _ => { Reconnected?.Invoke(); return Task.CompletedTask; };
             _connection.Closed += _ => { _connection = null; Disconnected?.Invoke(); return Task.CompletedTask; };
-            try { await _connection.StartAsync(cancellationToken); }
+            try
+            {
+                await _connection.StartAsync(cancellationToken);
+                Connected?.Invoke();
+            }
             catch
             {
                 var failed = _connection;
