@@ -25,13 +25,25 @@ Directory.CreateDirectory(localStateDirectory);
 var appLaunchProfile = builder.Configuration["CSweet:App:LaunchProfile"]
     ?? "http-no-wasm-debug";
 
+var appHostOutputDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+var buildConfiguration = appHostOutputDirectory.Parent?.Name
+    ?? throw new InvalidOperationException("Unable to determine the AppHost build configuration.");
+var targetFramework = appHostOutputDirectory.Name;
+var migratorAssembly = Path.Combine(
+    repositoryRoot,
+    "src",
+    "CSweet.Migrator",
+    "bin",
+    buildConfiguration,
+    targetFramework,
+    "CSweet.Migrator.dll");
+
 var migrator = builder.AddExecutable(
         "migrator",
         "dotnet",
         repositoryRoot,
-        "run",
-        "--project",
-        "src/CSweet.Migrator/CSweet.Migrator.csproj")
+        "exec",
+        migratorAssembly)
     .WithReference(postgres)
     .WaitFor(postgres);
 
