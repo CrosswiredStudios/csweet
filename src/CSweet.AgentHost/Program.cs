@@ -43,6 +43,8 @@ builder.Services.AddScoped<IPlatformCapabilityHandler, MemoryPlatformCapabilityA
 builder.Services.AddScoped<IPlatformCapabilityHandler, WebPlatformCapabilityAdapter>();
 builder.Services.AddScoped<IPlatformCapabilityHandler, WebSocketPlatformCapabilityAdapter>();
 builder.Services.AddScoped<IPlatformCapabilityHandler, WorkforcePlatformCapabilityHandler>();
+builder.Services.AddScoped<CSweet.Agent.SDK.IWorkforceCatalogProvider>(services =>
+    services.GetRequiredService<CSweet.Infrastructure.Marketplace.MarketplaceDiscoveryClient>());
 if (builder.Environment.IsDevelopment() &&
     builder.Configuration.GetValue<bool>("DevelopmentMarketplace:Enabled"))
     builder.Services.AddScoped<CSweet.Agent.SDK.IWorkforceCatalogProvider, DevelopmentWorkforceMarketplaceProvider>();

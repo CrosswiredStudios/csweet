@@ -24,6 +24,11 @@ var localStateDirectory = string.IsNullOrWhiteSpace(localAppData)
 Directory.CreateDirectory(localStateDirectory);
 var appLaunchProfile = builder.Configuration["CSweet:App:LaunchProfile"]
     ?? "http-no-wasm-debug";
+var marketplaceEnabled = builder.Configuration["CSweet:Marketplace:Enabled"] ?? "false";
+var marketplaceBaseUrl = builder.Configuration["CSweet:Marketplace:BaseUrl"]
+    ?? "https://marketplace.csweet.com/";
+var marketplaceTimeoutSeconds =
+    builder.Configuration["CSweet:Marketplace:TimeoutSeconds"] ?? "10";
 
 var appHostOutputDirectory = new DirectoryInfo(AppContext.BaseDirectory);
 var buildConfiguration = appHostOutputDirectory.Parent?.Name
@@ -60,6 +65,9 @@ var agentHost = builder.AddDockerfile(
     .WithEnvironment("Mcp__PublicEndpoint", "http://agenthost:8081/mcp")
     .WithBindMount(localStateDirectory, "/state")
     .WithEnvironment("CSweet__Secrets__FilePath", "/state/provider-secrets.json")
+    .WithEnvironment("CSweet__Marketplace__Enabled", marketplaceEnabled)
+    .WithEnvironment("CSweet__Marketplace__BaseUrl", marketplaceBaseUrl)
+    .WithEnvironment("CSweet__Marketplace__TimeoutSeconds", marketplaceTimeoutSeconds)
     .WithReference(postgres)
     .WaitFor(postgres)
     .WaitForCompletion(migrator);
@@ -70,6 +78,9 @@ var api = builder.AddProject<Projects.CSweet_Api>("api")
     .WithReference(agentHostEndpoint)
     .WithEnvironment("CSweet__ApiGateway__BrokerEndpoint", agentHostEndpoint)
     .WithEnvironment("CSweet__CommunicationPlugins__BrokerEndpoint", agentHostEndpoint)
+    .WithEnvironment("CSweet__Marketplace__Enabled", marketplaceEnabled)
+    .WithEnvironment("CSweet__Marketplace__BaseUrl", marketplaceBaseUrl)
+    .WithEnvironment("CSweet__Marketplace__TimeoutSeconds", marketplaceTimeoutSeconds)
     .WaitFor(postgres)
     .WaitFor(agentHost)
     .WaitForCompletion(migrator);

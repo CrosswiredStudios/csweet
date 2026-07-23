@@ -18,7 +18,9 @@ using CSweet.Infrastructure.Persistence;
 using CSweet.Infrastructure.Planning;
 using CSweet.Infrastructure.Setup;
 using CSweet.Infrastructure.Security;
+using CSweet.Infrastructure.Marketplace;
 using CSweet.Application.Security;
+using CSweet.Application.Marketplace;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
@@ -149,6 +151,21 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAgentRunLogWriter, AgentRunLogWriter>();
         builder.Services.AddScoped<IAgentRunner, AgentFrameworkAgentRunner>();
         builder.Services.AddScoped<IAgentWorkflowRunner, AgentFrameworkWorkflowRunner>();
+        builder.Services.AddOptions<MarketplaceOptions>()
+            .Bind(builder.Configuration.GetSection(MarketplaceOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        builder.Services.AddHttpClient<MarketplaceDiscoveryClient>((services, client) =>
+        {
+            var marketplace = services.GetRequiredService<
+                Microsoft.Extensions.Options.IOptions<MarketplaceOptions>>().Value;
+            client.BaseAddress = new Uri(
+                marketplace.BaseUrl.EndsWith('/') ? marketplace.BaseUrl : $"{marketplace.BaseUrl}/");
+            client.Timeout = TimeSpan.FromSeconds(marketplace.TimeoutSeconds);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("CSweet-Core/1.0");
+        });
+        builder.Services.AddScoped<IMarketplaceDiscoveryService>(
+            services => services.GetRequiredService<MarketplaceDiscoveryClient>());
 
         // Planning services
         builder.Services.AddScoped<IPlanningRunService, PlanningRunService>();

@@ -16,6 +16,7 @@ using CSweet.Infrastructure.Core;
 using CSweet.Infrastructure.Communications;
 using CSweet.Api.Notifications;
 using CSweet.Api.Security;
+using CSweet.Api.Marketplace;
 using CSweet.Application.Notifications;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -152,6 +153,7 @@ app.MapCommunicationEndpoints();
 app.MapAgentManagementEndpoints();
 app.MapPluginManagementEndpoints();
 app.MapSecurityAuditEndpoints();
+app.MapMarketplaceDiscoveryEndpoints();
 
 app.MapControllers();
 app.MapHub<AppEventsHub>("/hubs/app-events");

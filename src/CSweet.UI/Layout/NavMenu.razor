@@ -28,6 +28,10 @@
                     <MudNavLink Href="@EmployeesHref" Icon="@Icons.Material.Outlined.Groups" Class="@EmployeesClass">
                         Employees
                     </MudNavLink>
+                    <MudNavLink Href="@MarketplaceHref" Match="NavLinkMatch.Prefix"
+                                Icon="@Icons.Material.Outlined.Storefront" Class="business-nav-link">
+                        Agent marketplace
+                    </MudNavLink>
                     <MudNavLink Href="@CommunicationsHref" Class="business-nav-link">
                         <span class="communications-nav-content">
                             <span class="communications-nav-icon">
@@ -48,6 +52,7 @@
                 {
                     <div class="business-nav-disabled" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Dashboard" /> Overview</div>
                     <div class="business-nav-disabled" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Groups" /> Employees</div>
+                    <div class="business-nav-disabled" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Storefront" /> Agent marketplace</div>
                     <div class="business-nav-disabled" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Security" /> Security</div>
                 }
             </div>
@@ -84,6 +89,10 @@
 
     private string? CommunicationsHref => BusinessContext.SelectedBusiness is { } business
         ? $"/organizations/{business.Id}/communications"
+        : null;
+
+    private string? MarketplaceHref => BusinessContext.SelectedBusiness is { } business
+        ? $"/organizations/{business.Id}/marketplace"
         : null;
 
     private string? SecurityHref => BusinessContext.SelectedBusiness is { } business

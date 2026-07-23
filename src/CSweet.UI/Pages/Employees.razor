@@ -46,7 +46,8 @@
         else
         {
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
-                Marketplace <strong>coming soon</strong>. Production recommendations currently use current staff and installed agents only.
+                The Chief of Staff ranks current staff, installed agents, and live marketplace agents when the online catalog is connected.
+                <MudLink Href="@($"/organizations/{OrganizationId}/marketplace")">Browse the agent marketplace</MudLink>.
             </MudAlert>
             @if (!string.IsNullOrWhiteSpace(_hiringMessage))
             {

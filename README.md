@@ -93,7 +93,7 @@ The ambition is simple: make entrepreneurship feel less like juggling every job 
 - Plugin foundations and communication-provider integrations
 - Persistent PostgreSQL state, migrations, health checks, and OpenTelemetry foundations
 
-The longer-term product direction includes a unified marketplace for local agents, commercial workers, human professionals, and hybrid services. See the [product vision](docs/00-product-vision.md) and [prototype roadmap](docs/09-prototype-roadmap.md) for the full arc.
+The core can optionally connect to C-Sweet Marketplace for in-app agent browsing and Chief-of-Staff capability matching while continuing to work offline. Marketplace purchase and verified-install handoff remain link-based. See [marketplace discovery integration](docs/MARKETPLACE_INTEGRATION.md), the [product vision](docs/00-product-vision.md), and the [prototype roadmap](docs/09-prototype-roadmap.md).
 
 ## Bring your own models and infrastructure
 
